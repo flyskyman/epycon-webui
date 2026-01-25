@@ -28,6 +28,29 @@
 
 运行 EXE 后，自动打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
 
+下载与分发
+
+- 已在 GitHub Releases 上传可分发压缩包：WorkMateDataCenter-v0.0.2-alpha.zip（包含 `WorkMateDataCenter.exe` 及必要支持文件）。
+- Release 页面： https://github.com/flyskyman/epycon-webui/releases/tag/v0.0.2-alpha
+
+快速下载安装并运行（Windows）：
+
+1. 从上面 Release 页面下载 `WorkMateDataCenter-v0.0.2-alpha.zip`。
+2. 右键解压到任意目录（例如 `C:\Tools\WorkMateDataCenter`）。
+3. 双击 `WorkMateDataCenter.exe` 启动，或在 PowerShell 中运行：
+
+```powershell
+Start-Process -FilePath "C:\path\to\WorkMateDataCenter.exe"
+```
+
+4. 程序会启动本地服务并在默认浏览器打开 `http://127.0.0.1:5000`，可在界面中选择示例数据或上传自己的 `.log` 文件进行转换。
+
+提示：若你希望在无浏览器（服务器）环境使用批处理功能，请使用源码方式运行：
+
+```powershell
+python -m epycon
+```
+
 ## 项目结构
 
 - `.vscode/`：VS Code 工作区配置目录
