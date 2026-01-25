@@ -16,6 +16,16 @@
 2. 运行工具集：打开 `index.html` 或运行 `python app_gui.py`
 3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
 
+## 打包为可执行文件
+
+项目支持打包为独立 EXE 文件，无需安装 Python：
+
+1. 安装 PyInstaller：`pip install pyinstaller`
+2. 运行打包：`pyinstaller WorkMateDataCenter.spec`
+3. 生成的 EXE 文件位于 `dist/WorkMateDataCenter.exe`
+
+运行 EXE 后，打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
+
 ## 项目结构
 
 - `.vscode/`：VS Code 工作区配置目录
