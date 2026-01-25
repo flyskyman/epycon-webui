@@ -1,6 +1,0 @@
-{
-  "yaml.validate": false,
-  "[yaml]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
-}
