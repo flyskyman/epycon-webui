@@ -475,7 +475,9 @@ def open_browser():
         webbrowser.open_new("http://127.0.0.1:5000/editor.html")
 
 if __name__ == '__main__':
+    print("in __main__")
     # give the server a moment to bind before opening browser
     threading.Timer(1.5, open_browser).start()
     print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
-    app.run(port=5000, debug=True)
+    print("Running app.run...")
+    app.run(port=5000, debug=False)
