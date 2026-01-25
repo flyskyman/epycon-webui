@@ -45,16 +45,13 @@ from epycon.config.byteschema import (
 )
 
 
-def _twos_complement(darray: np.array, sample_size: int):
-    """ Extract negative values with the Two's complement
-
-    Args:
-        darray (np.array): _description_
-        sample_size (int): _description_
-    """
-    twos_complement = 2 ** (8 * sample_size) - 1
-    darray[darray >= (twos_complement // 2 - 1)] -= twos_complement
-
+def _twos_complement(darray, bytesize):
+    import numpy as np
+    # 强制使用 64 位整数，修复 Windows 溢出报错
+    val = np.int64(1 << (bytesize * 8))
+    darray = darray.astype(np.int64)
+    limit = np.int64(val // 2 - 1)
+    darray[darray >= limit] -= val
     return darray
 
 

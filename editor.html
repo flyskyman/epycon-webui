@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Epycon 配置编辑器 (JSON版)</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f3f4f6; }
+        .section-card { @apply bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6; }
+        .section-title { @apply text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex items-center; }
+        .input-group { @apply mb-4; }
+        .input-label { @apply block text-sm font-medium text-gray-700 mb-1; }
+        .input-field { @apply mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border; }
+        .btn-primary { @apply inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2; }
+        .btn-run { @apply inline-flex justify-center rounded-md border border-transparent bg-green-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2; }
+        .btn-secondary { @apply inline-flex justify-center rounded-md border border-gray-300 bg-white py-2 px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2; }
+        .btn-danger { @apply text-red-600 hover:text-red-800 text-sm ml-2; }
+        .array-item { @apply flex items-center mb-2; }
+    </style>
+</head>
+<body>
+
+<div id="app" class="min-h-screen p-8">
+    <header class="mb-8 flex justify-between items-center bg-white p-4 rounded-lg shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 flex items-center">
+                <span class="mr-2">⚡</span> Epycon 控制台
+            </h1>
+            <p class="text-gray-500 text-sm mt-1">WorkMate 数据转换配置 (JSON)</p>
+        </div>
+        <div class="space-x-3 flex">
+            <button @click="runOnServer" :disabled="isRunning" class="btn-run disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                <span v-if="!isRunning">🚀 运行转换</span>
+                <span v-else>⏳ 处理中...</span>
+            </button>
+            <button @click="resetToDefault" class="btn-secondary">重置</button>
+            <button @click="downloadJson" class="btn-primary">下载 JSON</button>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        <div class="space-y-6">
+
+            <div class="section-card">
+                <h2 class="section-title">📂 路径设置 (Paths)</h2>
+                
+                <div class="input-group">
+                    <label class="input-label">输入文件夹 (Input Folder)</label>
+                    <div class="flex gap-2">
+                        <input type="text" v-model="config.paths.input_folder" class="input-field mt-0" placeholder="例如: D:\Data\WorkMate">
+                        <button @click="selectFolder('input')" class="btn-secondary whitespace-nowrap px-3 py-2 h-[38px] mt-1">📂 选择</button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">输出文件夹 (Output Folder)</label>
+                    <div class="flex gap-2">
+                        <input type="text" v-model="config.paths.output_folder" class="input-field mt-0" placeholder="例如: D:\Data\Export">
+                        <button @click="selectFolder('output')" class="btn-secondary whitespace-nowrap px-3 py-2 h-[38px] mt-1">📂 选择</button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">指定 Study ID (可选)</label>
+                    <div v-for="(study, index) in config.paths.studies" :key="index" class="array-item">
+                        <input type="text" v-model="config.paths.studies[index]" class="input-field">
+                        <button @click="removeArrayItem('paths', 'studies', index)" class="btn-danger">删除</button>
+                    </div>
+                    <button @click="addArrayItem('paths', 'studies')" class="text-indigo-600 text-sm hover:underline mt-1">+ 添加 Study ID</button>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2 class="section-title">📊 数据转换设置 (Data)</h2>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="input-group">
+                        <label class="input-label">输出格式</label>
+                        <select v-model="config.data.output_format" class="input-field">
+                            <option value="h5">HDF5 (.h5)</option>
+                            <option value="csv">CSV (.csv)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">导联处理 (Leads)</label>
+                        <select v-model="config.data.leads" class="input-field">
+                            <option value="original">原始单极 (Original)</option>
+                            <option value="computed">计算导联 (Computed)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div v-if="config.data.output_format === 'h5'" class="input-group flex items-center mt-2 bg-blue-50 p-2 rounded">
+                    <input type="checkbox" v-model="config.data.pin_entries" id="pin_entries" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                    <label for="pin_entries" class="ml-2 block text-sm text-gray-900">将标注(Entries)嵌入数据文件</label>
+                </div>
+
+                <div class="input-group mt-4">
+                    <label class="input-label">指定通道 (Channels - 可选)</label>
+                    <div v-for="(ch, index) in config.data.channels" :key="index" class="array-item">
+                        <input type="text" v-model="config.data.channels[index]" class="input-field" placeholder="例如: I, II, V1">
+                        <button @click="removeArrayItem('data', 'channels', index)" class="btn-danger">删除</button>
+                    </div>
+                    <button @click="addArrayItem('data', 'channels')" class="text-indigo-600 text-sm hover:underline">+ 添加通道过滤</button>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2 class="section-title">🏷️ 标注设置 (Entries)</h2>
+                
+                <div class="input-group flex items-center mb-4">
+                    <input type="checkbox" v-model="config.entries.convert" id="convert_entries" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                    <label for="convert_entries" class="ml-2 block text-sm font-medium text-gray-900">导出独立标注文件</label>
+                </div>
+
+                <div v-if="config.entries.convert" class="pl-4 border-l-2 border-indigo-100">
+                    <div class="input-group">
+                        <label class="input-label">标注文件格式</label>
+                        <select v-model="config.entries.output_format" class="input-field">
+                            <option value="sel">SignalPlant (.sel)</option>
+                            <option value="csv">CSV (.csv)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group flex items-center">
+                        <input type="checkbox" v-model="config.entries.summary_csv" id="summary_csv" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                        <label for="summary_csv" class="ml-2 block text-sm text-gray-900">生成汇总 CSV</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2 class="section-title">⚙️ 全局设置</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="input-group">
+                        <label class="input-label">WorkMate 版本</label>
+                        <select v-model="config.global_settings.workmate_version" class="input-field">
+                            <option value="4.2">4.2 (Standard)</option>
+                            <option value="4.1">4.1 (Old)</option>
+                            <option value="4.3">4.3 (New)</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">分块大小 (Chunk Size)</label>
+                        <input type="number" v-model.number="config.global_settings.processing.chunk_size" class="input-field">
+                    </div>
+                </div>
+                
+                <div class="border-t pt-4 mt-4">
+                    <h3 class="text-sm font-medium text-gray-700 mb-2">凭证元数据</h3>
+                    <div class="grid grid-cols-1 gap-3">
+                        <input type="text" v-model="config.global_settings.credentials.author" class="input-field" placeholder="Author Email">
+                        <input type="text" v-model="config.global_settings.credentials.device" class="input-field" placeholder="Device Name">
+                        <input type="text" v-model="config.global_settings.credentials.owner" class="input-field" placeholder="Institution Owner">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="relative">
+            <div class="sticky top-8 space-y-6">
+                <div class="bg-gray-800 rounded-lg shadow-lg overflow-hidden border border-gray-700">
+                    <div class="bg-gray-900 px-4 py-2 border-b border-gray-700 flex justify-between items-center">
+                        <span class="text-gray-200 font-mono text-sm">config.json 预览</span>
+                        <button @click="copyToClipboard" class="text-xs text-gray-400 hover:text-white transition-colors">复制</button>
+                    </div>
+                    <pre class="p-4 text-sm font-mono text-green-400 overflow-auto max-h-[30vh]">{{ jsonOutput }}</pre>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 h-[50vh] flex flex-col">
+                    <div class="bg-indigo-50 px-4 py-2 border-b border-indigo-100 flex justify-between items-center flex-shrink-0">
+                        <span class="text-indigo-800 font-bold text-sm">运行日志</span>
+                        <span v-if="statusMessage" :class="{'text-green-600': lastStatus==='success', 'text-red-600': lastStatus==='error'}" class="text-xs font-bold">{{ statusMessage }}</span>
+                    </div>
+                    <div class="p-4 flex-grow overflow-auto bg-gray-900 font-mono text-xs text-green-400 whitespace-pre-wrap" id="log-container">{{ logs || "> 等待指令..." }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, computed } = Vue;
+
+    createApp({
+        setup() {
+            // 初始化配置 (V2.0 更新默认值)
+            const defaultConfig = {
+                paths: { input_folder: "", output_folder: "", studies: [] },
+                data: { output_format: "h5", pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {} },
+                entries: { convert: true, output_format: "sel", summary_csv: true, filter_annotation_type: [] },
+                global_settings: { workmate_version: "4.3", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3", owner: "" } }
+            };
+
+            const config = ref(JSON.parse(JSON.stringify(defaultConfig)));
+            const isRunning = ref(false);
+            const logs = ref("");
+            const statusMessage = ref("");
+            const lastStatus = ref("");
+
+            // 计算 JSON 字符串 (替换了之前的 YAML)
+            const jsonOutput = computed(() => {
+                return JSON.stringify(config.value, null, 2);
+            });
+
+            const addArrayItem = (s, k) => config.value[s][k].push("");
+            const removeArrayItem = (s, k, i) => config.value[s][k].splice(i, 1);
+            const resetToDefault = () => { if(confirm("确定重置?")) { config.value = JSON.parse(JSON.stringify(defaultConfig)); logs.value = ""; }};
+
+            const copyToClipboard = () => {
+                navigator.clipboard.writeText(jsonOutput.value).then(() => alert("已复制到剪贴板"));
+            };
+
+            // 下载 JSON 文件
+            const downloadJson = () => {
+                const blob = new Blob([jsonOutput.value], { type: "application/json" });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = "config.json";
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+
+            // 打开文件夹选择
+            const selectFolder = async (target) => {
+                try {
+                    const res = await fetch('http://127.0.0.1:5000/api/select-folder');
+                    const data = await res.json();
+                    if (data.path) {
+                        if (target === 'input') config.value.paths.input_folder = data.path;
+                        if (target === 'output') config.value.paths.output_folder = data.path;
+                    }
+                } catch (e) {
+                    alert("无法调用选择框，请确认后端程序 (app_gui.py) 正在运行。");
+                }
+            };
+
+            // 运行转换
+            const runOnServer = async () => {
+                if (!config.value.paths.input_folder || !config.value.paths.output_folder) {
+                    alert("请先设置输入和输出文件夹！"); return;
+                }
+                isRunning.value = true;
+                logs.value = "> 正在连接后台...\n";
+                statusMessage.value = "运行中...";
+                
+                try {
+                    const response = await fetch('http://127.0.0.1:5000/run-direct', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(config.value)
+                    });
+                    const result = await response.json();
+                    logs.value = result.logs || "无日志返回";
+                    lastStatus.value = result.status;
+                    statusMessage.value = result.status === 'success' ? "✅ 转换成功" : "❌ 发生错误";
+                } catch (error) {
+                    lastStatus.value = "error";
+                    statusMessage.value = "连接失败";
+                    logs.value += `\n❌ 无法连接到服务器: ${error.message}`;
+                } finally {
+                    isRunning.value = false;
+                }
+            };
+
+            return { config, jsonOutput, addArrayItem, removeArrayItem, resetToDefault, downloadJson, copyToClipboard, runOnServer, selectFolder, isRunning, logs, statusMessage, lastStatus };
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>

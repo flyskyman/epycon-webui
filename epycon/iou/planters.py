@@ -44,7 +44,7 @@ class EntryPlanter:
             ref_timestamp=ref_timestamp if ref_timestamp is not None else None,
             )
                 
-        with open(f_path, 'w') as f_obj:
+        with open(f_path, 'w', encoding='utf-8') as f_obj:
             f_obj.write(content)
 
     def savesel(
@@ -66,7 +66,7 @@ class EntryPlanter:
             os.path.basename(f_path),
             )
                 
-        with open(f_path, 'w') as f_obj:
+        with open(f_path, 'w', encoding='utf-8') as f_obj:
             f_obj.write(content)
 
     def _filter(
