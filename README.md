@@ -21,7 +21,7 @@
 项目支持打包为独立 EXE 文件，无需安装 Python：
 
 1. 安装 PyInstaller：`pip install pyinstaller`
-2. 运行打包：`pyinstaller WorkMateDataCenter.spec`
+2. 运行打包：`pyinstaller --onefile app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
 3. 生成的 EXE 文件位于 `dist/WorkMateDataCenter.exe`
 
 运行 EXE 后，打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
