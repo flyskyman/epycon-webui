@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Epycon 工具集</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #334155; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { color: #0f172a; margin-bottom: 10px; }
+        .header p { color: #64748b; font-size: 18px; }
+        .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
+        .tool-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 30px; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
+        .tool-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .tool-icon { font-size: 48px; margin-bottom: 20px; }
+        .tool-title { font-size: 24px; font-weight: 600; color: #0f172a; margin-bottom: 10px; }
+        .tool-desc { color: #64748b; margin-bottom: 20px; line-height: 1.5; }
+        .tool-link { display: inline-block; background: #3b82f6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 500; transition: background 0.2s; }
+        .tool-link:hover { background: #2563eb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Epycon 工具集</h1>
+            <p>WorkMate 数据处理和日志分析工具</p>
+        </div>
+
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-icon">⚙️</div>
+                <div class="tool-title">配置编辑器</div>
+                <div class="tool-desc">编辑 Epycon 配置，运行数据转换任务。支持 JSON 配置管理和批量处理。</div>
+                <a href="editor.html" class="tool-link">打开编辑器</a>
+            </div>
+
+            <div class="tool-card">
+                <div class="tool-icon">📊</div>
+                <div class="tool-title">日志解析器</div>
+                <div class="tool-desc">解析和搜索 WorkMate 日志文件，支持拖拽上传、过滤和深度搜索。</div>
+                <a href="WorkMate Log Parser.html" class="tool-link">打开解析器</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
