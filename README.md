@@ -1,6 +1,20 @@
-# epycon-web-ui
-A web-ui base on the epycon whici is a Python package for parsing and conversion EP signals recorded by Abbott WorkMate system.
-基于epycon的网页版操作界面，并做了一些必要的兼容性修正。以便在Windows下运行。
+# WorkMate 数据处理中心
+
+一个基于 epycon 的 Web UI 工具集，用于解析和转换 Abbott WorkMate 系统记录的 EP 信号数据。提供便捷的图形界面，支持数据转换、日志解析和 HDF5 预览。
+
+## 特性
+
+- **数据转换**：将 WorkMate 日志文件转换为 CSV 或 HDF5 格式
+- **日志解析**：深度搜索和过滤 WorkMate 日志条目
+- **HDF5 预览**：浏览和可视化 HDF5 文件内容
+- **Web 界面**：本地 Flask 服务，支持配置管理和批量处理
+- **跨平台**：优化 Windows 兼容性，处理编码和时间戳问题
+
+## 快速开始
+
+1. 安装依赖：`pip install -r requirements.txt`
+2. 运行工具集：打开 `index.html` 或运行 `python app_gui.py`
+3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
 
 ## 项目结构
 

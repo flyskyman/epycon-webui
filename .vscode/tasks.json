@@ -5,7 +5,9 @@
             "label": "运行 Epycon GUI",
             "type": "shell",
             "command": "python",
-            "args": ["app_gui.py"],
+            "args": [
+                "app_gui.py"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true

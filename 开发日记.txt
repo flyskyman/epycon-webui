@@ -22,3 +22,10 @@
 - 清理临时文件（__pycache__、epycon.egg-info/ 等）
 - 测试本地批量转换、演示脚本和 GUI 功能
 - GUI 运行在 http://127.0.0.1:5000，支持文件上传和转换执行
+- 整合 examples 和 samples 文件夹为统一的 examples/ 结构
+- 添加 .gitattributes 规范化行结束符
+- 创建 index.html 作为工具集入口，整合 editor.html、WorkMate Log Parser.html 和 h5_preview.html
+- 添加 .vscode/tasks.json 定义运行 GUI 的任务
+- 更新 README.md 添加项目结构描述
+- 添加 docs/papers/ 目录用于存放相关论文 PDF
+- 更新项目标题为 "WorkMate 数据处理中心"
