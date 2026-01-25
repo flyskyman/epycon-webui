@@ -466,12 +466,13 @@ def api_select_folder():
 
 def open_browser():
     try:
-        url = "http://127.0.0.1:5000/index.html"
+        url = "http://127.0.0.1:5000/"
         logging.getLogger(__name__).info(f"Opening browser to {url}")
         webbrowser.open_new(url)
     except Exception:
-        # fallback to root
-        webbrowser.open_new("http://127.0.0.1:5000")
+        # fallback options
+        webbrowser.open_new("http://127.0.0.1:5000/index.html")
+        webbrowser.open_new("http://127.0.0.1:5000/editor.html")
 
 if __name__ == '__main__':
     # give the server a moment to bind before opening browser
