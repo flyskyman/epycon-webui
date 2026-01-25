@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HDF5 文件预览器 (h5wasm) - 修复版</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #f5f5f5; }
+        header { background: #333; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 20px; }
+        h1 { margin: 0; font-size: 1.2rem; font-weight: normal; }
+        
+        #main-container { display: flex; flex: 1; overflow: hidden; }
+        
+        /* 左侧文件树 */
+        #tree-view { width: 300px; background: white; border-right: 1px solid #ddd; overflow-y: auto; padding: 10px; font-size: 14px; }
+        .tree-item { cursor: pointer; padding: 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tree-item:hover { background-color: #f0f0f0; }
+        .tree-item.selected { background-color: #e3f2fd; color: #1976d2; font-weight: 500; }
+        .tree-indent { margin-left: 20px; }
+        .icon-group::before { content: "📁 "; color: #fbc02d; }
+        .icon-dataset::before { content: "🔢 "; color: #4caf50; }
+        .icon-link::before { content: "🔗 "; color: #9c27b0; }
+
+        /* 右侧详情 */
+        #detail-view { flex: 1; padding: 20px; overflow-y: auto; background: white; }
+        .panel { border: 1px solid #eee; border-radius: 6px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .panel h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 10px; color: #444; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: monospace; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f9f9f9; width: 150px; }
+        
+        .array-preview { background: #2d2d2d; color: #eee; padding: 10px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; max-height: 300px; overflow: auto; }
+        
+        #loading { display: none; color: #aaa; font-style: italic; margin-left: 10px; }
+        .error-msg { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>HDF5 Preview (Fixed)</h1>
+    <input type="file" id="file-input" accept=".h5,.hdf5,.he5,.sel,.nxs" disabled>
+    <span id="status">正在初始化 WebAssembly...</span>
+</header>
+
+<div id="main-container">
+    <div id="tree-view">
+        <div style="color: #888; text-align: center; margin-top: 20px;">请选择一个 .h5 文件</div>
+    </div>
+    <div id="detail-view">
+        <div style="color: #888; text-align: center; margin-top: 50px;">在左侧选择节点以查看详情</div>
+    </div>
+</div>
+
+<script type="module">
+    import h5wasm from "https://cdn.jsdelivr.net/npm/h5wasm@latest/dist/esm/hdf5_hl.js";
+
+    const fileInput = document.getElementById('file-input');
+    const statusSpan = document.getElementById('status');
+    const treeView = document.getElementById('tree-view');
+    const detailView = document.getElementById('detail-view');
+    
+    let currentFile = null;
+    let Module = null; // 保存 WASM 模块实例
+    let FS = null;     // 保存文件系统实例
+
+    // 1. 初始化 h5wasm
+    (async () => {
+        try {
+            // 等待 WASM 加载完成，返回 Module 对象
+            Module = await h5wasm.ready;
+            // [关键修复] FS 必须从 Module 中获取，而不是从 h5wasm 导出中获取
+            FS = Module.FS; 
+            
+            console.log("h5wasm initialized. FS available:", !!FS);
+            statusSpan.textContent = "库已就绪，请选择文件";
+            statusSpan.style.color = "#4caf50";
+            fileInput.disabled = false;
+        } catch (e) {
+            console.error("Initialization failed:", e);
+            statusSpan.textContent = "初始化失败: " + e.message;
+            statusSpan.style.color = "red";
+            alert("WebAssembly 库加载失败，请检查网络或控制台日志。");
+        }
+    })();
+
+    // 2. 处理文件上传
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (!FS) {
+            alert("文件系统未就绪，请刷新页面重试。");
+            return;
+        }
+
+        statusSpan.textContent = `正在读取 ${file.name}...`;
+        statusSpan.style.color = "white";
+        
+        try {
+            // 读取文件内容为 ArrayBuffer
+            const buffer = await file.arrayBuffer();
+            
+            // 将文件写入 Emscripten 虚拟文件系统 (MEMFS)
+            // 使用简单的文件名以避免路径问题
+            const fname = "input_file.h5"; 
+            
+            // [关键步骤] 写入文件
+            try {
+                FS.writeFile(fname, new Uint8Array(buffer));
+            } catch (fsErr) {
+                throw new Error(`写入虚拟文件系统失败: ${fsErr.message}`);
+            }
+
+            // 如果之前有打开的文件，先关闭
+            if (currentFile) {
+                try { currentFile.close(); } catch(e) { console.warn("Closing previous file error", e); }
+                currentFile = null;
+            }
+
+            // 打开 HDF5 文件
+            try {
+                currentFile = new h5wasm.File(fname, "r");
+            } catch (openErr) {
+                throw new Error(`无法打开 HDF5 文件 (可能是格式损坏或非 HDF5 文件): ${openErr.message}`);
+            }
+            
+            // 渲染树结构
+            renderTree(currentFile);
+            
+            statusSpan.textContent = `已加载: ${file.name}`;
+            detailView.innerHTML = `<div style="color: #888; text-align: center; margin-top: 50px;">文件已加载。<br>点击左侧节点查看详情。</div>`;
+
+        } catch (err) {
+            console.error("File processing error:", err);
+            statusSpan.textContent = "解析错误";
+            statusSpan.style.color = "red";
+            // 在详情页显示具体错误信息
+            detailView.innerHTML = `<div class="panel" style="border-color:red;">
+                <h2 style="color:red">解析错误</h2>
+                <p>${err.message}</p>
+                <p>请查看浏览器控制台 (F12 -> Console) 获取更多技术细节。</p>
+            </div>`;
+        }
+    });
+
+    // 递归渲染文件树
+    function renderTree(file) {
+        treeView.innerHTML = '';
+        // 创建根节点
+        const rootItem = createTreeItem(file, '/', 'group', 0);
+        treeView.appendChild(rootItem);
+        // 自动展开根节点
+        loadChildren(file, rootItem, 0);
+    }
+
+    function createTreeItem(node, name, type, level) {
+        const div = document.createElement('div');
+        div.className = `tree-item icon-${type}`;
+        div.style.paddingLeft = (level * 20 + 5) + 'px';
+        div.textContent = name;
+        div.title = node.path || name; // 鼠标悬停显示全路径
+        
+        div.onclick = (e) => {
+            e.stopPropagation();
+            // 高亮选中
+            document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+            div.classList.add('selected');
+            
+            // 显示详情
+            showDetails(node, name);
+
+            // 如果是组，且未展开，则尝试展开
+            if (type === 'group' && !div.dataset.expanded) {
+                loadChildren(node, div, level);
+            }
+        };
+        return div;
+    }
+
+    function loadChildren(groupNode, parentElement, level) {
+        if (parentElement.dataset.expanded) return;
+        
+        try {
+            // 获取组下的所有 key
+            const keys = groupNode.keys(); 
+            keys.sort(); 
+
+            // 创建子容器
+            const container = document.createElement('div');
+            parentElement.after(container);
+            
+            if (keys.length === 0) {
+                // 空组提示
+                // const empty = document.createElement('div');
+                // empty.textContent = "(empty)";
+                // empty.style.paddingLeft = ((level + 1) * 20 + 20) + 'px';
+                // empty.style.color = "#ccc";
+                // container.appendChild(empty);
+            }
+
+            for (const key of keys) {
+                try {
+                    const child = groupNode.get(key);
+                    // 判断类型
+                    let type = 'unknown';
+                    if (child instanceof h5wasm.Group) type = 'group';
+                    else if (child instanceof h5wasm.Dataset) type = 'dataset';
+                    else if (child instanceof h5wasm.ExternalLink) type = 'link';
+                    else if (child instanceof h5wasm.SoftLink) type = 'link';
+                    
+                    const item = createTreeItem(child, key, type, level + 1);
+                    container.appendChild(item);
+                } catch(e) {
+                    console.warn(`Skipping child ${key}`, e);
+                }
+            }
+            parentElement.dataset.expanded = "true";
+        } catch (e) {
+            console.error("Error loading keys for group", e);
+        }
+    }
+
+    function showDetails(node, name) {
+        let html = `<h1>${name}</h1>`;
+        
+        // 1. 基本信息
+        html += `<div class="panel"><h2>基本信息 (Metadata)</h2><table>`;
+        // 尝试获取 path，如果没有（如根节点可能）则显示 name
+        html += `<tr><th>路径 (Path)</th><td>${node.path || '/'}</td></tr>`;
+        
+        if (node instanceof h5wasm.Dataset) {
+            html += `<tr><th>类型 (Type)</th><td>Dataset</td></tr>`;
+            html += `<tr><th>数据类型 (Dtype)</th><td>${node.dtype}</td></tr>`;
+            // 处理 shape
+            const shapeStr = Array.isArray(node.shape) ? `[${node.shape.join(', ')}]` : String(node.shape);
+            html += `<tr><th>形状 (Shape)</th><td>${shapeStr}</td></tr>`;
+            
+            // 其他元数据
+            if (node.metadata) {
+                for (let [k, v] of Object.entries(node.metadata)) {
+                    if (!['shape', 'type', 'dtype'].includes(k)) {
+                        html += `<tr><th>${k}</th><td>${v}</td></tr>`;
+                    }
+                }
+            }
+        } else if (node instanceof h5wasm.Group) {
+            html += `<tr><th>类型 (Type)</th><td>Group</td></tr>`;
+            try {
+                html += `<tr><th>成员数量</th><td>${node.keys().length}</td></tr>`;
+            } catch(e) {}
+        }
+        html += `</table></div>`;
+
+        // 2. 属性 (Attributes)
+        try {
+            const attrs = node.attrs;
+            const attrKeys = Object.keys(attrs);
+            if (attrKeys.length > 0) {
+                html += `<div class="panel"><h2>属性 (Attributes)</h2><table>`;
+                html += `<tr><th>Key</th><th>Value</th></tr>`;
+                for (let key of attrKeys) {
+                    let val = attrs[key].value;
+                    // 处理属性值也是 TypedArray 的情况
+                    if (val && val.length !== undefined && typeof val !== 'string' && !Array.isArray(val)) {
+                        val = Array.from(val);
+                    }
+                    html += `<tr><td>${key}</td><td>${JSON.stringify(val)}</td></tr>`;
+                }
+                html += `</table></div>`;
+            }
+        } catch (e) {
+            console.log("No attributes or error reading attributes", e);
+        }
+
+        // 3. 数据预览 (仅针对 Dataset)
+        if (node instanceof h5wasm.Dataset) {
+            html += `<div class="panel"><h2>数据预览 (Data Preview)</h2>`;
+            
+            try {
+                const shape = node.shape || [];
+                const totalSize = shape.reduce((a, b) => a * b, 1);
+                
+                if (totalSize === 0) {
+                    html += `<div>Empty Dataset</div>`;
+                } else if (totalSize > 2000) {
+                    // 大数据：读取切片
+                    let sliceVal = null;
+                    let sliceMsg = "";
+
+                    if (shape.length === 1) {
+                        const limit = Math.min(100, shape[0]);
+                        sliceVal = node.slice([[0, limit]]);
+                        sliceMsg = `前 ${limit} 项 (共 ${totalSize} 项)`;
+                    } else if (shape.length === 2) {
+                        const rows = Math.min(20, shape[0]);
+                        const cols = Math.min(20, shape[1]);
+                        sliceVal = node.slice([[0, rows], [0, cols]]);
+                        sliceMsg = `左上角 ${rows}x${cols} 切片 (总形状: ${shape.join('x')})`;
+                    } else {
+                        sliceMsg = "多维数据过大，暂不支持切片预览。";
+                    }
+                    
+                    if (sliceVal) {
+                        html += `<div><strong>${sliceMsg}</strong></div>`;
+                        html += `<div class="array-preview">${formatArray(sliceVal)}</div>`;
+                    } else {
+                        html += `<div>${sliceMsg}</div>`;
+                    }
+                } else {
+                    // 小数据：读取全部
+                    const val = node.value; 
+                    html += `<div class="array-preview">${formatArray(val)}</div>`;
+                }
+            } catch (e) {
+                html += `<div class="error-msg">读取数据内容失败: ${e.message}</div>`;
+                console.error(e);
+            }
+            html += `</div>`;
+        }
+
+        detailView.innerHTML = html;
+    }
+
+    function formatArray(data) {
+        if (data === null || data === undefined) return "null";
+        
+        // 尝试将其转换为普通数组
+        let arr;
+        if (Array.isArray(data)) {
+            arr = data;
+        } else if (data.buffer && data.length !== undefined) {
+            // TypedArray
+            arr = Array.from(data);
+        } else {
+            return String(data);
+        }
+
+        // 如果数组还是太大，再次截断显示字符串
+        if (arr.length > 500) {
+            const head = arr.slice(0, 100);
+            return JSON.stringify(head, null, 2).replace(/\]$/, `,\n  "... (${arr.length - 100} more items)"\n]`);
+        }
+        
+        return JSON.stringify(arr, null, 2);
+    }
+</script>
+
+</body>
+</html>
