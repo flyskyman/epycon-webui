@@ -36,7 +36,7 @@
 - 修复 EXE 启动时页面打开问题，确保默认打开 index.html 工具集入口。
 - 确认发布 v0.0.2-alpha 版本到 GitHub。
 
-2026年1月26日补记：✨ v0.0.3-alpha 发布
+2026年1月26日补记：✨ v0.0.3-alpha 发布完成
 **关键成就：**
 - 🚀 成功构建完全独立的 WorkMate_DataCenter.exe（8.9MB）
   - 无需 Python 环境，双击即可运行
@@ -63,13 +63,26 @@
 - 📝 更新发布文档
   - 创建 CHANGELOG.md 记录版本更新
   - 创建 release_notes_v0.0.3-alpha.md 发布说明
+  - 创建 WorkMate_DataCenter-v0.0.3-alpha.zip（34.46MB，58% 压缩率）
 
 **技术细节：**
 - PyInstaller CLI 参数：`--collect-all numpy --collect-all h5py --copy-metadata flask --copy-metadata werkzeug`
 - 添加数据文件：配置、静态 HTML、epycon 模块
 - 修复编码 UnicodeEncodeError：在 `__main__` 重配所有流编码
+- 使用 --onedir 模式以获得最佳启动性能
 
-**下一步计划：**
-1. ✅ 已完成：v0.0.3-alpha 发布并提交到 Git
-2. 可选：创建 GitHub Release 并上传 WorkMate_DataCenter.exe
-3. 后续迭代：性能优化、更多导出格式、数据验证增强
+**发布内容：**
+✅ Git 提交：98076ca（ZIP 包含）、144d74d（exe 构建）
+✅ 发布文件：WorkMate_DataCenter-v0.0.3-alpha.zip
+✅ 可用资源：dist/WorkMate_DataCenter/（解压后）
+✅ 文档：CHANGELOG.md、release_notes_v0.0.3-alpha.md
+
+**后续步骤：**
+1. ✅ GitHub Release 创建（可在网页端上传 ZIP）
+2. 性能优化、更多导出格式、数据验证增强
+
+**发布完成！** 🎉
+- ✅ GitHub Release: https://github.com/flyskyman/epycon-webui/releases/tag/v0.0.3-alpha
+- ✅ 标签推送: v0.0.3-alpha
+- ✅ ZIP 上传: WorkMate_DataCenter-v0.0.3-alpha.zip (34.46MB)
+- ✅ 本地清理: 删除 dist/、build/ 目录和 spec 文件，释放 ~134MB 空间
