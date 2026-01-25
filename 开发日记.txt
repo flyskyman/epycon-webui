@@ -29,3 +29,4 @@
 - 更新 README.md 添加项目结构描述
 - 添加 docs/papers/ 目录用于存放相关论文 PDF
 - 更新项目标题为 "WorkMate 数据处理中心"
+- 发布 v0.0.2-alpha 版本
