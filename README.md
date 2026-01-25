@@ -6,6 +6,7 @@ A web-ui base on the epycon whici is a Python package for parsing and conversion
 
 - `.vscode/`：VS Code 工作区配置目录
   - `settings.json`：编辑器和 Python 环境设置。
+  - `tasks.json`：定义运行任务，如启动 GUI 服务。
 - `index.html`：工具集入口页面，整合本地运行的编辑器和日志解析器。
 - `app_gui.py`：Flask Web 应用，提供 GUI 接口和 HTTP API，用于本地编辑器和直接运行转换。
 - `editor.html`：HTML 前端，用于本地标注编辑。
