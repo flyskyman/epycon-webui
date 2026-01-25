@@ -445,8 +445,8 @@ def execute_epycon_conversion(cfg):
 @app.route('/')
 def home():
     html_path = resource_path('index.html')
-    if os.path.exists(html_path): return send_file(html_path)
-    return f"Missing index.html"
+    with open(html_path, 'r', encoding='utf-8') as f:
+        return f.read()
 
 @app.route('/run-direct', methods=['POST'])
 def run_direct():
@@ -478,4 +478,4 @@ if __name__ == '__main__':
     # give the server a moment to bind before opening browser
     threading.Timer(1.5, open_browser).start()
     print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
-    app.run(port=5000, debug=False)
+    app.run(port=5000, debug=True)
