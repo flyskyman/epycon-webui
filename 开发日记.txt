@@ -30,3 +30,8 @@
 - 添加 docs/papers/ 目录用于存放相关论文 PDF
 - 更新项目标题为 "WorkMate 数据处理中心"
 - 发布 v0.0.2-alpha 版本
+
+2026年1月25日补记（续）：
+- 使用 PyInstaller 打包为独立 EXE 文件 (WorkMateDataCenter.exe)，支持无 Python 环境运行。
+- 修复 EXE 启动时页面打开问题，确保默认打开 index.html 工具集入口。
+- 确认发布 v0.0.2-alpha 版本到 GitHub。
