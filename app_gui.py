@@ -135,7 +135,7 @@ def is_semantic_garbage(text):
     """
     语义信噪比检测 (V67.7 核心算法)
     判断字符串是否由大量的 ASCII 符号组成（视觉乱码）。
-    例如: "((m(*" 或 "\;8\;B" 虽然是 ASCII，但应被剔除。
+    例如: "((m(*" 或 "\\;8\\;B" 虽然是 ASCII，但应被剔除。
     """
     if not text: return True
     
