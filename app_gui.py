@@ -444,9 +444,9 @@ def execute_epycon_conversion(cfg):
 
 @app.route('/')
 def home():
-    html_path = resource_path('editor.html')
+    html_path = resource_path('index.html')
     if os.path.exists(html_path): return send_file(html_path)
-    return f"Missing editor.html"
+    return f"Missing index.html"
 
 @app.route('/run-direct', methods=['POST'])
 def run_direct():
@@ -465,17 +465,7 @@ def api_select_folder():
         return jsonify({"error": str(e), "path": ""})
 
 def open_browser():
-    # 打开本地工具集入口页面
-    import os
-    import sys
-    if getattr(sys, 'frozen', False):
-        # 打包后的路径
-        base_path = sys._MEIPASS
-    else:
-        # 开发时的路径
-        base_path = os.path.dirname(__file__)
-    index_path = os.path.join(base_path, 'index.html')
-    webbrowser.open_new(f'file://{index_path}')
+    webbrowser.open_new("http://127.0.0.1:5000")
 
 if __name__ == '__main__':
     threading.Timer(1.0, open_browser).start()
