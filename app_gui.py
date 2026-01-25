@@ -465,7 +465,10 @@ def api_select_folder():
         return jsonify({"error": str(e), "path": ""})
 
 def open_browser():
-    webbrowser.open_new("http://127.0.0.1:5000")
+    # 打开本地工具集入口页面
+    import os
+    index_path = os.path.join(os.path.dirname(__file__), 'index.html')
+    webbrowser.open_new(f'file://{index_path}')
 
 if __name__ == '__main__':
     threading.Timer(1.0, open_browser).start()
