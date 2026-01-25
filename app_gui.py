@@ -465,9 +465,16 @@ def api_select_folder():
         return jsonify({"error": str(e), "path": ""})
 
 def open_browser():
-    webbrowser.open_new("http://127.0.0.1:5000")
+    try:
+        url = "http://127.0.0.1:5000/index.html"
+        logging.getLogger(__name__).info(f"Opening browser to {url}")
+        webbrowser.open_new(url)
+    except Exception:
+        # fallback to root
+        webbrowser.open_new("http://127.0.0.1:5000")
 
 if __name__ == '__main__':
-    threading.Timer(1.0, open_browser).start()
+    # give the server a moment to bind before opening browser
+    threading.Timer(1.5, open_browser).start()
     print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
     app.run(port=5000, debug=False)
