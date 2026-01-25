@@ -3,7 +3,7 @@ from epycon.iou.parsers import (
     LogParser,
 )
 
-file_path = "samples/study01/00000000.log"
+file_path = "examples/data/study01/00000000.log"
 
 # Example usage for reading entire file:
 with LogParser(file_path, start=0, end=2500) as parser:

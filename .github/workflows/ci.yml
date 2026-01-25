@@ -21,7 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy h5py jsonschema
       - name: Generate test data
-        run: python scripts/generate_fake_wmx32.py --out samples/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.1
+        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.1
       - name: Validate config
         run: |
           python - <<'PY'
@@ -32,7 +32,7 @@ jobs:
           print('CONFIG OK')
           PY
       - name: Create output directory
-        run: mkdir -p samples/out
+        run: mkdir -p examples/data/out
       - name: Run epycon
         env:
           PYTHONPATH: ${{ github.workspace }}/epycon
@@ -44,13 +44,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: epycon-output
-          path: samples/out/**
+          path: examples/data/out/**
       - name: Upload input artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: epycon-inputs
-          path: samples/study01/**
+          path: examples/data/study01/**
       - name: Upload debug info
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4

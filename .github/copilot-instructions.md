@@ -47,9 +47,9 @@
 
 - 最小样本目录（示例）：
 
-	- `samples/study01/00000000.log`（演示文件）
-	- `samples/study01/00000001.log`（可由生成器创建，演示多通道）
-	- `samples/study01/entries.log`（可选，用于标注导出）
+	- `examples/data/study01/00000000.log`（演示文件）
+	- `examples/data/study01/00000001.log`（可由生成器创建，演示多通道）
+	- `examples/data/study01/entries.log`（可选，用于标注导出）
 
 - 在仓库根目录运行批量转换（Unix / macOS / WSL）：
 
@@ -93,10 +93,10 @@
 python scripts\generate_fake_wmx32.py
 
 # 生成两通道、512 samples、采样率 500Hz 的文件到指定位置
-python scripts\generate_fake_wmx32.py --out samples/study01/00000001.log --channels 2 --samples 512 --value 500 --fs 500
+python scripts\generate_fake_wmx32.py --out examples/data/study01/00000001.log --channels 2 --samples 512 --value 500 --fs 500
 ```
 
-生成的文件可以直接放到 `samples/<study>` 目录下用于 `python -m epycon` 端到端验证。
+生成的文件可以直接放到 `examples/data/<study>` 目录下用于 `python -m epycon` 端到端验证。
 
 更多细节请参见生成器脚本说明： scripts/README.md
 
