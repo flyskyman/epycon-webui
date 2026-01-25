@@ -14,6 +14,7 @@ A web-ui base on the epycon whici is a Python package for parsing and conversion
   - `schema.json`：配置验证 schema。
 - `docs/`：文档目录
   - `delimiter_migration.md`：分隔符迁移指南。
+  - `papers/`：相关论文和文档 PDF 存放目录。
 - `epycon/`：核心 Python 包
   - `__main__.py`：命令行批量转换入口。
   - `cli/`：命令行接口模块。
