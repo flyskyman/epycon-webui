@@ -35,3 +35,41 @@
 - 使用 PyInstaller 打包为独立 EXE 文件 (WorkMateDataCenter.exe)，支持无 Python 环境运行。
 - 修复 EXE 启动时页面打开问题，确保默认打开 index.html 工具集入口。
 - 确认发布 v0.0.2-alpha 版本到 GitHub。
+
+2026年1月26日补记：✨ v0.0.3-alpha 发布
+**关键成就：**
+- 🚀 成功构建完全独立的 WorkMate_DataCenter.exe（8.9MB）
+  - 无需 Python 环境，双击即可运行
+  - 所有依赖内置（numpy, h5py, flask, werkzeug）
+  
+- 🌐 完善浏览器自动打开功能
+  - 实现后台线程延迟 1 秒打开默认浏览器
+  - 服务自动启动在 http://127.0.0.1:5000/
+  
+- 🔧 解决 Windows 编码问题
+  - 修复 Windows 控制台 GBK 编码导致中文/表情符号显示错误
+  - 添加流重配置：`stream.reconfigure(encoding="utf-8", errors="replace")`
+  - 确保 UTF-8 文本正确显示
+  
+- 📦 运行时文件处理
+  - 自动复制 base_library.zip 到 _internal/ 目录
+  - 复制 Tcl/Tk 数据目录 (_tcl_data/, _tk_data/) 以支持 Tkinter 文件对话框
+  
+- 📁 项目清理
+  - 删除临时 HTML 文件（response*.html、test.html）
+  - 删除旧配置文件（app_gui.spec、WorkMateDataCenter.spec）
+  - 删除过时文档（release_notes_v0.0.2-alpha.md、CHANGELOG.md）
+  
+- 📝 更新发布文档
+  - 创建 CHANGELOG.md 记录版本更新
+  - 创建 release_notes_v0.0.3-alpha.md 发布说明
+
+**技术细节：**
+- PyInstaller CLI 参数：`--collect-all numpy --collect-all h5py --copy-metadata flask --copy-metadata werkzeug`
+- 添加数据文件：配置、静态 HTML、epycon 模块
+- 修复编码 UnicodeEncodeError：在 `__main__` 重配所有流编码
+
+**下一步计划：**
+1. ✅ 已完成：v0.0.3-alpha 发布并提交到 Git
+2. 可选：创建 GitHub Release 并上传 WorkMate_DataCenter.exe
+3. 后续迭代：性能优化、更多导出格式、数据验证增强
