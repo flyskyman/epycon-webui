@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkMate Log Parser: V13 Deep Search</title>
+    <style>
+        :root { --primary: #0f172a; --accent: #3b82f6; --bg: #f8fafc; --white: #ffffff; --border: #e2e8f0; --success: #10b981; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: #334155; padding: 20px; margin: 0; }
+        
+        .container { max-width: 1600px; margin: 0 auto; background: var(--white); border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; height: 92vh; }
+        
+        /* Header */
+        .header { padding: 15px 20px; border-bottom: 1px solid var(--border); background: #fff; display: flex; justify-content: space-between; align-items: center; }
+        .header h2 { margin: 0; font-size: 18px; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+        .badge-count { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+        .stats-bar { font-size: 13px; color: #64748b; display: flex; gap: 20px; align-items: center; }
+        .stat-item strong { color: #0f172a; font-weight: 600; }
+
+        /* Filter Bar */
+        .filter-bar { padding: 10px 20px; background: #f1f5f9; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .filter-label { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; margin-right: 5px; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 6px; background: white; padding: 4px 10px; border-radius: 20px; border: 1px solid #cbd5e1; font-size: 12px; cursor: pointer; user-select: none; transition: all 0.2s; }
+        .checkbox-wrapper:hover { border-color: var(--accent); }
+        .checkbox-wrapper.active { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+        .checkbox-wrapper.inactive { opacity: 0.6; background: #f1f5f9; color: #94a3b8; } 
+        .checkbox-wrapper input { display: none; } 
+
+        /* Drag & Drop Zone */
+        .drop-zone {
+            padding: 20px; margin: 0; background: #fff; border-bottom: 1px solid var(--border);
+            display: flex; gap: 15px; align-items: center; flex-wrap: wrap;
+            transition: background 0.2s;
+        }
+        .drop-zone.drag-over { background: #eff6ff; border-color: var(--accent); }
+        
+        .drop-hint {
+            border: 2px dashed #cbd5e1; border-radius: 8px; padding: 10px 20px;
+            color: #64748b; font-size: 13px; display: flex; align-items: center; gap: 8px;
+            background: #f8fafc; flex-grow: 1; justify-content: center; cursor: pointer;
+        }
+        .drop-hint:hover { border-color: var(--accent); color: var(--accent); background: #fff; }
+
+        /* Controls */
+        .btn-action { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: white; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; color: #334155; transition: all 0.2s; font-weight: 500; height: 32px; }
+        .btn-action:hover:not(:disabled) { background: #f8fafc; border-color: var(--accent); color: var(--accent); }
+        .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: var(--primary); color: white; border: none; }
+        .btn-primary:hover:not(:disabled) { background: #1e293b; color: white; }
+        .btn-green { color: var(--success); border-color: #a7f3d0; }
+        .btn-green:hover:not(:disabled) { background: #ecfdf5; border-color: var(--success); }
+
+        .search-box { width: 200px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; height: 18px; }
+        .sort-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--accent); font-weight: 600; margin-left: auto; }
+
+        /* Table */
+        .table-wrap { flex-grow: 1; overflow: auto; position: relative; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+        thead { position: sticky; top: 0; z-index: 10; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        th { padding: 10px 15px; text-align: left; font-weight: 600; color: #475569; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        td { padding: 8px 15px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        tr:hover { background: #f1f5f9; }
+        
+        /* Column Widths */
+        .col-idx { width: 50px; color: #94a3b8; text-align: center; }
+        /* 增加来源列宽度，以显示完整路径 */
+        .col-source { width: 220px; color: #475569; font-weight: 500; font-size: 12px; } 
+        .col-time { width: 100px; font-family: 'Consolas', monospace; font-weight: bold; }
+        .col-group { width: 100px; }
+        .col-msg { width: auto; }
+
+        .tag { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .tag-PACE { background: #ffedd5; color: #c2410c; }
+        .tag-EVENT { background: #fce7f3; color: #be185d; }
+        .tag-NOTE { background: #dcfce7; color: #15803d; }
+        .tag-PROTOCOL { background: #e0f2fe; color: #0369a1; }
+        .tag-SYS, .tag-DEBUG, .tag-UNK { background: #f1f5f9; color: #94a3b8; }
+        .row-error { background: #fff1f2; }
+
+        .footer { padding: 10px 20px; border-top: 1px solid var(--border); background: #f8fafc; display: flex; justify-content: center; align-items: center; gap: 10px; }
+        .btn-page { padding: 5px 12px; border: 1px solid var(--border); background: white; border-radius: 4px; cursor: pointer; font-size: 13px; color: #475569; }
+        .btn-page:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+        .btn-page:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
+        .page-info { font-size: 13px; font-variant-numeric: tabular-nums; width: 120px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>WorkMate Log <span class="badge-count" id="countBadge">0</span></h2>
+        <div class="stats-bar">
+            <span class="stat-item">Date: <strong id="dateDisplay">-</strong></span>
+            <span class="stat-item">Files: <strong id="fileCount">0</strong></span>
+            <span class="stat-item">Time Range: <strong id="timeRange">-</strong></span>
+        </div>
+    </div>
+
+    <div class="filter-bar" id="filterBar" style="display:none;">
+        <span class="filter-label">智能过滤:</span>
+        <div id="filterGroup" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".log" style="display:none">
+        <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+
+        <button id="btnSingle" class="btn-action">📄 选择单文件</button>
+        <button id="btnBatch" class="btn-action btn-primary">📂 递归导入文件夹</button>
+
+        <div style="width:1px; height:20px; background:#e2e8f0; margin:0 5px;"></div>
+
+        <button id="btnCsv" class="btn-action" disabled>⬇ CSV</button>
+        <button id="btnXls" class="btn-action btn-green" disabled>⬇ Excel</button>
+
+        <input type="text" id="searchInput" class="search-box" placeholder="搜索..." disabled>
+        
+        <div class="sort-toggle" id="sortBtn">
+            <span>排序:</span> <span id="sortLabel">最新优先 (▼)</span>
+        </div>
+
+        <div class="drop-hint" id="dropHint">
+            <span>✋ 或将文件夹拖放到这里 (自动递归搜索 entries.log)</span>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table id="dataTable">
+            <thead>
+                <tr>
+                    <th class="col-idx">#</th>
+                    <th class="col-source">完整路径 (Source Path)</th>
+                    <th class="col-time">时间</th>
+                    <th class="col-group">类型</th>
+                    <th class="col-msg">内容 (Annotation)</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <tr><td colspan="5" style="text-align:center; padding:50px; color:#94a3b8;">请选择文件或拖入文件夹</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        <button class="btn-page" id="btnFirst" disabled>«</button>
+        <button class="btn-page" id="btnPrev" disabled>‹</button>
+        <span class="page-info" id="pageInfo">Page 1 / 1</span>
+        <button class="btn-page" id="btnNext" disabled>›</button>
+        <button class="btn-page" id="btnLast" disabled>»</button>
+    </div>
+</div>
+
+<script>
+    const GROUP_MAP = { 1:'PROTOCOL', 2:'EVENT', 3:'NOTE', 4:'DEBUG', 5:'SYS', 6:'PACE', 17:'RATE' };
+    const DEFAULT_HIDDEN = new Set(['SYS', 'DEBUG', 'UNK', 'IDK', 'ERROR', 'UNKNOWN']);
+    const PAGE_SIZE = 100; 
+
+    let state = {
+        allData: [],
+        filteredData: [],
+        activeFilters: new Set(),
+        currentPage: 1,
+        isDesc: true, 
+        dateSet: new Set()
+    };
+
+    const els = {
+        fileIn: document.getElementById('fileInput'),
+        folderIn: document.getElementById('folderInput'),
+        btnSingle: document.getElementById('btnSingle'),
+        btnBatch: document.getElementById('btnBatch'),
+        search: document.getElementById('searchInput'),
+        body: document.getElementById('tableBody'),
+        filterBar: document.getElementById('filterBar'),
+        filterGroup: document.getElementById('filterGroup'),
+        countBadge: document.getElementById('countBadge'),
+        fileCount: document.getElementById('fileCount'),
+        timeRange: document.getElementById('timeRange'),
+        dateDisplay: document.getElementById('dateDisplay'),
+        btnCsv: document.getElementById('btnCsv'),
+        btnXls: document.getElementById('btnXls'),
+        sortBtn: document.getElementById('sortBtn'),
+        sortLabel: document.getElementById('sortLabel'),
+        pInfo: document.getElementById('pageInfo'),
+        btnFirst: document.getElementById('btnFirst'),
+        btnLast: document.getElementById('btnLast'),
+        btnPrev: document.getElementById('btnPrev'),
+        btnNext: document.getElementById('btnNext'),
+        dropZone: document.getElementById('dropZone'),
+        dropHint: document.getElementById('dropHint')
+    };
+
+    // Button Triggers
+    els.btnSingle.onclick = () => els.fileIn.click();
+    els.btnBatch.onclick = () => els.folderIn.click();
+    els.dropHint.onclick = () => els.folderIn.click(); // Clicking hint also opens folder picker
+
+    // File Input Handlers
+    els.fileIn.onchange = (e) => handleFiles(e.target.files, false);
+    els.folderIn.onchange = (e) => handleFiles(e.target.files, true);
+
+    // Drag & Drop Handlers
+    els.dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        els.dropZone.classList.add('drag-over');
+    });
+    els.dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        els.dropZone.classList.remove('drag-over');
+    });
+    els.dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        els.dropZone.classList.remove('drag-over');
+        
+        // Handle dropped items (Recursively!)
+        const items = e.dataTransfer.items;
+        if (items) {
+            handleDrop(items);
+        }
+    });
+
+    // Event Listeners for UI
+    els.search.addEventListener('input', () => { state.currentPage = 1; applySortAndFilter(); });
+    els.sortBtn.addEventListener('click', toggleSort);
+    els.btnPrev.addEventListener('click', () => changePage(-1));
+    els.btnNext.addEventListener('click', () => changePage(1));
+    els.btnFirst.addEventListener('click', () => jumpPage(1));
+    els.btnLast.addEventListener('click', () => jumpPage(999999));
+    els.btnCsv.addEventListener('click', downloadCSV);
+    els.btnXls.addEventListener('click', downloadXLS);
+
+    // --- Core Logic ---
+
+    // 1. 处理拖拽 (递归)
+    async function handleDrop(dataTransferItems) {
+        els.body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px;">正在深度扫描文件夹，请稍候...</td></tr>`;
+        
+        let fileEntries = [];
+        // 获取所有 Entry
+        let queue = [];
+        for (let i = 0; i < dataTransferItems.length; i++) {
+            let item = dataTransferItems[i].webkitGetAsEntry();
+            if (item) queue.push(item);
+        }
+
+        // 递归读取
+        let foundFiles = [];
+        while (queue.length > 0) {
+            let entry = queue.shift();
+            if (entry.isFile) {
+                if (entry.name.toLowerCase() === 'entries.log') {
+                    // 需要将 Entry 转为 File 对象
+                    const file = await new Promise(resolve => entry.file(resolve));
+                    // 手动修补 fullPath 属性以便显示来源
+                    file._customPath = entry.fullPath.substring(1); // remove leading slash
+                    foundFiles.push(file);
+                }
+            } else if (entry.isDirectory) {
+                let reader = entry.createReader();
+                // readEntries 可能不会一次返回所有，需要循环读取直到空
+                let readEntriesBatch = async () => {
+                    return new Promise(resolve => reader.readEntries(resolve));
+                };
+                
+                let childEntries = [];
+                let batch = await readEntriesBatch();
+                while(batch.length > 0) {
+                    childEntries.push(...batch);
+                    batch = await readEntriesBatch();
+                }
+                
+                queue.push(...childEntries);
+            }
+        }
+
+        processValidFiles(foundFiles);
+    }
+
+    // 2. 处理 Input 选择
+    async function handleFiles(fileList, isBatch) {
+        if (!fileList || fileList.length === 0) return;
+
+        let validFiles = [];
+        if (isBatch) {
+            // input webkitdirectory 已经返回了扁平化的所有文件
+            validFiles = Array.from(fileList).filter(f => f.name.toLowerCase() === 'entries.log');
+        } else {
+            validFiles = Array.from(fileList);
+        }
+
+        processValidFiles(validFiles);
+    }
+
+    // 3. 统一处理文件解析
+    async function processValidFiles(validFiles) {
+        if (validFiles.length === 0) {
+            alert("未找到 entries.log 文件");
+            els.body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px; color:#94a3b8;">请选择文件或拖入文件夹</td></tr>`;
+            return;
+        }
+
+        els.body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px;">正在解析 ${validFiles.length} 个文件...</td></tr>`;
+        
+        state.allData = [];
+        state.dateSet.clear();
+        let globalIdx = 1;
+
+        const promises = validFiles.map(file => readFileAndParse(file));
+        const results = await Promise.all(promises);
+
+        results.forEach(res => {
+            if (res.date) state.dateSet.add(res.date);
+            res.rows.forEach(r => {
+                r.idx = globalIdx++;
+                state.allData.push(r);
+            });
+        });
+
+        els.fileCount.innerText = validFiles.length;
+        els.countBadge.innerText = state.allData.length;
+        updateDateDisplay();
+
+        els.search.disabled = false;
+        els.btnCsv.disabled = false;
+        els.btnXls.disabled = false;
+
+        updateTimeRange();
+        generateFilters();
+        applySortAndFilter();
+    }
+
+    function updateDateDisplay() {
+        const dates = Array.from(state.dateSet).sort();
+        if (dates.length === 0) {
+            els.dateDisplay.innerText = "-";
+        } else if (dates.length === 1) {
+            els.dateDisplay.innerText = dates[0];
+        } else {
+            els.dateDisplay.innerText = `${dates[0]} ~ ${dates[dates.length - 1]}`;
+        }
+    }
+
+    function readFileAndParse(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // Determine Source Path
+                let sourcePath = file.name;
+                
+                // Priority 1: Drag & Drop Custom Path
+                if (file._customPath) {
+                    sourcePath = file._customPath;
+                } 
+                // Priority 2: Webkit Relative Path (Input Folder)
+                else if (file.webkitRelativePath) {
+                    sourcePath = file.webkitRelativePath;
+                }
+                
+                // Cleanup: remove filename from path to show just the folder structure if possible, 
+                // OR keep it full. Let's keep it full but maybe strip the filename if it is entries.log to save space?
+                // Request said "Full Relative Path". 
+                // Let's remove the '/entries.log' suffix for cleaner display if it exists
+                if (sourcePath.toLowerCase().endsWith('entries.log')) {
+                    sourcePath = sourcePath.substring(0, sourcePath.length - 11); // remove entries.log
+                    if (sourcePath.endsWith('/')) sourcePath = sourcePath.slice(0, -1);
+                }
+
+                const result = parseBuffer(e.target.result, file.size, sourcePath || "Root");
+                resolve(result);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    function parseBuffer(buffer, fileSize, sourceName) {
+        const view = new DataView(buffer);
+        const rows = [];
+        let detectedDate = null;
+        
+        let version = 'x64';
+        let headerLen = 36;
+        let lineSize = 220;
+
+        if ((fileSize - 32) % 216 === 0) {
+            version = 'x32';
+            headerLen = 32;
+            lineSize = 216;
+        }
+
+        const decoder = new TextDecoder('iso-8859-1');
+
+        for(let ptr = headerLen; ptr < fileSize; ptr += lineSize) {
+            if(ptr + lineSize > fileSize) break;
+
+            let row = {
+                source: sourceName,
+                rawTs: 0,
+                timeStr: 'INVALID',
+                group: 'UNK',
+                msg: '',
+                isError: false,
+                searchStr: ''
+            };
+
+            try {
+                const gid = view.getUint16(ptr, true);
+                row.group = GROUP_MAP[gid] || `UNK(${gid})`;
+
+                let ts = 0;
+                if (version === 'x64') {
+                    ts = Number(view.getBigUint64(ptr + 10, true));
+                } else {
+                    ts = view.getUint32(ptr + 10, true) * 1000;
+                }
+                row.rawTs = ts;
+                
+                if (ts > 0 && ts < 4102444800000) { 
+                    const dateObj = new Date(ts + (8 * 3600 * 1000));
+                    if (!isNaN(dateObj.getTime())) {
+                        row.timeStr = dateObj.toISOString().substring(11, 19);
+                        if (!detectedDate) detectedDate = dateObj.toISOString().substring(0, 10);
+                    }
+                }
+
+                const textOffset = version === 'x64' ? 18 : 14;
+                const textLen = version === 'x64' ? 176 : 178;
+                const textBytes = new Uint8Array(buffer, ptr + textOffset, textLen);
+                row.msg = decoder.decode(textBytes).replace(/\x00/g, '').trim();
+
+            } catch (err) {
+                row.isError = true;
+                row.group = 'ERROR';
+                row.msg = `Err: ${err.message}`;
+            }
+
+            row.searchStr = `${row.source} ${row.timeStr} ${row.group} ${row.msg}`.toLowerCase();
+            rows.push(row);
+        }
+        return { rows: rows, date: detectedDate };
+    }
+
+    function generateFilters() {
+        const groups = new Set(state.allData.map(d => d.group));
+        state.activeFilters.clear();
+        
+        els.filterGroup.innerHTML = '';
+        const sortedGroups = Array.from(groups).sort();
+
+        sortedGroups.forEach(g => {
+            const isHidden = Array.from(DEFAULT_HIDDEN).some(keyword => g.toUpperCase().includes(keyword));
+            const isChecked = !isHidden;
+            if (isChecked) state.activeFilters.add(g);
+
+            const label = document.createElement('label');
+            label.className = `checkbox-wrapper ${isChecked ? 'active' : 'inactive'}`;
+            label.innerHTML = `<input type="checkbox" value="${g}" ${isChecked ? 'checked' : ''}><span>${g}</span>`;
+            
+            label.querySelector('input').addEventListener('change', (e) => {
+                if(e.target.checked) {
+                    state.activeFilters.add(g);
+                    label.classList.remove('inactive');
+                    label.classList.add('active');
+                } else {
+                    state.activeFilters.delete(g);
+                    label.classList.remove('active');
+                    label.classList.add('inactive');
+                }
+                state.currentPage = 1;
+                applySortAndFilter();
+            });
+            els.filterGroup.appendChild(label);
+        });
+        
+        els.filterBar.style.display = 'flex';
+    }
+
+    function applySortAndFilter() {
+        const q = els.search.value.toLowerCase();
+        let temp = state.allData.filter(d => state.activeFilters.has(d.group));
+        if (q) temp = temp.filter(d => d.searchStr.includes(q));
+
+        state.filteredData = [...temp].sort((a, b) => state.isDesc ? (b.rawTs - a.rawTs) : (a.rawTs - b.rawTs));
+        state.currentPage = 1;
+        render();
+    }
+
+    function render() {
+        const start = (state.currentPage - 1) * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+        const pageData = state.filteredData.slice(start, end);
+        const maxPage = Math.ceil(state.filteredData.length / PAGE_SIZE) || 1;
+
+        if (pageData.length === 0) {
+            els.body.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:#94a3b8;">无匹配数据</td></tr>';
+        } else {
+            els.body.innerHTML = pageData.map(d => `
+                <tr class="${d.isError ? 'row-error' : ''}">
+                    <td class="col-idx">${d.idx}</td>
+                    <td class="col-source" title="${d.source}">${d.source}</td>
+                    <td class="col-time">${d.timeStr}</td>
+                    <td class="col-group"><span class="tag tag-${d.group.split('(')[0]}">${d.group}</span></td>
+                    <td class="col-msg">${d.msg}</td>
+                </tr>
+            `).join('');
+        }
+
+        els.pInfo.innerText = `Page ${state.currentPage} / ${maxPage}`;
+        els.countBadge.innerText = state.filteredData.length;
+        els.btnPrev.disabled = state.currentPage === 1;
+        els.btnFirst.disabled = state.currentPage === 1;
+        els.btnNext.disabled = state.currentPage === maxPage;
+        els.btnLast.disabled = state.currentPage === maxPage;
+    }
+
+    function updateTimeRange() {
+        if (state.allData.length > 0) els.timeRange.innerText = "Ready";
+    }
+
+    function toggleSort() { state.isDesc = !state.isDesc; els.sortLabel.innerText = state.isDesc ? "最新优先 (▼)" : "最早优先 (▲)"; applySortAndFilter(); }
+    function changePage(d) { jumpPage(state.currentPage + d); }
+    function jumpPage(p) { const max = Math.ceil(state.filteredData.length / PAGE_SIZE)||1; if(p<1)p=1; if(p>max)p=max; state.currentPage=p; render(); }
+
+    function downloadCSV() {
+        if (!state.filteredData.length) return;
+        let csv = "\uFEFFIndex,Source,Time,Group,Annotation\n";
+        state.filteredData.forEach(r => csv += `${r.idx},${r.source},${r.timeStr},${r.group},"${r.msg.replace(/"/g, '""')}"\n`);
+        triggerDL(csv, 'workmate_log.csv', 'text/csv');
+    }
+
+    function downloadXLS() {
+        if (!state.filteredData.length) return;
+        let rows = state.filteredData.map(d => `<tr><td>${d.idx}</td><td>${d.source}</td><td>${d.timeStr}</td><td>${d.group}</td><td>${d.msg}</td></tr>`).join('');
+        let tpl = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1"><thead><tr style="background:#ddd;"><th>Index</th><th>Source</th><th>Time</th><th>Group</th><th>Annotation</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+        triggerDL(tpl, 'workmate_log.xls', 'application/vnd.ms-excel');
+    }
+
+    function triggerDL(content, name, mime) {
+        const url = URL.createObjectURL(new Blob([content], { type: `${mime};charset=utf-8;` }));
+        const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+</script>
+
+</body>
+</html>
