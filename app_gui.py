@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import time
 import webbrowser
 import logging
 import tkinter as tk
@@ -26,7 +27,7 @@ for path in candidates:
 
 def resource_path(relative_path):
     try:
-        base_path = sys._MEIPASS
+        base_path = sys._MEIPASS  # type: ignore
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
@@ -57,10 +58,10 @@ try:
     from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN
     from epycon.iou import LogParser, EntryPlanter, CSVPlanter, HDFPlanter, readentries, mount_channels
 except ImportError as e:
-    root = tk.Tk(); root.withdraw()
-    messagebox.showerror("启动错误", f"无法加载 Epycon。\n{e}"); sys.exit(1)
+    print(f"无法加载 Epycon。\n{e}")
+    sys.exit(1)
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
 class MemoryLogHandler(logging.Handler):
@@ -363,6 +364,9 @@ def execute_epycon_conversion(cfg):
                         n_channels = 0
                         with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"], samplesize=1024) as p:
                             header = p.get_header()
+                            if header is None:
+                                logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
+                                continue
                             fs = header.amp.sampling_freq
                             n_channels = get_safe_n_channels(header)
                         
@@ -389,9 +393,9 @@ def execute_epycon_conversion(cfg):
                             samplesize=cfg["global_settings"]["processing"]["chunk_size"]
                         ) as parser:
                             if cfg["data"]["leads"] == "computed":
-                                mappings = header.channels.computed_mappings
+                                mappings = header.channels.computed_mappings  # type: ignore
                             else:
-                                mappings = header.channels.raw_mappings
+                                mappings = header.channels.raw_mappings  # type: ignore
                             if cfg["data"]["channels"]:
                                 mappings = {k:v for k,v in mappings.items() if k in cfg["data"]["channels"]}
                             column_names = list(mappings.keys())
@@ -405,7 +409,7 @@ def execute_epycon_conversion(cfg):
                                     planter.write(chunk)
                                     
                                 if output_fmt == "h5" and cfg["data"]["pin_entries"] and target_entries_rel:
-                                    if hasattr(planter, 'add_marks'):
+                                    if isinstance(planter, HDFPlanter):
                                         safe_pos = [int(e.timestamp * fs) for e in target_entries_rel]
                                         safe_grp = [str(e.group) for e in target_entries_rel]
                                         safe_msg = [str(e.message) for e in target_entries_rel]
@@ -468,16 +472,25 @@ def open_browser():
     try:
         url = "http://127.0.0.1:5000/"
         logging.getLogger(__name__).info(f"Opening browser to {url}")
-        webbrowser.open_new(url)
-    except Exception:
-        # fallback options
-        webbrowser.open_new("http://127.0.0.1:5000/index.html")
-        webbrowser.open_new("http://127.0.0.1:5000/editor.html")
+        webbrowser.open(url)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to open browser: {e}")
+        print(f"请手动打开浏览器访问: {url}")
 
 if __name__ == '__main__':
-    print("in __main__")
-    # give the server a moment to bind before opening browser
-    threading.Timer(1.5, open_browser).start()
-    print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
-    print("Running app.run...")
-    app.run(port=5000, debug=False)
+    try:
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+        print("in __main__")
+        print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
+        print("请手动打开浏览器访问: http://127.0.0.1:5000/")
+        print("Running app.run...")
+        threading.Thread(target=lambda: (time.sleep(1), open_browser()), daemon=True).start()
+        app.run(port=5000, debug=False)
+    except Exception as e:
+        print(f"启动错误: {e}")
+        import traceback
+        traceback.print_exc()

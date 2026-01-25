@@ -104,7 +104,7 @@ class Header:
     def __post_init__(self):
         """ Post-init function
         """
-        self.amp = AmplifierSettings(**self.amp)
+        self.amp = AmplifierSettings(**self.amp)  # type: ignore
 
     def get_chnames(self):
         """_summary_

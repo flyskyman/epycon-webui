@@ -4,7 +4,7 @@ import argparse
 import logging
 import jsonschema
 
-from iou.parsers import (
+from ..iou.parsers import (
     # EpParser,
     # _readheader,
     # _read,

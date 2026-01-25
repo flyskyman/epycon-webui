@@ -6,5 +6,15 @@
     },
     "python.analysis.typeCheckingMode": "basic",
     "editor.formatOnSave": true,
-    "python.formatting.provider": "black"
+    "python.formatting.provider": "black",
+    "chat.tools.terminal.autoApprove": {
+        "/^& C:\\\\Projects\\\\epycon\\\\venv\\\\Scripts\\\\python\\.exe -c \"import os; import sys; print\\(\\[d for d in os\\.listdir\\(sys\\.path\\[1\\]\\) if 'pyinstaller' in d\\.lower\\(\\)\\]\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& C:\\\\Projects\\\\epycon\\\\venv\\\\Scripts\\\\python\\.exe -m pip install --force-reinstall pyinstaller$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
 }
