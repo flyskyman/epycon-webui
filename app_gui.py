@@ -467,7 +467,14 @@ def api_select_folder():
 def open_browser():
     # 打开本地工具集入口页面
     import os
-    index_path = os.path.join(os.path.dirname(__file__), 'index.html')
+    import sys
+    if getattr(sys, 'frozen', False):
+        # 打包后的路径
+        base_path = sys._MEIPASS
+    else:
+        # 开发时的路径
+        base_path = os.path.dirname(__file__)
+    index_path = os.path.join(base_path, 'index.html')
     webbrowser.open_new(f'file://{index_path}')
 
 if __name__ == '__main__':

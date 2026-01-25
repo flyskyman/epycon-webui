@@ -18,15 +18,15 @@
 
 ## 打包为可执行文件
 
-项目支持打包为独立 EXE 文件，无需安装 Python：
+项目支持打包为独立可执行文件，无需安装 Python：
 
 1. 安装 PyInstaller：`pip install pyinstaller`
-2. 运行打包：`pyinstaller --onefile app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
-3. 生成的 EXE 文件位于 `dist/WorkMateDataCenter.exe`
+2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
+3. 生成的文件位于 `dist/WorkMateDataCenter/`
 
-**注意**：运行 EXE 时，确保 HTML 文件和 config/、epycon/ 目录在同一目录中，或使用 --add-data 包含它们。
+**注意**：这是目录模式打包，包含 EXE 和支持文件。您可以压缩整个文件夹分发。
 
-运行 EXE 后，打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
+运行 EXE 后，自动打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
 
 ## 项目结构
 
