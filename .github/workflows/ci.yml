@@ -31,6 +31,8 @@ jobs:
           jsonschema.validate(cfg, schema)
           print('CONFIG OK')
           PY
+      - name: Create output directory
+        run: mkdir -p samples/out
       - name: Run epycon
         env:
           PYTHONPATH: ${{ github.workspace }}/epycon
