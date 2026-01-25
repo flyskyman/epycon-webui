@@ -1,0 +1,58 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy h5py jsonschema
+      - name: Generate test data
+        run: python scripts/generate_fake_wmx32.py --out samples/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.1
+      - name: Validate config
+        run: |
+          python - <<'PY'
+          import json, jsonschema
+          cfg = json.load(open('config/config.json'))
+          schema = json.load(open('config/schema.json'))
+          jsonschema.validate(cfg, schema)
+          print('CONFIG OK')
+          PY
+      - name: Run epycon
+        env:
+          PYTHONPATH: ${{ github.workspace }}/epycon
+          EPYCON_CONFIG: ${{ github.workspace }}/config/config.json
+          EPYCON_JSONSCHEMA: ${{ github.workspace }}/config/schema.json
+        run: python -m epycon
+      - name: Upload output artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: epycon-output
+          path: samples/out/**
+      - name: Upload input artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: epycon-inputs
+          path: samples/study01/**
+      - name: Upload debug info
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: epycon-debug
+          path: |
+            config/**
+            scripts/**
+            .github/workflows/ci.yml

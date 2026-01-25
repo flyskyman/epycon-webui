@@ -1,0 +1,25 @@
+{
+  "paths": {
+    "input_folder": "./samples",
+    "output_folder": "./samples/out",
+    "studies": ["study01"]
+  },
+  "data": {
+    "data_files": ["00000000"],
+    "output_format": "csv",
+    "custom_channels": {},
+    "leads": "raw",
+    "channels": [],
+    "pin_entries": false
+  },
+  "entries": {
+    "convert": true,
+    "output_format": "csv",
+    "summary_csv": false,
+    "filter_annotation_type": []
+  },
+  "global_settings": {
+    "workmate_version": "4.1",
+    "processing": {"chunk_size": 1024}
+  }
+}

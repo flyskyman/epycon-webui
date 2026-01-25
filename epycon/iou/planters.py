@@ -160,6 +160,18 @@ class CSVPlanter(DatalogPlanter):
         self._delimiter = kwargs.pop("delimiter", ",")
         self._header_isstored = False
         self._fmt = None
+        # Backwards-compatibility alias:
+        # Historically external code and older callers referenced
+        # `planter.delimiter` (without the underscore). The class now
+        # stores the value as `self._delimiter`, but keeping this alias
+        # prevents AttributeError when CSV writing paths access
+        # `self.delimiter`.
+        #
+        # If you consider removing this alias, update all internal
+        # references to use `self._delimiter` and change callers that
+        # access `planter.delimiter`. To find usage sites search for
+        # ".delimiter" in the repo.
+        self.delimiter = self._delimiter
 
     def __enter__(self):
         try:            
