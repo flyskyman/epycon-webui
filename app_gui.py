@@ -449,7 +449,7 @@ def execute_epycon_conversion(cfg):
 
 @app.route('/')
 def home():
-    html_path = resource_path('index.html')
+    html_path = resource_path('ui/index.html')
     with open(html_path, 'r', encoding='utf-8') as f:
         return f.read()
 
