@@ -13,7 +13,7 @@
 ## 快速开始
 
 1. 安装依赖：`pip install -r requirements.txt`
-2. 运行工具集：打开 `index.html` 或运行 `python app_gui.py`
+2. 运行工具集：打开 `ui/index.html` 或运行 `python app_gui.py`
 3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
 
 ## 打包为可执行文件
@@ -21,7 +21,7 @@
 项目支持打包为独立可执行文件，无需安装 Python：
 
 1. 安装 PyInstaller：`pip install pyinstaller`
-2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "ui;ui" --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
+2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "ui;ui" --add-data "config;config" --add-data "epycon;epycon"`
 3. 生成的文件位于 `dist/WorkMateDataCenter/`
 
 注意：运行时前端第三方 bundle 已集中放置于 `ui/vendor/`，请确保在打包时将该目录一并包含（例如使用 `--add-data "ui/vendor;ui/vendor"`）。
@@ -62,9 +62,8 @@ python -m epycon
 - `app_gui.py`：Flask Web 应用，提供 GUI 接口和 HTTP API，用于本地编辑器和直接运行转换。
   - 注：`WorkMate_DataCenter.py` 已从仓库移除；请使用 `app_gui.py` 作为唯一的可执行入口。
   - 兼容说明：若需要生成名为 `WorkMateDataCenter` 的可执行文件，请使用：
-    `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "ui;ui" --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
-- `editor.html`：HTML 前端，用于本地标注编辑。
- - `editor.html`：HTML 前端，用于本地标注编辑。依赖运行时代码请放置在 `ui/vendor/`（例如 `ui/vendor/vue.js`、`ui/vendor/tailwind.js`）。
+    `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "ui;ui" --add-data "config;config" --add-data "epycon;epycon"`
+- `ui/editor.html`：HTML 前端，用于本地标注编辑。依赖运行时代码请放置在 `ui/vendor/`（例如 `ui/vendor/vue.js`、`ui/vendor/tailwind.js`）。
 - `ui/`：用户界面相关文件
   - `h5_preview.html`：HDF5 文件预览工具。
   - `WorkMate Log Parser.html`：WorkMate 日志解析器相关 HTML。
