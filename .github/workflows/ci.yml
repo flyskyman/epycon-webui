@@ -21,7 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy h5py jsonschema
       - name: Generate test data
-        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3.2
+        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
       - name: Validate config
         run: |
           python - <<'PY'
