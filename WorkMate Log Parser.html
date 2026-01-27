@@ -1,545 +1,1314 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WorkMate Log Parser: V13 Deep Search</title>
     <style>
-        :root { --primary: #0f172a; --accent: #3b82f6; --bg: #f8fafc; --white: #ffffff; --border: #e2e8f0; --success: #10b981; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: #334155; padding: 20px; margin: 0; }
-        
-        .container { max-width: 1600px; margin: 0 auto; background: var(--white); border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; height: 92vh; }
-        
+        :root {
+            --primary: #0f172a;
+            --accent: #3b82f6;
+            --bg: #f8fafc;
+            --white: #ffffff;
+            --border: #e2e8f0;
+            --success: #10b981;
+        }
+
+        body {
+            font-family: 'Segoe UI', Inter, system-ui, sans-serif;
+            background-color: #f8fafc;
+            color: #334155;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            /* Fix scroll */
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            background: white;
+            flex: 1;
+            /* Take remaining height */
+            height: 100%;
+            min-height: 0;
+            /* Critical for nested scroll */
+            overflow: hidden;
+            /* Pass scroll to children */
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        /* New Layout Class for Views */
+        .view-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            /* Force table-wrap to scroll */
+            height: 100%;
+            min-height: 0;
+            /* Critical */
+        }
+
+        /* Table */
+        .table-wrap {
+            flex: 1;
+            /* Shorthand for grow, shrink, basis */
+            min-height: 0;
+            /* Critical */
+            overflow: auto;
+            position: relative;
+            display: flex;
+            /* Ensure full width */
+            flex-direction: column;
+        }
+
         /* Header */
-        .header { padding: 15px 20px; border-bottom: 1px solid var(--border); background: #fff; display: flex; justify-content: space-between; align-items: center; }
-        .header h2 { margin: 0; font-size: 18px; color: var(--primary); display: flex; align-items: center; gap: 10px; }
-        .badge-count { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
-        .stats-bar { font-size: 13px; color: #64748b; display: flex; gap: 20px; align-items: center; }
-        .stat-item strong { color: #0f172a; font-weight: 600; }
+        .header {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            background: #fff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h2 {
+            margin: 0;
+            font-size: 18px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .badge-count {
+            background: var(--accent);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+
+        .stats-bar {
+            font-size: 13px;
+            color: #64748b;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .stat-item strong {
+            color: #0f172a;
+            font-weight: 600;
+        }
 
         /* Filter Bar */
-        .filter-bar { padding: 10px 20px; background: #f1f5f9; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .filter-label { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; margin-right: 5px; }
-        
-        .checkbox-wrapper { display: flex; align-items: center; gap: 6px; background: white; padding: 4px 10px; border-radius: 20px; border: 1px solid #cbd5e1; font-size: 12px; cursor: pointer; user-select: none; transition: all 0.2s; }
-        .checkbox-wrapper:hover { border-color: var(--accent); }
-        .checkbox-wrapper.active { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
-        .checkbox-wrapper.inactive { opacity: 0.6; background: #f1f5f9; color: #94a3b8; } 
-        .checkbox-wrapper input { display: none; } 
+        .filter-bar {
+            padding: 10px 20px;
+            background: #f1f5f9;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filter-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            margin-right: 5px;
+        }
+
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            border: 1px solid #cbd5e1;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s;
+        }
+
+        .checkbox-wrapper:hover {
+            border-color: var(--accent);
+        }
+
+        .checkbox-wrapper.active {
+            background: #dbeafe;
+            color: #1e40af;
+            border-color: #93c5fd;
+        }
+
+        /* [NEW] Highlight for search hits in hidden groups */
+        .checkbox-wrapper.hit {
+            background: #fee2e2;
+            color: #991b1b;
+            border-color: #fca5a5;
+            box-shadow: 0 0 0 2px #fecaca;
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0% {
+                box-shadow: 0 0 0 0px #fecaca;
+            }
+
+            70% {
+                box-shadow: 0 0 0 4px rgba(254, 202, 202, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0px rgba(254, 202, 202, 0);
+            }
+        }
+
+        .checkbox-wrapper.inactive {
+            opacity: 0.6;
+            background: #f1f5f9;
+            color: #94a3b8;
+        }
+
+        .checkbox-wrapper input {
+            display: none;
+        }
+
+        /* [NEW] Toast Style */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: #1e293b;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            animation: toast-in 0.3s ease-out, toast-out 0.3s ease-in 2.7s forwards;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        @keyframes toast-in {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes toast-out {
+            from {
+                transform: translateY(0);
+                opacity: 1;
+            }
+
+            to {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+        }
 
         /* Drag & Drop Zone */
         .drop-zone {
-            padding: 20px; margin: 0; background: #fff; border-bottom: 1px solid var(--border);
-            display: flex; gap: 15px; align-items: center; flex-wrap: wrap;
+            padding: 20px;
+            margin: 0;
+            background: #fff;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
             transition: background 0.2s;
         }
-        .drop-zone.drag-over { background: #eff6ff; border-color: var(--accent); }
-        
-        .drop-hint {
-            border: 2px dashed #cbd5e1; border-radius: 8px; padding: 10px 20px;
-            color: #64748b; font-size: 13px; display: flex; align-items: center; gap: 8px;
-            background: #f8fafc; flex-grow: 1; justify-content: center; cursor: pointer;
+
+        .drop-zone.drag-over {
+            background: #eff6ff;
+            border-color: var(--accent);
         }
-        .drop-hint:hover { border-color: var(--accent); color: var(--accent); background: #fff; }
+
+        .drop-hint {
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            padding: 10px 20px;
+            color: #64748b;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #f8fafc;
+            flex-grow: 1;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .drop-hint:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: #fff;
+        }
 
         /* Controls */
-        .btn-action { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: white; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; color: #334155; transition: all 0.2s; font-weight: 500; height: 32px; }
-        .btn-action:hover:not(:disabled) { background: #f8fafc; border-color: var(--accent); color: var(--accent); }
-        .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-primary { background: var(--primary); color: white; border: none; }
-        .btn-primary:hover:not(:disabled) { background: #1e293b; color: white; }
-        .btn-green { color: var(--success); border-color: #a7f3d0; }
-        .btn-green:hover:not(:disabled) { background: #ecfdf5; border-color: var(--success); }
+        .btn-action {
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #334155;
+            transition: all 0.2s;
+            font-weight: 500;
+            height: 32px;
+        }
 
-        .search-box { width: 200px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; height: 18px; }
-        .sort-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--accent); font-weight: 600; margin-left: auto; }
+        .btn-action:hover:not(:disabled) {
+            background: #f8fafc;
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #1e293b;
+            color: white;
+        }
+
+        .btn-green {
+            color: var(--success);
+            border-color: #a7f3d0;
+        }
+
+        .btn-green:hover:not(:disabled) {
+            background: #ecfdf5;
+            border-color: var(--success);
+        }
+
+        .search-box {
+            width: 200px;
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 13px;
+            height: 18px;
+        }
+
+        .sort-toggle {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 13px;
+            color: var(--accent);
+            font-weight: 600;
+            margin-left: auto;
+        }
 
         /* Table */
-        .table-wrap { flex-grow: 1; overflow: auto; position: relative; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-        thead { position: sticky; top: 0; z-index: 10; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-        th { padding: 10px 15px; text-align: left; font-weight: 600; color: #475569; border-bottom: 1px solid var(--border); white-space: nowrap; }
-        td { padding: 8px 15px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        tr:hover { background: #f1f5f9; }
-        
+        .table-wrap {
+            flex-grow: 1;
+            overflow: auto;
+            position: relative;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            table-layout: fixed;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #f8fafc;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        th {
+            padding: 10px 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #475569;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        th.sortable {
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+            padding-right: 25px;
+        }
+
+        th.sortable:hover {
+            background: #f1f5f9;
+            color: var(--accent);
+        }
+
+        th.sortable::after {
+            content: '↕';
+            position: absolute;
+            right: 8px;
+            color: #cbd5e1;
+            font-size: 10px;
+        }
+
+        th.sortable.asc::after {
+            content: '↑';
+            color: var(--accent);
+        }
+
+        th.sortable.desc::after {
+            content: '↓';
+            color: var(--accent);
+        }
+
+        td {
+            padding: 8px 15px;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        tr:hover {
+            background: #f1f5f9;
+        }
+
         /* Column Widths */
-        .col-idx { width: 50px; color: #94a3b8; text-align: center; }
+        .col-idx {
+            width: 50px;
+            color: #94a3b8;
+            text-align: center;
+        }
+
         /* 增加来源列宽度，以显示完整路径 */
-        .col-source { width: 220px; color: #475569; font-weight: 500; font-size: 12px; } 
-        .col-time { width: 100px; font-family: 'Consolas', monospace; font-weight: bold; }
-        .col-group { width: 100px; }
-        .col-msg { width: auto; }
+        .col-source {
+            width: 220px;
+            color: #475569;
+            font-weight: 500;
+            font-size: 12px;
+        }
 
-        .tag { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-        .tag-PACE { background: #ffedd5; color: #c2410c; }
-        .tag-EVENT { background: #fce7f3; color: #be185d; }
-        .tag-NOTE { background: #dcfce7; color: #15803d; }
-        .tag-PROTOCOL { background: #e0f2fe; color: #0369a1; }
-        .tag-SYS, .tag-DEBUG, .tag-UNK { background: #f1f5f9; color: #94a3b8; }
-        .row-error { background: #fff1f2; }
+        .col-time {
+            width: 100px;
+            font-family: 'Consolas', monospace;
+            font-weight: bold;
+        }
 
-        .footer { padding: 10px 20px; border-top: 1px solid var(--border); background: #f8fafc; display: flex; justify-content: center; align-items: center; gap: 10px; }
-        .btn-page { padding: 5px 12px; border: 1px solid var(--border); background: white; border-radius: 4px; cursor: pointer; font-size: 13px; color: #475569; }
-        .btn-page:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-        .btn-page:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
-        .page-info { font-size: 13px; font-variant-numeric: tabular-nums; width: 120px; text-align: center; }
+        .col-group {
+            width: 100px;
+        }
+
+        .col-msg {
+            width: auto;
+        }
+
+        .tag {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .tag-PACE {
+            background: #ffedd5;
+            color: #c2410c;
+        }
+
+        .tag-EVENT {
+            background: #fce7f3;
+            color: #be185d;
+        }
+
+        .tag-NOTE {
+            background: #dcfce7;
+            color: #15803d;
+        }
+
+        .tag-PROTOCOL {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .tag-SYS,
+        .tag-DEBUG,
+        .tag-UNK {
+            background: #f1f5f9;
+            color: #94a3b8;
+        }
+
+        .row-error {
+            background: #fff1f2;
+        }
+
+        .footer {
+            padding: 10px 20px;
+            border-top: 1px solid var(--border);
+            background: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-page {
+            padding: 5px 12px;
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #475569;
+        }
+
+        .btn-page:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-page:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #f1f5f9;
+        }
+
+        .page-info {
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+            width: 120px;
+            text-align: center;
+        }
     </style>
 </head>
+
 <body>
 
-<div class="container">
-    <div class="header">
-        <h2>WorkMate Log <span class="badge-count" id="countBadge">0</span></h2>
-        <div class="stats-bar">
-            <span class="stat-item">Date: <strong id="dateDisplay">-</strong></span>
-            <span class="stat-item">Files: <strong id="fileCount">0</strong></span>
-            <span class="stat-item">Time Range: <strong id="timeRange">-</strong></span>
-        </div>
-    </div>
-
-    <div class="filter-bar" id="filterBar" style="display:none;">
-        <span class="filter-label">智能过滤:</span>
-        <div id="filterGroup" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
-    </div>
-
-    <div class="drop-zone" id="dropZone">
-        <input type="file" id="fileInput" accept=".log" style="display:none">
-        <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
-
-        <button id="btnSingle" class="btn-action">📄 选择单文件</button>
-        <button id="btnBatch" class="btn-action btn-primary">📂 递归导入文件夹</button>
-
-        <div style="width:1px; height:20px; background:#e2e8f0; margin:0 5px;"></div>
-
-        <button id="btnCsv" class="btn-action" disabled>⬇ CSV</button>
-        <button id="btnXls" class="btn-action btn-green" disabled>⬇ Excel</button>
-
-        <input type="text" id="searchInput" class="search-box" placeholder="搜索..." disabled>
-        
-        <div class="sort-toggle" id="sortBtn">
-            <span>排序:</span> <span id="sortLabel">最新优先 (▼)</span>
+    <div class="container">
+        <div class="header">
+            <div style="display:flex; align-items:center; gap:15px;">
+                <h2 style="margin:0;">WorkMate Explorer <span class="badge-count" id="countBadge">0</span></h2>
+                <!-- Breadcrumb Navigation -->
+                <div id="navBreadcrumb"
+                    style="display:none; align-items:center; font-size:14px; color:#64748b; background:#f1f5f9; padding:4px 12px; border-radius:15px;">
+                    <span class="nav-link" id="navHome"
+                        style="cursor:pointer; color:#3b82f6; font-weight:600;">首页列表</span>
+                    <span style="margin:0 8px;">/</span>
+                    <span id="navCurrent" style="font-weight:600; color:#0f172a;">-</span>
+                </div>
+            </div>
+            <div id="toast-container"></div>
+            <div class="stats-bar">
+                <span class="stat-item">Total Patients: <strong id="statPatientCount">-</strong></span>
+                <span class="stat-item">Time Range: <strong id="statTimeRange">-</strong></span>
+            </div>
         </div>
 
-        <div class="drop-hint" id="dropHint">
-            <span>✋ 或将文件夹拖放到这里 (自动递归搜索 entries.log)</span>
+        <!-- VIEW 1: DASHBOARD (Patient List) -->
+        <div id="view-dashboard" class="view-container">
+
+            <!-- Scan / Import Zone -->
+            <div class="drop-zone" id="dashDropZone">
+                <input type="file" id="fileInput" accept=".log" multiple style="display:none">
+                <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <button id="btnSingle" class="btn-action" style="height:36px; padding:0 15px; font-size:14px;">📄
+                        导入单文件</button>
+                    <button id="btnScan" class="btn-action btn-primary"
+                        style="height:36px; padding:0 20px; font-size:14px;">📂 导入文件夹 (递归扫描)</button>
+                    <div style="color:#64748b; font-size:13px; margin-left:10px;">
+                        支持拖拽！会自动匹配同目录下的 <b>MASTER</b> 和 <b>entries.log</b>
+                    </div>
+                </div>
+
+                <div id="dashSearchGroup" style="margin-left:auto; display:none; gap:10px;">
+                    <input type="text" id="contentSearch" class="search-box" style="width:200px;"
+                        placeholder="🔍 搜索日志内容 (Deep)...">
+                    <input type="text" id="dashSearch" class="search-box" style="width:200px;"
+                        placeholder="🔍 搜索姓名、ID 或日期...">
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table id="dashTable">
+                    <thead>
+                        <tr>
+                            <th style="width:50px;">#</th>
+                            <th style="width:150px;">病人姓名 (Name)</th>
+                            <th style="width:120px;">病人 ID</th>
+                            <th style="width:140px;">操作日期</th>
+                            <th style="width:100px;">日志数</th>
+                            <th>数据源路径 (Source Path)</th>
+                            <th style="width:80px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dashBody">
+                        <tr>
+                            <td colspan="7" style="text-align:center; padding:60px; color:#94a3b8;">
+                                <div style="font-size:40px; margin-bottom:10px;">📂</div>
+                                <div>请点击上方按钮或拖入文件夹开始扫描</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Debug Console (Visible for troubleshooting) -->
+            <div
+                style="background:#1e1e1e; color:#0f0; font-family:monospace; padding:10px; font-size:11px; max-height:150px; overflow:auto; border-top:1px solid #333;">
+                <div style="font-weight:bold; margin-bottom:5px; display:flex; justify-content:space-between;">
+                    <span>📟 System Log (如果导入失败，请截图此区域)</span>
+                    <button onclick="document.getElementById('sysLog').innerHTML=''"
+                        style="font-size:10px; cursor:pointer;">Clear</button>
+                </div>
+                <div id="sysLog" style="white-space:pre-wrap;">Ready.</div>
+            </div>
         </div>
-    </div>
 
-    <div class="table-wrap">
-        <table id="dataTable">
-            <thead>
-                <tr>
-                    <th class="col-idx">#</th>
-                    <th class="col-source">完整路径 (Source Path)</th>
-                    <th class="col-time">时间</th>
-                    <th class="col-group">类型</th>
-                    <th class="col-msg">内容 (Annotation)</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                <tr><td colspan="5" style="text-align:center; padding:50px; color:#94a3b8;">请选择文件或拖入文件夹</td></tr>
-            </tbody>
-        </table>
-    </div>
+        <!-- VIEW 2: DETAIL (Log Entries) -->
+        <div id="view-detail" class="view-container" style="display:none;">
+            <div class="filter-bar" id="filterBar" style="display:none;">
+                <button id="btnBack" class="btn-action" style="margin-right:10px;">← 返回列表</button>
+                <div style="width:1px; height:20px; background:#e2e8f0; margin:0 10px;"></div>
+                <span class="filter-label">过滤:</span>
+                <div id="filterGroup" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
 
-    <div class="footer">
-        <button class="btn-page" id="btnFirst" disabled>«</button>
-        <button class="btn-page" id="btnPrev" disabled>‹</button>
-        <span class="page-info" id="pageInfo">Page 1 / 1</span>
-        <button class="btn-page" id="btnNext" disabled>›</button>
-        <button class="btn-page" id="btnLast" disabled>»</button>
-    </div>
-</div>
+                <div style="margin-left:auto; display:flex; gap:10px;">
+                    <input type="text" id="logSearch" class="search-box" placeholder="搜索日志内容...">
+                    <button id="btnCsv" class="btn-action">⬇ CSV</button>
+                    <button id="btnXls" class="btn-action btn-green">⬇ XLS</button>
+                </div>
+            </div>
 
-<script>
-    const GROUP_MAP = { 1:'PROTOCOL', 2:'EVENT', 3:'NOTE', 4:'DEBUG', 5:'SYS', 6:'PACE', 17:'RATE' };
-    const DEFAULT_HIDDEN = new Set(['SYS', 'DEBUG', 'UNK', 'IDK', 'ERROR', 'UNKNOWN']);
-    const PAGE_SIZE = 100; 
+            <div class="table-wrap">
+                <table id="dataTable">
+                    <thead>
+                        <tr>
+                            <th class="col-idx">#</th>
+                            <th class="col-time sortable" onclick="handleDetailSort('ts')">时间 (Time)</th>
+                            <th class="col-group sortable" onclick="handleDetailSort('group')">类型</th>
+                            <th class="col-msg sortable" onclick="handleDetailSort('msg')">内容 (Annotation)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- Logs go here -->
+                    </tbody>
+                </table>
+            </div>
 
-    let state = {
-        allData: [],
-        filteredData: [],
-        activeFilters: new Set(),
-        currentPage: 1,
-        isDesc: true, 
-        dateSet: new Set()
-    };
+            <div class="footer">
+                <button class="btn-page" id="btnPrev" disabled>‹</button>
+                <span class="page-info" id="pageInfo">Page 1 / 1</span>
+                <button class="btn-page" id="btnNext" disabled>›</button>
+                <button class="btn-page" id="btnLast" disabled>»</button>
+            </div>
+        </div>
 
-    const els = {
-        fileIn: document.getElementById('fileInput'),
-        folderIn: document.getElementById('folderInput'),
-        btnSingle: document.getElementById('btnSingle'),
-        btnBatch: document.getElementById('btnBatch'),
-        search: document.getElementById('searchInput'),
-        body: document.getElementById('tableBody'),
-        filterBar: document.getElementById('filterBar'),
-        filterGroup: document.getElementById('filterGroup'),
-        countBadge: document.getElementById('countBadge'),
-        fileCount: document.getElementById('fileCount'),
-        timeRange: document.getElementById('timeRange'),
-        dateDisplay: document.getElementById('dateDisplay'),
-        btnCsv: document.getElementById('btnCsv'),
-        btnXls: document.getElementById('btnXls'),
-        sortBtn: document.getElementById('sortBtn'),
-        sortLabel: document.getElementById('sortLabel'),
-        pInfo: document.getElementById('pageInfo'),
-        btnFirst: document.getElementById('btnFirst'),
-        btnLast: document.getElementById('btnLast'),
-        btnPrev: document.getElementById('btnPrev'),
-        btnNext: document.getElementById('btnNext'),
-        dropZone: document.getElementById('dropZone'),
-        dropHint: document.getElementById('dropHint')
-    };
+        <script>
+            const GROUP_MAP = { 1: 'PROTOCOL', 2: 'EVENT', 3: 'NOTE', 4: 'DEBUG', 5: 'SYS', 6: 'PACE', 17: 'RATE' };
+            const DEFAULT_HIDDEN = new Set(['SYS', 'DEBUG', 'UNK', 'IDK', 'ERROR', 'UNKNOWN']);
+            const PAGE_SIZE = 100;
 
-    // Button Triggers
-    els.btnSingle.onclick = () => els.fileIn.click();
-    els.btnBatch.onclick = () => els.folderIn.click();
-    els.dropHint.onclick = () => els.folderIn.click(); // Clicking hint also opens folder picker
+            // --- State Management ---
+            let appData = {
+                studies: [],
+                activeStudy: null,
+                dashFilter: "",
+                contentFilter: "", // Deep Search
+                detailRows: [],
+                detailFilterRows: [],
+                detailPage: 1,
+                activeLogFilters: new Set(['PROTOCOL', 'EVENT', 'NOTE', 'PACE', 'RATE']),
+                logSearch: "",
+                detailSort: { key: 'ts', dir: 1 }, // 1: asc, -1: desc
+                hitGroups: new Set()
+            };
 
-    // File Input Handlers
-    els.fileIn.onchange = (e) => handleFiles(e.target.files, false);
-    els.folderIn.onchange = (e) => handleFiles(e.target.files, true);
+            const els = {
+                viewDash: document.getElementById('view-dashboard'),
+                viewDetail: document.getElementById('view-detail'),
+                countBadge: document.getElementById('countBadge'),
+                navBread: document.getElementById('navBreadcrumb'),
+                navCurrent: document.getElementById('navCurrent'),
+                btnHome: document.getElementById('navHome'),
 
-    // Drag & Drop Handlers
-    els.dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        els.dropZone.classList.add('drag-over');
-    });
-    els.dropZone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        els.dropZone.classList.remove('drag-over');
-    });
-    els.dropZone.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        els.dropZone.classList.remove('drag-over');
-        
-        // Handle dropped items (Recursively!)
-        const items = e.dataTransfer.items;
-        if (items) {
-            handleDrop(items);
-        }
-    });
+                fileIn: document.getElementById('fileInput'),
+                folderIn: document.getElementById('folderInput'),
 
-    // Event Listeners for UI
-    els.search.addEventListener('input', () => { state.currentPage = 1; applySortAndFilter(); });
-    els.sortBtn.addEventListener('click', toggleSort);
-    els.btnPrev.addEventListener('click', () => changePage(-1));
-    els.btnNext.addEventListener('click', () => changePage(1));
-    els.btnFirst.addEventListener('click', () => jumpPage(1));
-    els.btnLast.addEventListener('click', () => jumpPage(999999));
-    els.btnCsv.addEventListener('click', downloadCSV);
-    els.btnXls.addEventListener('click', downloadXLS);
+                dropZone: document.getElementById('dashDropZone'),
+                btnSingle: document.getElementById('btnSingle'),
+                btnScan: document.getElementById('btnScan'),
+                dashSearch: document.getElementById('dashSearch'),
+                contentSearch: document.getElementById('contentSearch'), // New
+                dashBody: document.getElementById('dashBody'),
+                // Stats
+                statPatientCount: document.getElementById('statPatientCount'),
+                statTimeRange: document.getElementById('statTimeRange'),
 
-    // --- Core Logic ---
+                logBody: document.getElementById('tableBody'),
+                btnBack: document.getElementById('btnBack'),
+                filterBar: document.getElementById('filterBar'),
+                filterGroup: document.getElementById('filterGroup'),
+                logSearch: document.getElementById('logSearch'),
+                btnPagePrev: document.getElementById('btnPrev'),
+                btnPageNext: document.getElementById('btnNext'),
+                pageInfo: document.getElementById('pageInfo'),
+                btnCsv: document.getElementById('btnCsv'),
+                btnXls: document.getElementById('btnXls')
+            };
 
-    // 1. 处理拖拽 (递归)
-    async function handleDrop(dataTransferItems) {
-        els.body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px;">正在深度扫描文件夹，请稍候...</td></tr>`;
-        
-        let fileEntries = [];
-        // 获取所有 Entry
-        let queue = [];
-        for (let i = 0; i < dataTransferItems.length; i++) {
-            let item = dataTransferItems[i].webkitGetAsEntry();
-            if (item) queue.push(item);
-        }
+            // --- Event Listeners ---
+            if (els.btnSingle) els.btnSingle.onclick = () => els.fileIn.click();
+            els.btnScan.onclick = () => els.folderIn.click();
+            els.btnHome.onclick = () => switchView('dash');
+            els.btnBack.onclick = () => switchView('dash');
 
-        // 递归读取
-        let foundFiles = [];
-        while (queue.length > 0) {
-            let entry = queue.shift();
-            if (entry.isFile) {
-                if (entry.name.toLowerCase() === 'entries.log') {
-                    // 需要将 Entry 转为 File 对象
-                    const file = await new Promise(resolve => entry.file(resolve));
-                    // 手动修补 fullPath 属性以便显示来源
-                    file._customPath = entry.fullPath.substring(1); // remove leading slash
-                    foundFiles.push(file);
-                }
-            } else if (entry.isDirectory) {
-                let reader = entry.createReader();
-                // readEntries 可能不会一次返回所有，需要循环读取直到空
-                let readEntriesBatch = async () => {
-                    return new Promise(resolve => reader.readEntries(resolve));
+            // Debounce Helper
+            function debounce(func, wait) {
+                let timeout;
+                return function (...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
                 };
-                
-                let childEntries = [];
-                let batch = await readEntriesBatch();
-                while(batch.length > 0) {
-                    childEntries.push(...batch);
-                    batch = await readEntriesBatch();
-                }
-                
-                queue.push(...childEntries);
             }
-        }
 
-        processValidFiles(foundFiles);
-    }
+            // Safety check for filter bar elements before binding
+            if (els.logSearch) {
+                els.logSearch.addEventListener('input', (e) => {
+                    appData.logSearch = e.target.value.toLowerCase();
+                    appData.detailPage = 1;
+                    applyDetailFilters();
+                });
+            }
 
-    // 2. 处理 Input 选择
-    async function handleFiles(fileList, isBatch) {
-        if (!fileList || fileList.length === 0) return;
+            if (els.btnPagePrev) els.btnPagePrev.onclick = () => changeLogPage(-1);
+            if (els.btnPageNext) els.btnPageNext.onclick = () => changeLogPage(1);
+            if (els.btnCsv) els.btnCsv.onclick = downloadCurrentLog;
+            if (els.btnXls) els.btnXls.onclick = downloadCurrentXls;
 
-        let validFiles = [];
-        if (isBatch) {
-            // input webkitdirectory 已经返回了扁平化的所有文件
-            validFiles = Array.from(fileList).filter(f => f.name.toLowerCase() === 'entries.log');
-        } else {
-            validFiles = Array.from(fileList);
-        }
+            els.fileIn.onchange = (e) => handleFiles(e.target.files);
+            els.folderIn.onchange = (e) => handleFiles(e.target.files);
 
-        processValidFiles(validFiles);
-    }
+            if (els.dashSearch) {
+                els.dashSearch.addEventListener('input', (e) => {
+                    appData.dashFilter = e.target.value.toLowerCase();
+                    renderDashboard();
+                });
+            }
 
-    // 3. 统一处理文件解析
-    async function processValidFiles(validFiles) {
-        if (validFiles.length === 0) {
-            alert("未找到 entries.log 文件");
-            els.body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px; color:#94a3b8;">请选择文件或拖入文件夹</td></tr>`;
-            return;
-        }
+            if (els.contentSearch) {
+                els.contentSearch.addEventListener('input', debounce((e) => {
+                    appData.contentFilter = e.target.value.toLowerCase();
+                    renderDashboard();
+                }, 300));
+            }
 
-        els.body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px;">正在解析 ${validFiles.length} 个文件...</td></tr>`;
-        
-        state.allData = [];
-        state.dateSet.clear();
-        let globalIdx = 1;
+            // Drag & Drop
+            if (els.dropZone) {
+                els.dropZone.addEventListener('dragover', e => { e.preventDefault(); els.dropZone.style.background = '#eef2ff'; });
+                els.dropZone.addEventListener('dragleave', e => { e.preventDefault(); els.dropZone.style.background = ''; });
+                els.dropZone.addEventListener('drop', async e => {
+                    e.preventDefault();
+                    els.dropZone.style.background = '';
+                    if (e.dataTransfer.items) scanItems(e.dataTransfer.items);
+                });
+            }
 
-        const promises = validFiles.map(file => readFileAndParse(file));
-        const results = await Promise.all(promises);
-
-        results.forEach(res => {
-            if (res.date) state.dateSet.add(res.date);
-            res.rows.forEach(r => {
-                r.idx = globalIdx++;
-                state.allData.push(r);
-            });
-        });
-
-        els.fileCount.innerText = validFiles.length;
-        els.countBadge.innerText = state.allData.length;
-        updateDateDisplay();
-
-        els.search.disabled = false;
-        els.btnCsv.disabled = false;
-        els.btnXls.disabled = false;
-
-        updateTimeRange();
-        generateFilters();
-        applySortAndFilter();
-    }
-
-    function updateDateDisplay() {
-        const dates = Array.from(state.dateSet).sort();
-        if (dates.length === 0) {
-            els.dateDisplay.innerText = "-";
-        } else if (dates.length === 1) {
-            els.dateDisplay.innerText = dates[0];
-        } else {
-            els.dateDisplay.innerText = `${dates[0]} ~ ${dates[dates.length - 1]}`;
-        }
-    }
-
-    function readFileAndParse(file) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                // Determine Source Path
-                let sourcePath = file.name;
-                
-                // Priority 1: Drag & Drop Custom Path
-                if (file._customPath) {
-                    sourcePath = file._customPath;
-                } 
-                // Priority 2: Webkit Relative Path (Input Folder)
-                else if (file.webkitRelativePath) {
-                    sourcePath = file.webkitRelativePath;
+            // --- Logger Helper ---
+            function log(msg) {
+                console.log(msg);
+                let el = document.getElementById('sysLog');
+                if (el) {
+                    el.innerText += `\n[${new Date().toLocaleTimeString()}] ${msg}`;
+                    el.scrollTop = el.scrollHeight;
                 }
-                
-                // Cleanup: remove filename from path to show just the folder structure if possible, 
-                // OR keep it full. Let's keep it full but maybe strip the filename if it is entries.log to save space?
-                // Request said "Full Relative Path". 
-                // Let's remove the '/entries.log' suffix for cleaner display if it exists
-                if (sourcePath.toLowerCase().endsWith('entries.log')) {
-                    sourcePath = sourcePath.substring(0, sourcePath.length - 11); // remove entries.log
-                    if (sourcePath.endsWith('/')) sourcePath = sourcePath.slice(0, -1);
+            }
+
+            // --- Toast Helper ---
+            function showToast(msg, icon = "💡") {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+                container.appendChild(toast);
+                setTimeout(() => toast.remove(), 3100);
+            }
+
+            // --- Core: Scanning Logic (V3 Recursive Flattening) ---
+            async function scanItems(items) {
+                log(`Scan started. Items detected: ${items.length}`);
+                setDashLoading(true, "Scanning & Flattening files...");
+
+                let allFiles = []; // { file: File, path: string }
+
+                try {
+                    // Helper to recursively read entries
+                    async function traverseEntry(entry, pathSoFar) {
+                        if (entry.isFile) {
+                            try {
+                                let f = await new Promise((r, j) => entry.file(r, j));
+                                allFiles.push({ file: f, path: pathSoFar + f.name });
+                            } catch (e) { log(`Read Key Error: ${e.message}`); }
+                        } else if (entry.isDirectory) {
+                            let reader = entry.createReader();
+                            let entries = [];
+                            let read = () => new Promise(r => reader.readEntries(r));
+                            let batch;
+                            do {
+                                batch = await read();
+                                entries = entries.concat(batch);
+                            } while (batch.length > 0);
+
+                            for (let child of entries) {
+                                await traverseEntry(child, pathSoFar + entry.name + "/");
+                            }
+                        }
+                    }
+
+                    // 1. Unpack Inputs
+                    for (let i = 0; i < items.length; i++) {
+                        let item = items[i];
+                        // A. Webkit Entry
+                        if (item.webkitGetAsEntry) {
+                            let entry = item.webkitGetAsEntry();
+                            if (entry) await traverseEntry(entry, "");
+                        }
+                        // B. Raw File (Input Select)
+                        else if (item instanceof File) {
+                            let p = item.webkitRelativePath || item.name;
+                            allFiles.push({ file: item, path: p });
+                        }
+                        // C. Fallback
+                        else if (item.kind === 'file') {
+                            let f = item.getAsFile();
+                            if (f) allFiles.push({ file: f, path: f.name });
+                        }
+                    }
+
+                } catch (e) {
+                    log(`Critical Scan Error: ${e.message}`);
                 }
 
-                const result = parseBuffer(e.target.result, file.size, sourcePath || "Root");
-                resolve(result);
-            };
-            reader.readAsArrayBuffer(file);
-        });
-    }
+                log(`Flattened to ${allFiles.length} files. Grouping...`);
 
-    function parseBuffer(buffer, fileSize, sourceName) {
-        const view = new DataView(buffer);
-        const rows = [];
-        let detectedDate = null;
-        
-        let version = 'x64';
-        let headerLen = 36;
-        let lineSize = 220;
+                let fileMap = new Map(); // "folderKey" -> { entries, master }
 
-        if ((fileSize - 32) % 216 === 0) {
-            version = 'x32';
-            headerLen = 32;
-            lineSize = 216;
-        }
+                for (let obj of allFiles) {
+                    let name = obj.file.name.toLowerCase();
+                    let fullPath = obj.path;
 
-        const decoder = new TextDecoder('iso-8859-1');
+                    // Case 1: Single Log
+                    if (name.endsWith('.log') && fullPath === name) {
+                        let key = "Single_" + name + "_" + Math.random();
+                        fileMap.set(key, { entries: obj.file, path: "SingleFile" });
+                        continue;
+                    }
 
-        for(let ptr = headerLen; ptr < fileSize; ptr += lineSize) {
-            if(ptr + lineSize > fileSize) break;
+                    // Case 2: Folder Structure
+                    if (name === 'entries.log' || name === 'master') {
+                        // "A/B/entries.log" -> "A/B"
+                        let folderPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
+                        if (!folderPath) folderPath = "Root"; // Should not happen often if from folder
 
-            let row = {
-                source: sourceName,
-                rawTs: 0,
-                timeStr: 'INVALID',
-                group: 'UNK',
-                msg: '',
-                isError: false,
-                searchStr: ''
-            };
+                        if (!fileMap.has(folderPath)) fileMap.set(folderPath, {});
 
-            try {
-                const gid = view.getUint16(ptr, true);
-                row.group = GROUP_MAP[gid] || `UNK(${gid})`;
-
-                let ts = 0;
-                if (version === 'x64') {
-                    ts = Number(view.getBigUint64(ptr + 10, true));
-                } else {
-                    ts = view.getUint32(ptr + 10, true) * 1000;
-                }
-                row.rawTs = ts;
-                
-                if (ts > 0 && ts < 4102444800000) { 
-                    const dateObj = new Date(ts + (8 * 3600 * 1000));
-                    if (!isNaN(dateObj.getTime())) {
-                        row.timeStr = dateObj.toISOString().substring(11, 19);
-                        if (!detectedDate) detectedDate = dateObj.toISOString().substring(0, 10);
+                        let group = fileMap.get(folderPath);
+                        group.path = folderPath;
+                        if (name === 'master') group.master = obj.file;
+                        else group.entries = obj.file;
                     }
                 }
 
-                const textOffset = version === 'x64' ? 18 : 14;
-                const textLen = version === 'x64' ? 176 : 178;
-                const textBytes = new Uint8Array(buffer, ptr + textOffset, textLen);
-                row.msg = decoder.decode(textBytes).replace(/\x00/g, '').trim();
+                log(`Found ${fileMap.size} potential study groups.`);
 
-            } catch (err) {
-                row.isError = true;
-                row.group = 'ERROR';
-                row.msg = `Err: ${err.message}`;
+                appData.studies = [];
+                let filesUsedCount = 0;
+                for (let [key, group] of fileMap) {
+                    if (group.entries) {
+                        try {
+                            let study = await parseStudy(group.path || key, group.entries, group.master);
+                            appData.studies.push(study);
+                            // Count actual files consumed
+                            if (group.entries) filesUsedCount++;
+                            if (group.master) filesUsedCount++;
+                        } catch (e) { log(`Parse error ${key}: ${e.message}`); }
+                    }
+                }
+
+                log(`Successfully parsed ${appData.studies.length} studies.`);
+
+                appData.studies.sort((a, b) => b.ts - a.ts);
+                setDashLoading(false);
+                renderDashboard();
+
+                // Show detailed Toast summary
+                if (appData.studies.length > 0) {
+                    showToast(`完成！解析到 ${appData.studies.length} 个患者日志，共处理 ${filesUsedCount} 个有效文件。`, "✅");
+                }
+
+                // Feature: Show Search ONLY after import
+                let searchGroup = document.getElementById('dashSearchGroup');
+                if (searchGroup) {
+                    searchGroup.style.display = (appData.studies.length > 0) ? 'flex' : 'none';
+                }
+
+                if (appData.studies.length === 0) {
+                    alert("没有找到符合条件的日志文件。\nSee Debug Log at bottom.");
+                }
             }
 
-            row.searchStr = `${row.source} ${row.timeStr} ${row.group} ${row.msg}`.toLowerCase();
-            rows.push(row);
-        }
-        return { rows: rows, date: detectedDate };
-    }
+            async function handleFiles(fileList) {
+                if (!fileList) return;
+                // Direct pass for Files, scanItems handles both Entries and Files
+                scanItems(Array.from(fileList));
+            }
 
-    function generateFilters() {
-        const groups = new Set(state.allData.map(d => d.group));
-        state.activeFilters.clear();
-        
-        els.filterGroup.innerHTML = '';
-        const sortedGroups = Array.from(groups).sort();
+            // --- Core: Parsers ---
+            async function parseStudy(path, logFile, masterFile) {
+                let study = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    path: path,
+                    name: "Unknown",
+                    pid: "-",
+                    date: "-",
+                    ts: 0,
+                    logFile: logFile,
+                    rows: []
+                };
 
-        sortedGroups.forEach(g => {
-            const isHidden = Array.from(DEFAULT_HIDDEN).some(keyword => g.toUpperCase().includes(keyword));
-            const isChecked = !isHidden;
-            if (isChecked) state.activeFilters.add(g);
-
-            const label = document.createElement('label');
-            label.className = `checkbox-wrapper ${isChecked ? 'active' : 'inactive'}`;
-            label.innerHTML = `<input type="checkbox" value="${g}" ${isChecked ? 'checked' : ''}><span>${g}</span>`;
-            
-            label.querySelector('input').addEventListener('change', (e) => {
-                if(e.target.checked) {
-                    state.activeFilters.add(g);
-                    label.classList.remove('inactive');
-                    label.classList.add('active');
-                } else {
-                    state.activeFilters.delete(g);
-                    label.classList.remove('active');
-                    label.classList.add('inactive');
+                if (masterFile) {
+                    try {
+                        let buf = await masterFile.arrayBuffer();
+                        let info = parseMaster(buf);
+                        if (info.name) study.name = info.name;
+                        if (info.id) study.pid = info.id;
+                    } catch (e) { }
                 }
-                state.currentPage = 1;
-                applySortAndFilter();
-            });
-            els.filterGroup.appendChild(label);
-        });
-        
-        els.filterBar.style.display = 'flex';
-    }
 
-    function applySortAndFilter() {
-        const q = els.search.value.toLowerCase();
-        let temp = state.allData.filter(d => state.activeFilters.has(d.group));
-        if (q) temp = temp.filter(d => d.searchStr.includes(q));
+                try {
+                    let buf = await logFile.arrayBuffer();
+                    let res = parseLogBuffer(buf);
+                    study.rows = res.rows;
+                    if (res.date) {
+                        study.date = res.date;
+                        study.ts = new Date(res.date).getTime();
+                    }
+                } catch (e) { }
 
-        state.filteredData = [...temp].sort((a, b) => state.isDesc ? (b.rawTs - a.rawTs) : (a.rawTs - b.rawTs));
-        state.currentPage = 1;
-        render();
-    }
+                return study;
+            }
 
-    function render() {
-        const start = (state.currentPage - 1) * PAGE_SIZE;
-        const end = start + PAGE_SIZE;
-        const pageData = state.filteredData.slice(start, end);
-        const maxPage = Math.ceil(state.filteredData.length / PAGE_SIZE) || 1;
+            function parseMaster(buffer) {
+                if (buffer.byteLength < 0x4F) return {};
+                let nameBytes = new Uint8Array(buffer, 0x02, 64);
+                let name = "";
+                for (let i = 0; i < nameBytes.length; i++) {
+                    if (nameBytes[i] === 0) break;
+                    name += String.fromCharCode(nameBytes[i]);
+                }
+                let idBytes = new Uint8Array(buffer, 0x43, 16);
+                let pid = "";
+                for (let i = 0; i < idBytes.length; i++) {
+                    if (idBytes[i] === 0) break;
+                    pid += String.fromCharCode(idBytes[i]);
+                }
+                return { name: name.trim(), id: pid.trim() };
+            }
 
-        if (pageData.length === 0) {
-            els.body.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:#94a3b8;">无匹配数据</td></tr>';
-        } else {
-            els.body.innerHTML = pageData.map(d => `
-                <tr class="${d.isError ? 'row-error' : ''}">
-                    <td class="col-idx">${d.idx}</td>
-                    <td class="col-source" title="${d.source}">${d.source}</td>
-                    <td class="col-time">${d.timeStr}</td>
-                    <td class="col-group"><span class="tag tag-${d.group.split('(')[0]}">${d.group}</span></td>
-                    <td class="col-msg">${d.msg}</td>
-                </tr>
-            `).join('');
-        }
+            function parseLogBuffer(buffer) {
+                const view = new DataView(buffer);
+                const rows = [];
+                let detectedDate = null;
+                let fileSize = buffer.byteLength;
 
-        els.pInfo.innerText = `Page ${state.currentPage} / ${maxPage}`;
-        els.countBadge.innerText = state.filteredData.length;
-        els.btnPrev.disabled = state.currentPage === 1;
-        els.btnFirst.disabled = state.currentPage === 1;
-        els.btnNext.disabled = state.currentPage === maxPage;
-        els.btnLast.disabled = state.currentPage === maxPage;
-    }
+                const V_x64 = { head: 36, line: 220, tsOff: 10, txtOff: 18, txtLen: 176 };
+                const V_x32 = { head: 32, line: 216, tsOff: 10, txtOff: 14, txtLen: 178 };
+                let spec = V_x64;
 
-    function updateTimeRange() {
-        if (state.allData.length > 0) els.timeRange.innerText = "Ready";
-    }
+                if ((fileSize - 36) % 220 === 0) spec = V_x64;
+                else if ((fileSize - 32) % 216 === 0) spec = V_x32;
 
-    function toggleSort() { state.isDesc = !state.isDesc; els.sortLabel.innerText = state.isDesc ? "最新优先 (▼)" : "最早优先 (▲)"; applySortAndFilter(); }
-    function changePage(d) { jumpPage(state.currentPage + d); }
-    function jumpPage(p) { const max = Math.ceil(state.filteredData.length / PAGE_SIZE)||1; if(p<1)p=1; if(p>max)p=max; state.currentPage=p; render(); }
+                const decoder = new TextDecoder('iso-8859-1');
 
-    function downloadCSV() {
-        if (!state.filteredData.length) return;
-        let csv = "\uFEFFIndex,Source,Time,Group,Annotation\n";
-        state.filteredData.forEach(r => csv += `${r.idx},${r.source},${r.timeStr},${r.group},"${r.msg.replace(/"/g, '""')}"\n`);
-        triggerDL(csv, 'workmate_log.csv', 'text/csv');
-    }
+                for (let ptr = spec.head; ptr < fileSize; ptr += spec.line) {
+                    if (ptr + spec.line > fileSize) break;
 
-    function downloadXLS() {
-        if (!state.filteredData.length) return;
-        let rows = state.filteredData.map(d => `<tr><td>${d.idx}</td><td>${d.source}</td><td>${d.timeStr}</td><td>${d.group}</td><td>${d.msg}</td></tr>`).join('');
-        let tpl = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1"><thead><tr style="background:#ddd;"><th>Index</th><th>Source</th><th>Time</th><th>Group</th><th>Annotation</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
-        triggerDL(tpl, 'workmate_log.xls', 'application/vnd.ms-excel');
-    }
+                    let row = { ts: 0, timeStr: '', group: 'UNK', msg: '' };
 
-    function triggerDL(content, name, mime) {
-        const url = URL.createObjectURL(new Blob([content], { type: `${mime};charset=utf-8;` }));
-        const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    }
-</script>
+                    try {
+                        const gid = view.getUint16(ptr, true);
+                        row.group = GROUP_MAP[gid] || `UNK(${gid})`;
 
+                        let ts = (spec === V_x64) ? Number(view.getBigUint64(ptr + spec.tsOff, true)) : view.getUint32(ptr + spec.tsOff, true) * 1000;
+                        row.ts = ts;
+
+                        if (ts > 0 && ts < 4102444800000) {
+                            const d = new Date(ts + (8 * 3600 * 1000));
+                            row.timeStr = d.toISOString().substring(11, 19);
+                            if (!detectedDate) detectedDate = d.toISOString().substring(0, 10);
+                        }
+
+                        const textBytes = new Uint8Array(buffer, ptr + spec.txtOff, spec.txtLen);
+                        row.msg = decoder.decode(textBytes).replace(/\x00/g, '').trim();
+
+                    } catch (err) { }
+                    rows.push(row);
+                }
+                return { rows: rows, date: detectedDate };
+            }
+
+            // --- UI Logic ---
+            function renderDashboard() {
+                let list = appData.studies;
+
+                // 1. Metadata Filter
+                if (appData.dashFilter) {
+                    let q = appData.dashFilter;
+                    list = list.filter(s =>
+                        s.name.toLowerCase().includes(q) ||
+                        s.pid.toLowerCase().includes(q) ||
+                        s.date.includes(q)
+                    );
+                }
+
+                // 2. Deep Content Filter (New)
+                if (appData.contentFilter) {
+                    let q = appData.contentFilter;
+                    setDashLoading(true, "Searching content..."); // Show loading state briefly
+                    // This is synchronous but let's hope it's fast enough. 
+                    // For truly large datasets, this should be chunked/async, but keeping simple for now.
+                    list = list.filter(s => {
+                        // Check if ANY row matches
+                        return s.rows.some(r => r.msg.toLowerCase().includes(q));
+                    });
+                }
+
+                // Update Top Stats
+                if (els.statPatientCount) els.statPatientCount.innerText = list.length;
+                if (els.countBadge) els.countBadge.innerText = list.length;
+
+                if (els.statTimeRange) {
+                    if (list.length > 0) {
+                        // Find Min/Max Date
+                        // Dates are strings "YYYY-MM-DD" or "-"
+                        let validDates = list.map(s => s.date).filter(d => d !== '-' && d.length >= 10);
+                        if (validDates.length > 0) {
+                            validDates.sort();
+                            let min = validDates[0];
+                            let max = validDates[validDates.length - 1];
+                            els.statTimeRange.innerText = (min === max) ? min : `${min} ~ ${max}`;
+                        } else {
+                            els.statTimeRange.innerText = "-";
+                        }
+                    } else {
+                        els.statTimeRange.innerText = "-";
+                    }
+                }
+
+                els.dashBody.innerHTML = list.map((s, i) => {
+                    let matchInfo = "";
+                    let displayCount = s.rows.length;
+
+                    // Enhancement: Show match count if filtering by content
+                    if (appData.contentFilter) {
+                        let q = appData.contentFilter;
+                        // IMPORTANT: Count ALL matches (including UNK/SYS) to avoid missing data
+                        let matchCount = s.rows.filter(r => r.msg.toLowerCase().includes(q)).length;
+                        matchInfo = `<div style="font-size:11px; color:#ef4444; font-weight:bold;">包含 ${matchCount} 条匹配</div>`;
+                    }
+
+                    return `
+            <tr style="cursor:pointer;" onclick="loadStudyDetail('${s.id}')">
+                <td>${i + 1}</td>
+                <td style="font-weight:600; color:#0f172a;">${s.name}</td>
+                <td style="font-family:monospace;">${s.pid}</td>
+                <td>${s.date}</td>
+                <td>
+                    <span class="badge-count">${displayCount}</span>
+                    ${matchInfo}
+                </td>
+                <td style="color:#64748b; font-size:12px;">${s.path}</td>
+                <td>
+                    <button class="btn-action btn-primary"
+                            style="padding:2px 8px; font-size:12px;"
+                            onclick="event.stopPropagation(); loadStudyDetail('${s.id}');">
+                        查看
+                    </button>
+                </td>
+            </tr>
+        `;
+                }).join('') || `<tr><td colspan="7" style="text-align:center; padding:30px;">无匹配记录</td></tr>`;
+            }
+
+            function setDashLoading(isLoading, msg = "") {
+                if (isLoading) {
+                    els.dashBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:50px;">
+                <div style="font-weight:bold; color:#3b82f6;">⏳ 处理中... (请查看控制台如有错误)</div>
+                <div style="font-size:12px; color:#64748b;">${msg}</div>
+            </td></tr>`;
+                }
+            }
+
+            window.loadStudyDetail = function (id) {
+                console.log("Attempting to load study:", id);
+                try {
+                    let study = appData.studies.find(s => s.id === id);
+                    if (!study) {
+                        console.error("Study not found for ID:", id);
+                        return;
+                    }
+
+                    appData.activeStudy = study;
+                    appData.detailRows = study.rows;
+
+                    if (els.navBread) els.navBread.style.display = 'flex';
+                    if (els.navCurrent) els.navCurrent.innerText = `${study.name} (${study.date})`;
+
+                    // Reset filters for new study
+                    appData.activeLogFilters = new Set();
+                    appData.detailSort = { key: 'ts', dir: 1 }; // Reset to default sort
+                    // Initial activation based on defaults (not in hidden list)
+                    study.rows.forEach(r => {
+                        if (!DEFAULT_HIDDEN.has(r.group)) appData.activeLogFilters.add(r.group);
+                    });
+
+                    // Feature: Pass-through Deep Search to Detail View
+                    appData.hitGroups = new Set(); // Reset hits
+                    if (appData.contentFilter) {
+                        let q = appData.contentFilter;
+                        appData.logSearch = q;
+                        if (els.logSearch) els.logSearch.value = q;
+
+                        // NEW LOGIC: If a group is hidden but contains search matches, force-show it
+                        study.rows.forEach(r => {
+                            if (r.msg.toLowerCase().includes(q)) {
+                                if (!appData.activeLogFilters.has(r.group)) {
+                                    appData.activeLogFilters.add(r.group);
+                                    appData.hitGroups.add(r.group);
+                                }
+                            }
+                        });
+
+                        if (appData.hitGroups.size > 0) {
+                            showToast(`搜索关键词命中并展开了隐藏分组: ${Array.from(appData.hitGroups).join(', ')}`, "🔎");
+                        }
+                    } else {
+                        appData.logSearch = "";
+                        if (els.logSearch) els.logSearch.value = "";
+                    }
+
+                    renderFilterBar();
+                    switchView('detail');
+                    appData.detailPage = 1;
+                    applyDetailFilters();
+                } catch (e) {
+                    console.error("Error loading detail:", e);
+                    alert("加载详情失败: " + e.message);
+                }
+            };
+
+            function switchView(mode) {
+                if (mode === 'dash') {
+                    els.viewDash.style.display = 'flex'; // Fix: Use flex to maintain layout
+                    els.viewDetail.style.display = 'none';
+                    if (els.navBread) els.navBread.style.display = 'none';
+                } else {
+                    els.viewDash.style.display = 'none';
+                    els.viewDetail.style.display = 'flex'; // Fix: Use flex to maintain layout
+                }
+            }
+
+
+            function renderFilterBar() {
+                let groups = new Set(appData.detailRows.map(r => r.group));
+                if (els.filterGroup) els.filterGroup.innerHTML = "";
+
+                groups.forEach(g => {
+                    let isChecked = appData.activeLogFilters.has(g);
+                    let isHit = appData.hitGroups && appData.hitGroups.has(g);
+
+                    let label = document.createElement('label');
+                    label.className = `checkbox-wrapper ${isChecked ? 'active' : ''} ${isHit ? 'hit' : ''}`;
+                    label.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''}> ${g}${isHit ? ' (Match)' : ''}`;
+                    label.querySelector('input').onchange = (e) => {
+                        if (e.target.checked) {
+                            appData.activeLogFilters.add(g);
+                            label.classList.add('active');
+                        } else {
+                            appData.activeLogFilters.delete(g);
+                            label.classList.remove('active');
+                        }
+                        appData.detailPage = 1;
+                        applyDetailFilters();
+                    };
+                    if (els.filterGroup) els.filterGroup.appendChild(label);
+                });
+                if (els.filterBar) els.filterBar.style.display = 'flex';
+            }
+
+            function applyDetailFilters() {
+                let q = appData.logSearch;
+                let filtered = appData.detailRows.filter(r => {
+                    if (!appData.activeLogFilters.has(r.group)) return false;
+                    if (q && !r.msg.toLowerCase().includes(q)) return false;
+                    return true;
+                });
+
+                // Apply Sorting
+                const { key, dir } = appData.detailSort;
+                filtered.sort((a, b) => {
+                    let valA = a[key];
+                    let valB = b[key];
+                    if (typeof valA === 'string') {
+                        return valA.localeCompare(valB) * dir;
+                    }
+                    return (valA - valB) * dir;
+                });
+
+                appData.detailFilterRows = filtered;
+                updateSortUI();
+                renderLogTable();
+            }
+
+            function handleDetailSort(key) {
+                if (appData.detailSort.key === key) {
+                    appData.detailSort.dir *= -1;
+                } else {
+                    appData.detailSort.key = key;
+                    appData.detailSort.dir = 1;
+                }
+                applyDetailFilters();
+            }
+
+            function updateSortUI() {
+                document.querySelectorAll('th.sortable').forEach(th => {
+                    th.classList.remove('asc', 'desc');
+                });
+                const { key, dir } = appData.detailSort;
+                let colClass = (key === 'ts') ? 'col-time' : (key === 'group' ? 'col-group' : 'col-msg');
+                let target = document.querySelector(`th.${colClass}`);
+                if (target) {
+                    target.classList.add(dir === 1 ? 'asc' : 'desc');
+                }
+            }
+
+            function renderLogTable() {
+                let start = (appData.detailPage - 1) * PAGE_SIZE;
+                let pageData = appData.detailFilterRows.slice(start, start + PAGE_SIZE);
+                let totalPages = Math.ceil(appData.detailFilterRows.length / PAGE_SIZE) || 1;
+
+                if (els.pageInfo) els.pageInfo.innerText = `Page ${appData.detailPage} / ${totalPages} (Total: ${appData.detailFilterRows.length})`;
+                if (els.countBadge) els.countBadge.innerText = appData.detailFilterRows.length;
+
+                els.logBody.innerHTML = pageData.map((r, i) => `
+            <tr>
+                <td class="col-idx">${start + i + 1}</td>
+                <td class="col-time">${r.timeStr}</td>
+                <td class="col-group"><span class="tag tag-${r.group}">${r.group}</span></td>
+                <td class="col-msg">${r.msg}</td>
+            </tr>
+        `).join('') || `<tr><td colspan="4" style="text-align:center; padding:30px;">无日志显示</td></tr>`;
+
+                if (els.btnPagePrev) els.btnPagePrev.disabled = appData.detailPage <= 1;
+                if (els.btnPageNext) els.btnPageNext.disabled = appData.detailPage >= totalPages;
+            }
+
+            function changeLogPage(delta) {
+                let totalPages = Math.ceil(appData.detailFilterRows.length / PAGE_SIZE) || 1;
+                let next = appData.detailPage + delta;
+                if (next >= 1 && next <= totalPages) {
+                    appData.detailPage = next;
+                    renderLogTable();
+                }
+            }
+
+            function downloadCurrentLog() {
+                if (!appData.activeStudy) return;
+                let csv = "\uFEFFTime,Group,Message\n";
+                appData.detailFilterRows.forEach(r => csv += `${r.timeStr},${r.group},"${r.msg.replace(/"/g, '""')}"\n`);
+                triggerDL(csv, `${appData.activeStudy.name}_${appData.activeStudy.date}.csv`, 'text/csv');
+            }
+
+            function downloadCurrentXls() {
+                if (!appData.activeStudy) return;
+                let rows = appData.detailFilterRows.map((r, i) => `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${r.timeStr}</td>
+                        <td>${r.group}</td>
+                        <td>${r.msg}</td>
+                    </tr>
+                `).join('');
+
+                let tpl = `
+                    <html xmlns:x="urn:schemas-microsoft-com:office:excel">
+                    <head><meta charset="UTF-8"></head>
+                    <body>
+                        <table border="1">
+                            <thead>
+                                <tr style="background:#ddd;">
+                                    <th>Index</th><th>Time</th><th>Group</th><th>Message</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </body>
+                    </html>`;
+
+                triggerDL(tpl, `${appData.activeStudy.name}_${appData.activeStudy.date}.xls`, 'application/vnd.ms-excel');
+            }
+
+            function triggerDL(content, name, mime) {
+                const blob = new Blob([content], { type: `${mime};charset=utf-8;` });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = name;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        </script>
 </body>
+
 </html>
