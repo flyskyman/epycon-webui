@@ -67,7 +67,7 @@ class HDFMarksConfig:
         ('Info', 'S256'),
     )
     DEFAULT_VALIDITY: float = 0.0
-    DEFAULT_GROUP: str = 'GROUP_1'.encode('UTF-8')
+    DEFAULT_GROUP: bytes = 'GROUP_1'.encode('UTF-8')
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class HDFAttrsConfig:
     DEFAULT_DATACACHE = 'RAW'
     DEFAULT_UNITS = 'uV'
     DEFAULT_FS: int = 2000
-    generated_by: str = 'epycon'.encode('UTF-8')
+    generated_by: bytes = 'epycon'.encode('UTF-8')
     left_idx: int = 0
     right_idx: int = 100
     
