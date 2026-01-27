@@ -2,10 +2,14 @@
   "paths": {
     "input_folder": "./examples/data",
     "output_folder": "./examples/data/out",
-    "studies": ["study01"]
+    "studies": [
+      "study01"
+    ]
   },
   "data": {
-    "data_files": ["00000000"],
+    "data_files": [
+      "00000000"
+    ],
     "output_format": "csv",
     "custom_channels": {},
     "leads": "raw",
@@ -19,7 +23,9 @@
     "filter_annotation_type": []
   },
   "global_settings": {
-    "workmate_version": "4.1",
-    "processing": {"chunk_size": 1024}
+    "workmate_version": "4.3.2",
+    "processing": {
+      "chunk_size": 1024
+    }
   }
 }

@@ -5,47 +5,123 @@
 		"paths": {
 			"type": "object",
 			"properties": {
-				"input_folder": {"type": "string"},
-				"output_folder": {"type": "string"},
-				"studies": {"type": "array", "items": {"type": "string"}}
+				"input_folder": {
+					"type": "string"
+				},
+				"output_folder": {
+					"type": "string"
+				},
+				"studies": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
 			},
-			"required": ["input_folder", "output_folder"]
+			"required": [
+				"input_folder",
+				"output_folder"
+			]
 		},
 		"data": {
 			"type": "object",
 			"properties": {
-				"data_files": {"type": "array", "items": {"type": "string"}},
-				"output_format": {"type": "string", "enum": ["csv", "h5"]},
-				"custom_channels": {"type": "object"},
-				"leads": {"type": "string", "enum": ["computed", "raw"]},
-				"channels": {"type": "array", "items": {"type": "string"}},
-				"pin_entries": {"type": "boolean"}
+				"data_files": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"output_format": {
+					"type": "string",
+					"enum": [
+						"csv",
+						"h5"
+					]
+				},
+				"custom_channels": {
+					"type": "object"
+				},
+				"leads": {
+					"type": "string",
+					"enum": [
+						"computed",
+						"raw"
+					]
+				},
+				"channels": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"pin_entries": {
+					"type": "boolean"
+				}
 			},
-			"required": ["data_files", "output_format"]
+			"required": [
+				"data_files",
+				"output_format"
+			]
 		},
 		"entries": {
 			"type": "object",
 			"properties": {
-				"convert": {"type": "boolean"},
-				"output_format": {"type": "string", "enum": ["csv", "sel"]},
-				"summary_csv": {"type": "boolean"},
-				"filter_annotation_type": {"type": "array", "items": {"type": "string"}}
+				"convert": {
+					"type": "boolean"
+				},
+				"output_format": {
+					"type": "string",
+					"enum": [
+						"csv",
+						"sel"
+					]
+				},
+				"summary_csv": {
+					"type": "boolean"
+				},
+				"filter_annotation_type": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
 			}
 		},
 		"global_settings": {
 			"type": "object",
 			"properties": {
-				"workmate_version": {"type": "string", "enum": ["4.1", "4.2", "4.3"]},
+				"workmate_version": {
+					"type": "string",
+					"enum": [
+						"4.1",
+						"4.2",
+						"4.3",
+						"4.3.2"
+					]
+				},
 				"processing": {
 					"type": "object",
 					"properties": {
-						"chunk_size": {"type": "integer", "minimum": 1}
+						"chunk_size": {
+							"type": "integer",
+							"minimum": 1
+						}
 					},
-					"required": ["chunk_size"]
+					"required": [
+						"chunk_size"
+					]
 				}
 			},
-			"required": ["workmate_version", "processing"]
+			"required": [
+				"workmate_version",
+				"processing"
+			]
 		}
 	},
-	"required": ["paths", "data", "global_settings"]
+	"required": [
+		"paths",
+		"data",
+		"global_settings"
+	]
 }
