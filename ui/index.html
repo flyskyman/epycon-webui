@@ -87,11 +87,8 @@
             background: #2563eb;
         }
     </style>
-    <script>
-        function startService() {
-            alert('请在 VS Code 中按 Ctrl+Shift+P，输入 "Tasks: Run Task"，选择 "运行 Epycon GUI" 来启动服务。\n\n服务启动后，点击 "打开编辑器" 使用工具。');
-        }
-    </script>
+    <!-- 后端服务在通过 EXE 或 `python app_gui.py` 启动时会自动运行，
+         因此无需在前端手动触发启动。保留该页面为纯入口页面。 -->
 </head>
 
 <body>
@@ -108,8 +105,7 @@
                 <div class="tool-desc">编辑 Epycon 配置，运行数据转换任务。支持 JSON 配置管理和批量处理。<br><strong>注意：</strong>使用前请先启动后端服务。
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
-                    <button onclick="startService()" class="tool-link" style="background: #10b981;">启动服务</button>
-                    <a href="/ui/editor.html" class="tool-link">打开编辑器</a>
+                    <a href="/ui/editor.html" class="tool-link" style="background: #10b981;">打开编辑器</a>
                 </div>
             </div>
 
