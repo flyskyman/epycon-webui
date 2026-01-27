@@ -162,3 +162,7 @@ cython_debug/
 
 # Examples / generated sample data (do not commit large binary/example datasets)
 examples/data/
+
+# Build/dist artifacts
+dist/
+build/
