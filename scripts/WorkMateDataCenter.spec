@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['..\app_gui.py'],
+    ['../app_gui.py'],
     pathex=[],
     binaries=[],
     datas=[('ui', 'ui'), ('config', 'config'), ('epycon', 'epycon')],
