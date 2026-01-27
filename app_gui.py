@@ -490,6 +490,17 @@ if __name__ == '__main__':
                 except Exception:
                     pass
         print("in __main__")
+        # 如果以 PyInstaller 打包为 EXE 并在 Windows 上运行，最小化控制台窗口
+        try:
+            if getattr(sys, 'frozen', False) and os.name == 'nt':
+                import ctypes
+                SW_MINIMIZE = 6
+                hWnd = ctypes.windll.kernel32.GetConsoleWindow()
+                if hWnd:
+                    ctypes.windll.user32.ShowWindow(hWnd, SW_MINIMIZE)
+        except Exception:
+            pass
+
         print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
         print("请手动打开浏览器访问: http://127.0.0.1:5000/")
         print("Running app.run...")
