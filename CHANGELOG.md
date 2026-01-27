@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- 🐛 **类型检查错误修复**: 修复 Pylance 静态类型检查 51 个错误（降至 0 个）
+  - `bins.parsebin`: 支持 `Union[bytes, bytearray]` 类型参数
+  - `Entry.group`: 支持 `Union[int, str]` 类型（映射到 GROUP_MAP 标签）
+  - `LogParser`: 所有 `Optional` 参数添加正确类型注解
+  - 添加运行时断言保护和 `BinaryIO` 类型注解
+
+### Added
+- ✅ **完整测试套件**: 新增 26 个测试用例覆盖核心功能
+  - 基础功能测试 (`test_type_fixes.py`)
+  - 边缘情况测试 (`test_edge_cases.py`)
+  - 集成测试 (`test_integration.py`)
+  - 端到端测试 (`test_end_to_end.py`)
+- 📄 **测试报告文档**: 详细测试覆盖率和验证结果 (`docs/TEST_REPORT.md`)
+
+### Technical Details
+- `bins.py`: `parsebin` 参数从 `bytearray` 改为 `Union[bytes, bytearray]`
+- `_dataclasses.py`: `Entry.group` 字段从 `int` 改为 `Union[int, str]`
+- `parsers.py`: 添加 `Optional` 类型、`BinaryIO` 注解和断言保护
+- 100% 向后兼容，无破坏性变更
+
 ## [0.0.4-alpha] - 2026-01-27
 
 ### Added
