@@ -1,5 +1,9 @@
 # WorkMate 数据处理中心
 
+![CI](https://github.com/flyskyman/epycon-webui/workflows/CI/badge.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 一个基于 epycon 的 Web UI 工具集，用于解析和转换 Abbott WorkMate 系统记录的 EP 信号数据。提供便捷的图形界面，支持数据转换、日志解析和 HDF5 预览。
 
 ## 特性
