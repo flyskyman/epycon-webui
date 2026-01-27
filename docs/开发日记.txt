@@ -86,3 +86,15 @@
 - ✅ 标签推送: v0.0.3-alpha
 - ✅ ZIP 上传: WorkMate_DataCenter-v0.0.3-alpha.zip (34.46MB)
 - ✅ 本地清理: 删除 dist/、build/ 目录和 spec 文件，释放 ~134MB 空间
+
+2026年1月27日 补记：
+- 核心：统一默认 WorkMate 设备版本为 `4.3.2`，并更新 `config`/`schema`，修正版本校验以接受 `4.3.2`。
+- UI：在 `ui/WorkMate Log Parser.html` 中更新注释（保留 V3 兼容说明并标注默认目标版本为 4.3.2）。
+- 提交管理：将今日更改按逻辑拆分为多个提交（UI/docs、config、core、gui、spec），并提交 `docs/release_notes_v0.0.4-alpha.md`。
+- 打包与发布：使用 `scripts/WorkMateDataCenter.spec` 构建 EXE（输出 `dist/WorkMateDataCenter.exe`），创建并覆盖 GitHub Release `v0.0.4-alpha`，并上传 EXE 作为资产。
+- 仓库整理：将 `examples/data/` 添加到 `.gitignore`，清理 `build/`、`dist/`、`__pycache__` 等临时文件，提交 `.gitignore` 更改。
+- 下步建议：为 CI 自动构建和发布配置 GitHub Actions；考虑为各平台添加带平台后缀的二进制资产和数字签名流程。
+
+小结：完成版本对齐、文档与 UI 注释修正、分组提交、打 tag 与覆盖 release、EXE 构建与上传，以及仓库清理，为下一阶段（CI + 功能迭代）做好准备。
+
+2026年1月27日 — 结束。
