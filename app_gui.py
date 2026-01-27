@@ -7,7 +7,7 @@ import logging
 import io
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory, make_response, render_template_string
 from flask_cors import CORS
 from glob import iglob
 import dataclasses
@@ -27,10 +27,12 @@ for path in candidates:
         sys.path.insert(0, path)
 
 def resource_path(relative_path):
+    """ 获取资源文件的绝对路径，兼容开发环境与 PyInstaller 打包环境 """
     try:
         base_path = sys._MEIPASS  # type: ignore
     except Exception:
-        base_path = os.path.abspath(".")
+        # 核心修复：使用脚本所在目录 current_dir，而不是运行时的 CWD
+        base_path = current_dir
     return os.path.join(base_path, relative_path)
 
 # ========================================================
@@ -64,6 +66,20 @@ except ImportError as e:
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
+
+# ========================================================
+# 📝 [核心] 全局日志配置 (同时输出到文件和控制台)
+# ========================================================
+LOG_PATH = os.path.join(tempfile.gettempdir(), "epycon_gui.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("epycon_web")
 
 class MemoryLogHandler(logging.Handler):
     def __init__(self):
@@ -288,10 +304,13 @@ def export_global_csv(entries, output_folder, study_id):
 # --- 核心转换逻辑 ---
 def execute_epycon_conversion(cfg):
     mem_handler = MemoryLogHandler()
-    logger = logging.getLogger("epycon_gui")
-    logger.setLevel(logging.INFO)
-    if logger.hasHandlers(): logger.handlers.clear()
-    logger.addHandler(mem_handler)
+    mem_handler.setFormatter(logging.Formatter('%(message)s')) # 内存日志只记录纯消息
+    
+    # 获取全局定义的 logger
+    conv_logger = logging.getLogger("epycon_web")
+    
+    # 临时添加内存处理器，任务结束后移除
+    conv_logger.addHandler(mem_handler)
     
     utf8_guard = UTF8EnforcedOpen()
     
@@ -301,8 +320,10 @@ def execute_epycon_conversion(cfg):
             output_folder = cfg["paths"]["output_folder"]
             
             if not input_folder or not os.path.exists(input_folder):
-                logger.error(f"❌ 输入文件夹不存在: {input_folder}")
-                return False, mem_handler.logs
+                conv_logger.error(f"❌ 输入文件夹不存在: {input_folder}")
+                res_logs = mem_handler.logs
+                conv_logger.removeHandler(mem_handler)
+                return False, res_logs
                 
             output_fmt = cfg["data"]["output_format"]
             valid_datalogs = set(cfg["data"]["data_files"])
@@ -316,8 +337,10 @@ def execute_epycon_conversion(cfg):
                     if os.path.isdir(sub_path): study_list.append(sub_path)
             
             if not study_list:
-                 logger.warning("⚠️ 未找到 log 文件。")
-                 return False, mem_handler.logs
+                 conv_logger.warning("⚠️ 未找到 log 文件。")
+                 res_logs = mem_handler.logs
+                 conv_logger.removeHandler(mem_handler)
+                 return False, res_logs
 
             processed_count = 0
             
@@ -336,7 +359,7 @@ def execute_epycon_conversion(cfg):
                 
                 if need_entries and os.path.exists(epath):
                     try:
-                        logger.info(f"🔎 读取标注: {os.path.basename(epath)}")
+                        conv_logger.info(f"🔎 读取标注: {os.path.basename(epath)}")
                         clean_path = prepare_standard_entries_file(epath) 
                         native_entries = readentries(clean_path, version=cfg["global_settings"]["workmate_version"])
                         
@@ -346,10 +369,10 @@ def execute_epycon_conversion(cfg):
                             try: os.remove(clean_path)
                             except: pass
                             
-                        logger.info(f"✅ 归一化标注: {len(all_entries_norm)} 条 (ASCII+SNR双重净化)")
+                        conv_logger.info(f"✅ 归一化标注: {len(all_entries_norm)} 条 (ASCII+SNR双重净化)")
                         export_global_csv(all_entries_norm, output_folder, study_id)
                     except Exception as e:
-                        logger.warning(f"⚠️ 读取失败: {e}")
+                        conv_logger.warning(f"⚠️ 读取失败: {e}")
 
                 # --- [Step 2] 精确对齐 ---
                 for datalog_path in logs_in_study:
@@ -357,7 +380,7 @@ def execute_epycon_conversion(cfg):
                     if valid_datalogs and datalog_id not in valid_datalogs: continue
                     
                     processed_count += 1
-                    logger.info(f"处理文件: {datalog_id}.log")
+                    conv_logger.info(f"处理文件: {datalog_id}.log")
                     
                     try:
                         log_start_sec = get_raw_log_start_seconds(datalog_path)
@@ -366,7 +389,7 @@ def execute_epycon_conversion(cfg):
                         with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"], samplesize=1024) as p:
                             header = p.get_header()
                             if header is None:
-                                logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
+                                conv_logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
                                 continue
                             fs = header.amp.sampling_freq
                             n_channels = get_safe_n_channels(header)
@@ -432,26 +455,101 @@ def execute_epycon_conversion(cfg):
                             elif file_fmt == "sel":
                                 entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
                             
-                            logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
+                            conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
 
                     except Exception as e:
-                        logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
+                        conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
                         continue
                         
-            logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
-            return True, mem_handler.logs
+            conv_logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
+            res_logs = mem_handler.logs
+            conv_logger.removeHandler(mem_handler)
+            return True, res_logs
         
     except Exception as e:
         import traceback
         err = traceback.format_exc()
-        logger.error(f"❌ 系统错误:\n{err}")
-        return False, mem_handler.logs
+        conv_logger.error(f"❌ 系统错误:\n{err}")
+        res_logs = mem_handler.logs
+        conv_logger.removeHandler(mem_handler)
+        return False, res_logs
 
 @app.route('/')
 def home():
+    """ 访问主页中心 """
     html_path = resource_path('ui/index.html')
-    with open(html_path, 'r', encoding='utf-8') as f:
-        return f.read()
+    if not os.path.exists(html_path):
+        return f"UI 首页缺失，请检查路径: {html_path}", 404
+        
+    try:
+        with open(html_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return render_template_string(content)
+    except Exception as e:
+        return f"无法加载首页: {e}", 500
+
+@app.route('/ui/<path:filename>')
+def serve_ui(filename):
+    """
+    统一处理 /ui/ 路径下的静态资产。
+    包括 HTML（自动注入导航）、JS、CSS 和图像。
+    """
+    import re
+    from flask import make_response, send_from_directory
+    
+    ui_base = resource_path('ui')
+    file_full_path = os.path.join(ui_base, filename)
+    
+    if not os.path.exists(file_full_path):
+        return f"资产未找到: {filename}", 404
+        
+    # 处理非 HTML 静态资源 (tailwind.js, vue.js 等)
+    if not filename.lower().endswith('.html'):
+        return send_from_directory(ui_base, filename)
+        
+    # 处理子页 HTML (自动注入返回主中心的按钮)
+    try:
+        with open(file_full_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        return f"读取文件失败: {e}", 500
+
+    # 仅向非 index.html 的 HTML 文件注入返回导航
+    if 'index.html' not in filename.lower():
+        nav_injection = """
+        <div id="epycon-home-nav" style="position:fixed; top:12px; right:12px; z-index:9999; opacity:0.9;">
+            <a href="/" style="background:#0f172a; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-size:13px; font-family:sans-serif; font-weight:500; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border:1px solid #334155;">
+                ← 返回数据中心
+            </a>
+        </div>
+        """
+        # 在 <body> 标签后注入
+        body_match = re.search(r'<\s*body[^>]*>', content, re.IGNORECASE | re.DOTALL)
+        if body_match:
+            end_pos = body_match.end()
+            content = content[:end_pos] + nav_injection + content[end_pos:]
+        else:
+            content = nav_injection + content
+            
+    response = make_response(content)
+    response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
+
+@app.route('/vendor/<path:filename>')
+def serve_vendor_compatibility(filename):
+    """ 
+    兼容逻辑：允许根路径下的 index.html 通过相对路径 'vendor/...' 访问资源。
+    这使得 HTML 在直接双击打开和通过 Flask 访问时都能找到 CSS/JS。
+    """
+    return send_from_directory(resource_path('ui/vendor'), filename)
+
+@app.route('/<filename>.html')
+def serve_html_compatibility(filename):
+    """
+    兼容逻辑：允许根路径下的请求重定向到 /ui/ 路径。
+    例如请求 /editor.html 会映射到 serve_ui('editor.html')
+    """
+    return serve_ui(f"{filename}.html")
 
 @app.route('/run-direct', methods=['POST'])
 def run_direct():
