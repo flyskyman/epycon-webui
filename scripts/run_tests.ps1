@@ -1,5 +1,5 @@
 # Run tests and generate coverage report
-# Usage: .\run_tests.ps1
+# Usage: .\scripts\run_tests.ps1
 
 Write-Host "`n============================================" -ForegroundColor Cyan
 Write-Host "  Run tests and generate coverage report" -ForegroundColor Cyan
