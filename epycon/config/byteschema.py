@@ -190,6 +190,7 @@ class WMx64LogSchema:
 class WMx64MasterSchema:
     """ Master file
     """
+    subject_name = 0x02, 0x43
     subject_id = 0x43, 0x4F
 
 
