@@ -21,7 +21,7 @@
 项目支持打包为独立可执行文件，无需安装 Python：
 
 1. 安装 PyInstaller：`pip install pyinstaller`
-2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon" --add-data "ui/vendor;ui/vendor"`
+2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "ui;ui" --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
 3. 生成的文件位于 `dist/WorkMateDataCenter/`
 
 注意：运行时前端第三方 bundle 已集中放置于 `ui/vendor/`，请确保在打包时将该目录一并包含（例如使用 `--add-data "ui/vendor;ui/vendor"`）。
@@ -62,18 +62,27 @@ python -m epycon
 - `app_gui.py`：Flask Web 应用，提供 GUI 接口和 HTTP API，用于本地编辑器和直接运行转换。
   - 注：`WorkMate_DataCenter.py` 已从仓库移除；请使用 `app_gui.py` 作为唯一的可执行入口。
   - 兼容说明：若需要生成名为 `WorkMateDataCenter` 的可执行文件，请使用：
-    `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
+    `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "ui;ui" --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
 - `editor.html`：HTML 前端，用于本地标注编辑。
  - `editor.html`：HTML 前端，用于本地标注编辑。依赖运行时代码请放置在 `ui/vendor/`（例如 `ui/vendor/vue.js`、`ui/vendor/tailwind.js`）。
-- `h5_preview.html`：HDF5 文件预览工具。
-- `fix_encoding.py`：编码修复脚本。
-- `WorkMate Log Parser.html`：WorkMate 日志解析器相关 HTML。
+- `ui/`：用户界面相关文件
+  - `h5_preview.html`：HDF5 文件预览工具。
+  - `WorkMate Log Parser.html`：WorkMate 日志解析器相关 HTML。
+  - `vendor/`：运行时第三方静态文件（如 Vue.js、Tailwind CSS）。
+- `scripts/`：脚本和工具
+  - `fix_encoding.py`：编码修复脚本。
+  - `WorkMateDataCenter.spec`：PyInstaller 打包配置。
+  - `generate_fake_wmx32.py`：生成假 WMx32 日志文件的脚本。
+  - `README.md`：脚本使用说明。
 - `config/`：配置文件目录
   - `config.json`：运行时配置。
   - `schema.json`：配置验证 schema。
 - `docs/`：文档目录
   - `delimiter_migration.md`：分隔符迁移指南。
   - `papers/`：相关论文和文档 PDF 存放目录。
+  - `release_notes_v0.0.3-alpha.md`：v0.0.3-alpha 版本发布说明。
+  - `WorkMate_DataCenter-v0.0.3-alpha.zip`：v0.0.3-alpha 版本可分发压缩包。
+  - `开发日记.txt`：开发过程记录。
 - `epycon/`：核心 Python 包
   - `__main__.py`：命令行批量转换入口。
   - `cli/`：命令行接口模块。
