@@ -44,3 +44,7 @@ WorkMate DataCenter v0.0.3-alpha 是首个独立可执行应用版本，提供�
 ---
 
 **For detailed changelog, see CHANGELOG.md**
+
+## Repository maintenance note
+
+- The repository previously contained a duplicate entrypoint file named `WorkMate_DataCenter.py`. That file has been removed from the canonical branch and replaced by `app_gui.py` as the single source entry. The deletion is available on branch `chore/remove-workmate-datacenter` and will be merged after review.

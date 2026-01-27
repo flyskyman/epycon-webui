@@ -16,6 +16,9 @@
 - 📝 应用文件重命名：app_gui.py → WorkMate_DataCenter.py
 - 🗑️ 清理临时文件和过时配置
 
+### Maintenance
+- ♻️ 清理：从仓库删除了重复入口 `WorkMate_DataCenter.py`，保留 `app_gui.py` 作为唯一实现（变更在分支 `chore/remove-workmate-datacenter`，待 PR 合并）。
+
 ## [0.0.2-alpha] - Previous
 
 See git history for details.
