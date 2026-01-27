@@ -37,6 +37,37 @@ python -m pytest --cov=epycon --cov-report=term-missing --cov-report=html --cov-
 
 生成的 HTML 报告位于 `htmlcov/index.html`，XML 报告为 `coverage.xml`，这些输出已被添加到 `.gitignore`。
 
+## 清理仓库临时文件
+
+在开发或 CI 运行后，可以安全地清理本地产生的临时测试产物：
+
+- 推荐（PowerShell，仓库根目录运行）：
+
+```powershell
+.\scripts\clean_repo.ps1
+```
+
+- 手动（如果不使用脚本）：
+
+```powershell
+# 删除覆盖率报告与缓存
+Remove-Item -LiteralPath htmlcov -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath coverage.xml -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath .coverage -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath .pytest_cache -Recurse -Force -ErrorAction SilentlyContinue
+# 删除仓库内的 __pycache__（跳过虚拟环境）
+Get-ChildItem -Recurse -Directory -Force | Where-Object { $_.Name -eq '__pycache__' -and $_.FullName -notlike '*\\venv\\*' -and $_.FullName -notlike '*\\.venv\\*' } | ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
+```
+
+注意：该清理不会删除虚拟环境（`venv` / `.venv`）或源码文件。若需要删除临时脚本或已合并的临时文件（例如本地 `PR_BODY.md`），请使用 `git rm <file>` 并提交，然后推送到远端：
+
+```powershell
+git rm PR_BODY.md
+git commit -m "chore: remove temporary PR body file"
+git push origin <branch>
+```
+
+
 ## 打包为可执行文件
 
 项目支持打包为独立可执行文件，无需安装 Python：
