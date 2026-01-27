@@ -405,10 +405,30 @@ class LogParser(abc.Iterator):
 
 
 def _mount_channels(darray, mappings):
+    """Mount channels from raw data array based on mappings.
+    
+    Args:
+        darray: Raw data array with shape (samples, all_channels)
+        mappings: Dict mapping channel names to source indices.
+                  Values must be lists: [index] for single ref,
+                  or [pos_ref, neg_ref] for differential.
+    
+    Returns:
+        Mounted data array with shape (samples, len(mappings))
+    
+    Raises:
+        TypeError: If mapping values are not lists/tuples
+    """
     result = np.empty((len(mappings), darray.shape[0]), dtype=darray.dtype)
 
     # Iterate through the tuples, performing the selection/summation    
     for t, source in enumerate(mappings.values()):
+        # Normalize source to list if it's a single int (common mistake)
+        if isinstance(source, int):
+            source = [source]
+        elif not isinstance(source, (list, tuple)):
+            raise TypeError(f"Mapping values must be list or tuple, got {type(source).__name__}")
+        
         if len(source) == 1:
             result[t] = darray[:, source[0]]
         else:            
@@ -568,9 +588,16 @@ def _readentries(
         timestamp = struct.unpack(fmt, barray[pointer + start_byte:pointer + end_byte])[0] / factor
 
         # retrieve text annotation
+        # Text is null-terminated, decode as latin-1 (single-byte encoding)
         start_byte, end_byte = diary.text
-        message = barray[pointer + start_byte:pointer + end_byte]
-        message = "".join([char for i in struct.unpack("<" + "B" * len(message), message) if (char:= chr(i)).isprintable()])
+        text_bytes = barray[pointer + start_byte:pointer + end_byte]
+        # Find null terminator and decode
+        null_pos = text_bytes.find(b'\x00')
+        if null_pos >= 0:
+            text_bytes = text_bytes[:null_pos]
+        message = text_bytes.decode('latin-1', errors='replace')
+        # Filter out non-printable characters (keep ASCII printable range)
+        message = "".join(c for c in message if c.isprintable() or c in ' \t')
         
         # if re.match('[\x00-\x1f\x7f]+', text):
         #     continue

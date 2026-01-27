@@ -58,8 +58,10 @@ except ImportError: pass
 # 📦 导入 Epycon
 # ========================================================
 try:
-    from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN
+    from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN, MASTER_FILENAME
     from epycon.iou import LogParser, EntryPlanter, CSVPlanter, HDFPlanter, readentries, mount_channels
+    from epycon.iou.parsers import _readmaster
+    from epycon.utils.person import Tokenize
 except ImportError as e:
     print(f"无法加载 Epycon。\n{e}")
     sys.exit(1)
@@ -326,7 +328,14 @@ def execute_epycon_conversion(cfg):
                 return False, res_logs
                 
             output_fmt = cfg["data"]["output_format"]
-            valid_datalogs = set(cfg["data"]["data_files"])
+            # 兼容 "00000000" 和 "00000000.log" 两种格式
+            valid_datalogs = set(
+                f.rstrip(".log") if f.endswith(".log") else f
+                for f in cfg["data"]["data_files"]
+            )
+            
+            # 获取 studies 过滤列表
+            valid_studies = set(cfg["paths"].get("studies", []))
             
             direct_logs = list(iglob(os.path.join(input_folder, "*.log")))
             study_list = []
@@ -334,16 +343,29 @@ def execute_epycon_conversion(cfg):
                 study_list.append(input_folder)
             else:
                 for sub_path in iglob(os.path.join(input_folder, '**')):
-                    if os.path.isdir(sub_path): study_list.append(sub_path)
+                    if os.path.isdir(sub_path):
+                        # 应用 studies 过滤
+                        study_name = os.path.basename(sub_path)
+                        if valid_studies and study_name not in valid_studies:
+                            continue
+                        study_list.append(sub_path)
             
             if not study_list:
                  conv_logger.warning("⚠️ 未找到 log 文件。")
                  res_logs = mem_handler.logs
                  conv_logger.removeHandler(mem_handler)
                  return False, res_logs
+            
+            if valid_studies:
+                conv_logger.info(f"📁 已过滤 studies: {len(study_list)} 个符合条件")
 
             processed_count = 0
             
+            # 获取配置选项
+            merge_mode = cfg["data"].get("merge_logs", False)
+            pseudonymize = cfg["global_settings"].get("pseudonymize", False)
+            credentials = cfg["global_settings"].get("credentials", {})
+
             for study_path in study_list:
                 study_id = os.path.basename(study_path)
                 logs_in_study = sorted(list(iglob(os.path.join(study_path, LOG_PATTERN))))
@@ -352,6 +374,23 @@ def execute_epycon_conversion(cfg):
                 try: os.makedirs(os.path.join(output_folder, study_id), exist_ok=True)
                 except: pass
                 
+                # --- [Step 0] 读取 MASTER 文件并处理匿名化 ---
+                try:
+                    master_info = _readmaster(os.path.join(study_path, MASTER_FILENAME))
+                except (IOError, FileNotFoundError):
+                    conv_logger.warning(f"⚠️ 未找到 MASTER 文件: {study_id}")
+                    master_info = {"id": "", "name": ""}
+                
+                if pseudonymize:
+                    tokenizer = Tokenize(8, {})
+                    subject_id = tokenizer()
+                    subject_name = ""
+                    if master_info["id"]:
+                        conv_logger.info(f"🔒 匿名化: {master_info['id']} -> {subject_id}")
+                else:
+                    subject_id = master_info["id"]
+                    subject_name = master_info["name"]
+
                 # --- [Step 1] 读取并清洗 Entries ---
                 all_entries_norm = []
                 epath = os.path.join(study_path, ENTRIES_FILENAME)
@@ -373,93 +412,245 @@ def execute_epycon_conversion(cfg):
                         export_global_csv(all_entries_norm, output_folder, study_id)
                     except Exception as e:
                         conv_logger.warning(f"⚠️ 读取失败: {e}")
+                
+                # --- [Step 1.5] 导出汇总 entries CSV (summary_csv) ---
+                if cfg["entries"].get("summary_csv", False) and all_entries_norm:
+                    try:
+                        summary_path = os.path.join(output_folder, study_id, "entries_summary.csv")
+                        entryplanter = EntryPlanter(all_entries_norm)
+                        filter_groups = cfg["entries"].get("filter_annotation_type", [])
+                        criteria = {
+                            "fids": list(valid_datalogs) if valid_datalogs else [],
+                            "groups": filter_groups if filter_groups else [],
+                        }
+                        entryplanter.savecsv(summary_path, criteria=criteria)
+                        conv_logger.info(f"📊 导出汇总标注: entries_summary.csv")
+                    except Exception as e:
+                        conv_logger.warning(f"⚠️ 汇总 CSV 导出失败: {e}")
 
-                # --- [Step 2] 精确对齐 ---
+                # --- [Step 2] 处理数据文件 ---
+                # 筛选有效的 datalog 文件
+                valid_logs = []
                 for datalog_path in logs_in_study:
                     datalog_id = os.path.basename(datalog_path).replace(".log", "")
-                    if valid_datalogs and datalog_id not in valid_datalogs: continue
+                    if valid_datalogs and datalog_id not in valid_datalogs: 
+                        continue
+                    valid_logs.append((datalog_path, datalog_id))
+                
+                if not valid_logs:
+                    continue
+                
+                # ===================== 合并模式 =====================
+                if merge_mode and output_fmt == "h5":
+                    conv_logger.info(f"📦 合并模式: 将 {len(valid_logs)} 个文件合并为单文件")
                     
-                    processed_count += 1
-                    conv_logger.info(f"处理文件: {datalog_id}.log")
-                    
-                    try:
-                        log_start_sec = get_raw_log_start_seconds(datalog_path)
-                        
-                        n_channels = 0
+                    # 收集所有文件的时间戳用于排序
+                    datalog_info = []
+                    for datalog_path, datalog_id in valid_logs:
                         with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"], samplesize=1024) as p:
                             header = p.get_header()
                             if header is None:
                                 conv_logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
                                 continue
-                            fs = header.amp.sampling_freq
-                            n_channels = get_safe_n_channels(header)
+                            datalog_info.append({
+                                'path': datalog_path,
+                                'id': datalog_id,
+                                'timestamp': header.timestamp,
+                                'header': header,
+                            })
+                    
+                    # 按时间戳排序
+                    datalog_info.sort(key=lambda x: x['timestamp'])
+                    first_timestamp = datalog_info[0]['timestamp'] if datalog_info else 0
+                    
+                    # 构建 HDF5 元数据
+                    hdf_attributes = {
+                        "subject_id": subject_id,
+                        "subject_name": subject_name,
+                        "study_id": study_id,
+                        "datalog_ids": ",".join([d['id'] for d in datalog_info]),
+                        "timestamp": first_timestamp,
+                        "datetime": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+                        "merged": True,
+                        "num_files": len(datalog_info),
+                    }
+                    if credentials:
+                        hdf_attributes.update({
+                            "author": credentials.get("author", ""),
+                            "device": credentials.get("device", ""),
+                            "owner": credentials.get("owner", ""),
+                        })
+                    
+                    merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged.h5")
+                    is_first_file = True
+                    total_samples = 0
+                    
+                    for idx, dlog_info in enumerate(datalog_info):
+                        datalog_path = dlog_info['path']
+                        datalog_id = dlog_info['id']
+                        header = dlog_info['header']
+                        fs = header.amp.sampling_freq
                         
-                        file_size = os.path.getsize(datalog_path)
-                        duration_sec = 0.0
-                        if n_channels > 0 and fs > 0:
-                            n_samples = (file_size - 32) // (n_channels * 2)
-                            duration_sec = n_samples / fs
+                        processed_count += 1
+                        conv_logger.info(f"   合并 {idx+1}/{len(datalog_info)}: {datalog_id}.log")
                         
-                        log_end_sec = log_start_sec + duration_sec
-                        
-                        target_entries_rel = [] 
-                        for e in all_entries_norm:
-                            if log_start_sec <= e.timestamp <= log_end_sec:
-                                diff_seconds = e.timestamp - log_start_sec
-                                new_e = dataclasses.replace(e)
-                                new_e.timestamp = diff_seconds
-                                target_entries_rel.append(new_e)
-
-                        # 转换波形
                         with LogParser(
                             datalog_path, 
                             version=cfg["global_settings"]["workmate_version"], 
                             samplesize=cfg["global_settings"]["processing"]["chunk_size"]
                         ) as parser:
                             if cfg["data"]["leads"] == "computed":
-                                mappings = header.channels.computed_mappings  # type: ignore
+                                mappings = header.channels.computed_mappings
                             else:
-                                mappings = header.channels.raw_mappings  # type: ignore
+                                mappings = header.channels.raw_mappings
                             if cfg["data"]["channels"]:
                                 mappings = {k:v for k,v in mappings.items() if k in cfg["data"]["channels"]}
                             column_names = list(mappings.keys())
                             
-                            out_path = os.path.join(output_folder, study_id, f"{datalog_id}.{output_fmt}")
-                            PlanterClass = CSVPlanter if output_fmt == "csv" else HDFPlanter
+                            if is_first_file:
+                                hdf_attributes["sampling_freq"] = fs
+                                hdf_attributes["num_channels"] = header.num_channels
                             
-                            with PlanterClass(out_path, column_names=column_names, sampling_freq=fs) as planter:
+                            with HDFPlanter(
+                                merged_output_path,
+                                column_names=column_names,
+                                sampling_freq=fs,
+                                factor=1000,
+                                units="mV",
+                                attributes=hdf_attributes if is_first_file else {},
+                                append=not is_first_file,
+                            ) as planter:
                                 for chunk in parser:
                                     chunk = mount_channels(chunk, mappings)
                                     planter.write(chunk)
-                                    
-                                if output_fmt == "h5" and cfg["data"]["pin_entries"] and target_entries_rel:
-                                    if isinstance(planter, HDFPlanter):
-                                        safe_pos = [int(e.timestamp * fs) for e in target_entries_rel]
-                                        safe_grp = [str(e.group) for e in target_entries_rel]
-                                        safe_msg = [str(e.message) for e in target_entries_rel]
-                                        valid = [(p,g,m) for p,g,m in zip(safe_pos, safe_grp, safe_msg) if p>=0]
-                                        if valid:
-                                            p,g,m = zip(*valid)
-                                            planter.add_marks(list(p), list(g), list(m))
+                                    total_samples += chunk.shape[0]
+                                
+                                # 第一个文件时写入所有 entries
+                                if is_first_file and cfg["data"]["pin_entries"] and all_entries_norm:
+                                    safe_pos = [int(e.timestamp * fs) for e in all_entries_norm]
+                                    safe_grp = [str(e.group) for e in all_entries_norm]
+                                    safe_msg = [str(e.message) for e in all_entries_norm]
+                                    valid = [(p,g,m) for p,g,m in zip(safe_pos, safe_grp, safe_msg) if p>=0]
+                                    if valid:
+                                        p,g,m = zip(*valid)
+                                        planter.add_marks(list(p), list(g), list(m))
+                        
+                        is_first_file = False
+                    
+                    conv_logger.info(f"   ✅ 合并完成: {merged_output_path} ({total_samples} samples)")
+                
+                else:
+                    # ===================== 常规模式 (每个文件单独输出) =====================
+                    for datalog_path, datalog_id in valid_logs:
+                        processed_count += 1
+                        conv_logger.info(f"处理文件: {datalog_id}.log")
+                        
+                        try:
+                            log_start_sec = get_raw_log_start_seconds(datalog_path)
+                            
+                            n_channels = 0
+                            with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"], samplesize=1024) as p:
+                                header = p.get_header()
+                                if header is None:
+                                    conv_logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
+                                    continue
+                                fs = header.amp.sampling_freq
+                                n_channels = get_safe_n_channels(header)
+                            
+                            file_size = os.path.getsize(datalog_path)
+                            duration_sec = 0.0
+                            if n_channels > 0 and fs > 0:
+                                n_samples = (file_size - 32) // (n_channels * 2)
+                                duration_sec = n_samples / fs
+                            
+                            log_end_sec = log_start_sec + duration_sec
+                            
+                            target_entries_rel = [] 
+                            for e in all_entries_norm:
+                                if log_start_sec <= e.timestamp <= log_end_sec:
+                                    diff_seconds = e.timestamp - log_start_sec
+                                    new_e = dataclasses.replace(e)
+                                    new_e.timestamp = diff_seconds
+                                    target_entries_rel.append(new_e)
 
-                        if cfg["entries"]["convert"] and target_entries_rel:
-                            file_fmt = cfg["entries"]["output_format"]
-                            entry_out_path = os.path.join(output_folder, study_id, f"{datalog_id}.{file_fmt}")
-                            
-                            entryplanter = EntryPlanter(target_entries_rel)
-                            filter_groups = cfg["entries"]["filter_annotation_type"]
-                            criteria = {"groups": filter_groups} if filter_groups else {}
-                            
-                            if file_fmt == "csv":
-                                entryplanter.savecsv(entry_out_path, criteria=criteria, ref_timestamp=0)
-                            elif file_fmt == "sel":
-                                entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
-                            
-                            conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
+                            # 转换波形
+                            with LogParser(
+                                datalog_path, 
+                                version=cfg["global_settings"]["workmate_version"], 
+                                samplesize=cfg["global_settings"]["processing"]["chunk_size"]
+                            ) as parser:
+                                if cfg["data"]["leads"] == "computed":
+                                    mappings = header.channels.computed_mappings
+                                else:
+                                    mappings = header.channels.raw_mappings
+                                if cfg["data"]["channels"]:
+                                    mappings = {k:v for k,v in mappings.items() if k in cfg["data"]["channels"]}
+                                column_names = list(mappings.keys())
+                                
+                                out_path = os.path.join(output_folder, study_id, f"{datalog_id}.{output_fmt}")
+                                
+                                # 构建 HDF5 元数据（非合并模式）
+                                hdf_attributes = {
+                                    "subject_id": subject_id,
+                                    "subject_name": subject_name,
+                                    "study_id": study_id,
+                                    "datalog_id": datalog_id,
+                                    "timestamp": header.timestamp,
+                                    "datetime": datetime.fromtimestamp(header.timestamp).isoformat() if header.timestamp else "",
+                                }
+                                if credentials:
+                                    hdf_attributes.update({
+                                        "author": credentials.get("author", ""),
+                                        "device": credentials.get("device", ""),
+                                        "owner": credentials.get("owner", ""),
+                                    })
+                                
+                                if output_fmt == "csv":
+                                    PlanterClass = CSVPlanter
+                                    planter_kwargs = {"column_names": column_names, "sampling_freq": fs}
+                                else:
+                                    PlanterClass = HDFPlanter
+                                    planter_kwargs = {
+                                        "column_names": column_names, 
+                                        "sampling_freq": fs,
+                                        "factor": 1000,
+                                        "units": "mV",
+                                        "attributes": hdf_attributes,
+                                    }
+                                
+                                with PlanterClass(out_path, **planter_kwargs) as planter:
+                                    for chunk in parser:
+                                        chunk = mount_channels(chunk, mappings)
+                                        planter.write(chunk)
+                                        
+                                    if output_fmt == "h5" and cfg["data"]["pin_entries"] and target_entries_rel:
+                                        if isinstance(planter, HDFPlanter):
+                                            safe_pos = [int(e.timestamp * fs) for e in target_entries_rel]
+                                            safe_grp = [str(e.group) for e in target_entries_rel]
+                                            safe_msg = [str(e.message) for e in target_entries_rel]
+                                            valid = [(p,g,m) for p,g,m in zip(safe_pos, safe_grp, safe_msg) if p>=0]
+                                            if valid:
+                                                p,g,m = zip(*valid)
+                                                planter.add_marks(list(p), list(g), list(m))
 
-                    except Exception as e:
-                        conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
-                        continue
+                            if cfg["entries"]["convert"] and target_entries_rel:
+                                file_fmt = cfg["entries"]["output_format"]
+                                entry_out_path = os.path.join(output_folder, study_id, f"{datalog_id}.{file_fmt}")
+                                
+                                entryplanter = EntryPlanter(target_entries_rel)
+                                filter_groups = cfg["entries"]["filter_annotation_type"]
+                                criteria = {"groups": filter_groups} if filter_groups else {}
+                                
+                                if file_fmt == "csv":
+                                    entryplanter.savecsv(entry_out_path, criteria=criteria, ref_timestamp=0)
+                                elif file_fmt == "sel":
+                                    entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
+                                
+                                conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
+
+                        except Exception as e:
+                            conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
+                            continue
                         
             conv_logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
             res_logs = mem_handler.logs

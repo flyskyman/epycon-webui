@@ -7,22 +7,27 @@
 	- **IO 层**: epycon/iou/（parsers.py、planters.py）。数据流：LogParser -> header -> mount_channels -> Planter.write(chunk)。
 	- **标注/Entries**: `readentries()` 返回 `Entry`，由 `EntryPlanter` 导出 CSV/SEL；GUI 的清洗逻辑在 `app_gui.py` 的 `clean_entries_content()`。
 	- **GUI/工具**: `app_gui.py` 提供 Flask 接口 (`/run-direct`) 与本地 HTML 编辑器，包含 `UTF8EnforcedOpen` 用于强制 UTF-8 写入。
+	- **匿名化**: `epycon/utils/person.py` 的 `Tokenize` 类用于生成伪匿名 ID，配合 `global_settings.pseudonymize` 配置使用。
 
 - **关键文件速查**:
-	- epycon/__main__.py：批量转换流程与 `deep_override` 覆盖配置。
-	- epycon/iou/planters.py：Planter 接口实现（CSV/HDF），新增 Planter 应遵循相同模式。
+	- epycon/__main__.py：批量转换流程、`deep_override` 覆盖配置、多文件合并逻辑。
+	- epycon/iou/planters.py：Planter 接口实现（CSV/HDF），`HDFPlanter` 支持 `append` 模式用于多文件合并。
+	- epycon/iou/parsers.py：`LogParser` 解析器、`_readmaster()` 读取 MASTER 文件获取受试者信息。
 	- epycon/core/helpers.py：`deep_override`, `default_log_path`, `difftimestamp` 等工具。
+	- epycon/utils/person.py：`Tokenize` 类用于数据匿名化。
 	- config/config.json、config/schema.json：运行时配置与 jsonschema 校验点。
 
 - **必读约定（工程规律）**:
-	- Planter 必须支持上下文管理器模式：`with Planter(...) as p:`，并实现 `write(chunk)`；HDF 支持 `add_marks(...)`。
+	- Planter 必须支持上下文管理器模式：`with Planter(...) as p:`，并实现 `write(chunk)`；HDF 支持 `add_marks(...)` 和 `append` 模式。
 	- `LogParser` 是上下文管理器且可迭代：不要一次性载入整个文件，按 chunk 流式处理。
 	- 配置变更靠 `deep_override(cfg, path.split('.'), value)` 逐层覆盖，最终通过 `jsonschema.validate(cfg, schema)` 校验。
 	- 所有向磁盘写入的文本文件应使用 UTF-8（`encoding='utf-8'` 或 `UTF8EnforcedOpen`）。
+	- HDF5 输出文件包含完整元数据属性（subject_id, timestamp, datetime 等），便于后续处理。
 
 - **运行 / 调试 快捷**:
 	- 批量 CLI（默认）：
 		- `python -m epycon`（可用环境变量 `EPYCON_CONFIG` / `EPYCON_JSONSCHEMA` 指定配置）
+		- `python -m epycon --merge`（合并多个 log 文件到单一 HDF5）
 	- GUI：`python app_gui.py`，浏览器打开本地编辑器，或使用 `/run-direct` POST 触发 `execute_epycon_conversion(cfg)`。
 
 - **注意事项与坑（仓库特有）**:
@@ -32,8 +37,26 @@
 	- 仓库没有完整的单元测试；修改 IO 或格式输出时，最好准备一个小样例（示例目录包含 `*.log` + `entries.log`）在 examples/ 下验证。
 	- 小心 CLI 参数/命名不一致：`__main__.py` 期望 `data.output_format` 为 `csv` 或 `h5`，但部分 CLI 文件使用 `hdf` 字样，请在修改参数解析时保持一致。
 
+- **快速示例：程序化集成**
+
+```python
+# 基础读取
+from epycon.iou import LogParser, HDFPlanter
+
+with LogParser("00000000.log", version="4.3.2") as parser:
+    header = parser.get_header()
+    with HDFPlanter("output.h5", column_names=["CH1"], sampling_freq=header.amp.sampling_freq, attributes={"subject_id": "S001"}) as planter:
+        for chunk in parser:
+            planter.write(chunk)
+
+# 多文件合并（append 模式）
+with HDFPlanter("merged.h5", column_names=["CH1"], append=True) as planter:
+    for chunk in parser:
+        planter.write(chunk)
+```
+
 - **快速示例：新增 Planter 最小约定**
-	- 支持 `__enter__`, `__exit__`, `write(chunk)`；可选 `add_marks(positions, groups, messages)`。参见 epycon/iou/planters.py。
+	- 支持 `__enter__`, `__exit__`, `write(chunk)`；可选 `add_marks(positions, groups, messages)` 和 `append` 参数。参见 epycon/iou/planters.py。
 
 - **如何贡献改动（建议流程）**
 	1. 在本地用小样例跑 `python -m epycon` 或 `python app_gui.py` 验证输出。

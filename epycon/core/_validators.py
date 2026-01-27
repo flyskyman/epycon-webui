@@ -81,14 +81,18 @@ def _validate_str(
 def _validate_version(
     version: Union[str, None],
 ) -> str:
-    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3', '4.3.2'} 
+    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3'}
 
     if version is None:
         return 'x64'
     
-    if version in valid_x32:
+    # Normalize version to major.minor (e.g., 4.3.2 -> 4.3)
+    parts = version.split('.')
+    normalized = '.'.join(parts[:2]) if len(parts) >= 2 else version
+    
+    if normalized in valid_x32:
         return 'x32'    
-    elif version in valid_x64:
+    elif normalized in valid_x64:
         return 'x64'
     else:
         raise ValueError(f'Invalid parameter `version`: {version}. Expected one of {valid_x32 | valid_x64}')

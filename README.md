@@ -105,6 +105,188 @@ Start-Process -FilePath "C:\path\to\WorkMateDataCenter.exe"
 python -m epycon
 ```
 
+## 程序化集成 API
+
+epycon 核心模块支持程序化调用，方便集成到其他 Python 项目中。
+
+### 基础用法：读取 WorkMate 日志
+
+```python
+from epycon.iou import LogParser, mount_channels
+
+# 读取单个日志文件
+with LogParser("path/to/00000000.log", version="4.3.2", samplesize=1024) as parser:
+    header = parser.get_header()
+    print(f"采样率: {header.amp.sampling_freq} Hz")
+    print(f"通道数: {header.num_channels}")
+    print(f"时间戳: {header.timestamp}")
+    
+    # 迭代读取数据块
+    for chunk in parser:
+        # chunk 是 numpy 数组，形状为 (samples, channels)
+        print(f"数据块形状: {chunk.shape}")
+```
+
+### 导出为 HDF5（含完整元数据）
+
+```python
+from epycon.iou import LogParser, HDFPlanter, mount_channels
+from epycon.iou.parsers import _readmaster
+from datetime import datetime
+
+# 读取 MASTER 文件获取受试者信息
+master_info = _readmaster("path/to/study/MASTER")
+
+with LogParser("path/to/00000000.log", version="4.3.2") as parser:
+    header = parser.get_header()
+    
+    # 构建元数据
+    attributes = {
+        "subject_id": master_info["id"],
+        "subject_name": master_info["name"],
+        "study_id": "study01",
+        "timestamp": header.timestamp,
+        "datetime": datetime.fromtimestamp(header.timestamp).isoformat(),
+        "sampling_freq": header.amp.sampling_freq,
+    }
+    
+    # 写入 HDF5
+    with HDFPlanter(
+        "output.h5",
+        column_names=["CH1", "CH2"],
+        sampling_freq=header.amp.sampling_freq,
+        factor=1000,  # uV -> mV
+        units="mV",
+        attributes=attributes,
+    ) as planter:
+        for chunk in parser:
+            planter.write(chunk)
+```
+
+### 多文件合并到单一 HDF5
+
+```python
+from epycon.iou import LogParser, HDFPlanter
+
+log_files = ["00000000.log", "00000001.log", "00000002.log"]
+output_path = "merged_output.h5"
+
+is_first = True
+for log_file in sorted(log_files):
+    with LogParser(log_file, version="4.3.2") as parser:
+        header = parser.get_header()
+        
+        with HDFPlanter(
+            output_path,
+            column_names=["CH1", "CH2"],
+            sampling_freq=header.amp.sampling_freq,
+            attributes={"merged": True} if is_first else {},
+            append=not is_first,  # 第一个文件用 write 模式，后续用 append
+        ) as planter:
+            for chunk in parser:
+                planter.write(chunk)
+        
+        is_first = False
+```
+
+### 数据匿名化
+
+```python
+from epycon.utils.person import Tokenize
+
+# 创建 tokenizer（8 字符长度）
+tokenizer = Tokenize(length=8, mapping={})
+
+# 生成匿名 ID
+original_id = "PatientName123"
+anonymous_id = tokenizer()  # 返回如 "a1b2c3d4" 的随机 token
+
+print(f"原始: {original_id} -> 匿名: {anonymous_id}")
+```
+
+### 读取标注/Entries
+
+```python
+from epycon.iou import readentries, EntryPlanter
+
+# 读取 entries.log
+entries = readentries("path/to/entries.log", version="4.3.2")
+
+for entry in entries:
+    print(f"时间: {entry.timestamp}, 类型: {entry.group}, 消息: {entry.message}")
+
+# 导出为 CSV
+planter = EntryPlanter(entries)
+planter.savecsv("entries_output.csv", criteria={"groups": ["Mark", "Event"]})
+```
+
+### CLI 命令行参数
+
+```bash
+# 基础转换
+python -m epycon
+
+# 使用自定义配置
+python -m epycon --custom_config_path /path/to/config.json
+
+# 合并多个日志文件到单一 HDF5
+python -m epycon --merge
+
+# 指定输入输出目录
+python -m epycon -i /input/folder -o /output/folder
+```
+
+### 配置文件说明
+
+配置文件 `config/config.json` 主要字段：
+
+```json
+{
+  "paths": {
+    "input_folder": "数据输入目录",
+    "output_folder": "输出目录",
+    "studies": ["study01", "study02"]  // 空数组表示处理所有
+  },
+  "data": {
+    "output_format": "h5",       // "h5" 或 "csv"
+    "merge_logs": false,         // true 时合并多个 log 到单一文件
+    "data_files": [],            // 空数组表示处理所有
+    "channels": []               // 空数组表示导出所有通道
+  },
+  "global_settings": {
+    "workmate_version": "4.3.2",
+    "pseudonymize": false,       // true 时启用数据匿名化
+    "credentials": {
+      "author": "your@email.com",
+      "device": "Abbott WorkMate",
+      "owner": "Your Institution"
+    }
+  }
+}
+```
+
+### HDF5 输出文件结构
+
+导出的 HDF5 文件兼容 SignalPlant 格式：
+
+```
+file.h5
+├── Data                    # 主数据集 (channels × samples)
+├── Info                    # 通道信息
+├── ChannelSettings         # 通道设置
+├── Marks                   # 标注数据（可选）
+└── [属性]
+    ├── Fs                  # 采样频率
+    ├── subject_id          # 受试者 ID
+    ├── subject_name        # 受试者姓名
+    ├── study_id            # 研究 ID
+    ├── timestamp           # Unix 时间戳
+    ├── datetime            # ISO 格式时间
+    ├── merged              # 是否为合并文件
+    ├── datalog_ids         # 合并的文件列表（逗号分隔）
+    └── ...
+```
+
 
 ## 项目结构（当前）
 

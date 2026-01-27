@@ -69,7 +69,7 @@ def deep_override(cfg_dict: dict, keys: list, value):
     return cfg_dict
 
 
-def difftimestamp(timestamps: List[float]):
+def difftimestamp(timestamps: List[Union[int, float]]) -> float:
     assert len(timestamps) == 2
     return abs((datetime.fromtimestamp(timestamps[0]) - datetime.fromtimestamp(timestamps[1])).total_seconds())
 
