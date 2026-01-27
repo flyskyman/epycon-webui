@@ -5,7 +5,7 @@ a = Analysis(
     ['../app_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('ui', 'ui'), ('config', 'config'), ('epycon', 'epycon')],
+    datas=[('../ui', 'ui'), ('../config', 'config'), ('../epycon', 'epycon')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
