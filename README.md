@@ -21,6 +21,22 @@
 2. 运行工具集：打开 `ui/index.html` 或运行 `python app_gui.py`
 3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
 
+## 开发：运行测试与生成覆盖率
+
+- 使用项目内的 PowerShell 脚本（推荐，保留在 `scripts/`）：
+
+```powershell
+.\scripts\run_tests.ps1
+```
+
+- 或使用 Python/pytest 直接运行（在虚拟环境中）：
+
+```powershell
+python -m pytest --cov=epycon --cov-report=term-missing --cov-report=html --cov-report=xml
+```
+
+生成的 HTML 报告位于 `htmlcov/index.html`，XML 报告为 `coverage.xml`，这些输出已被添加到 `.gitignore`。
+
 ## 打包为可执行文件
 
 项目支持打包为独立可执行文件，无需安装 Python：

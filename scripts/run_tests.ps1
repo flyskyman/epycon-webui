@@ -1,5 +1,5 @@
 # Run tests and generate coverage report
-# Usage: .\run_tests.ps1
+# Usage: .\scripts\run_tests.ps1
 
 Write-Host "`n============================================" -ForegroundColor Cyan
 Write-Host "  Run tests and generate coverage report" -ForegroundColor Cyan
@@ -26,8 +26,7 @@ if ($LASTEXITCODE -eq 0) {
     if ($response -eq '' -or $response -eq 'Y' -or $response -eq 'y') {
         Start-Process htmlcov\index.html
     }
-}
-else {
+} else {
     Write-Host "`nTESTS FAILED" -ForegroundColor Red
     exit 1
 }

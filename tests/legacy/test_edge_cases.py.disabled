@@ -1,0 +1,6 @@
+"""
+边缘情况和回归测试 (归档)
+原始脚本保留为参考，已迁移到 `tests/legacy/`。
+"""
+
+# NOTE: original script moved here for archival. Use pytest-style tests in `tests/`.
