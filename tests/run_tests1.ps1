@@ -1,5 +1,5 @@
-# Run tests and generate coverage report (moved to tests1)
-# Usage: .\tests1\run_tests1.ps1
+# Run tests and generate coverage report (moved from tests1)
+# Usage: .\tests\run_tests1.ps1
 
 Write-Host "`n============================================" -ForegroundColor Cyan
 Write-Host "  Run tests and generate coverage report" -ForegroundColor Cyan
