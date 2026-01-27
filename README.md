@@ -58,6 +58,9 @@ python -m epycon
   - `tasks.json`：定义运行任务，如启动 GUI 服务。
 - `index.html`：工具集入口页面，整合本地运行的编辑器和日志解析器。
 - `app_gui.py`：Flask Web 应用，提供 GUI 接口和 HTTP API，用于本地编辑器和直接运行转换。
+  - 注：`WorkMate_DataCenter.py` 已从仓库移除；请使用 `app_gui.py` 作为唯一的可执行入口。
+  - 兼容说明：若需要生成名为 `WorkMateDataCenter` 的可执行文件，请使用：
+    `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
 - `editor.html`：HTML 前端，用于本地标注编辑。
 - `h5_preview.html`：HDF5 文件预览工具。
 - `fix_encoding.py`：编码修复脚本。
