@@ -80,9 +80,8 @@ def _validate_str(
 
 def _validate_version(
     version: Union[str, None],
-    ) -> None:
-
-    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3'} 
+) -> str:
+    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3', '4.3.2'} 
 
     if version is None:
         return 'x64'
@@ -92,7 +91,7 @@ def _validate_version(
     elif version in valid_x64:
         return 'x64'
     else:
-        raise ValueError(f'Invalid parameter `version`. Expected {52} ')
+        raise ValueError(f'Invalid parameter `version`: {version}. Expected one of {valid_x32 | valid_x64}')
 
 
 def _validate_reference(positive_ref, negative_ref):
