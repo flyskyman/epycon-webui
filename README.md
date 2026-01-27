@@ -53,49 +53,25 @@ Start-Process -FilePath "C:\path\to\WorkMateDataCenter.exe"
 python -m epycon
 ```
 
-## 项目结构
 
-- `.vscode/`：VS Code 工作区配置目录
-  - `settings.json`：编辑器和 Python 环境设置。
-  - `tasks.json`：定义运行任务，如启动 GUI 服务。
-- `index.html`：工具集入口页面，整合本地运行的编辑器和日志解析器。
-- `app_gui.py`：Flask Web 应用，提供 GUI 接口和 HTTP API，用于本地编辑器和直接运行转换。
-  - 注：`WorkMate_DataCenter.py` 已从仓库移除；请使用 `app_gui.py` 作为唯一的可执行入口。
-  - 兼容说明：若需要生成名为 `WorkMateDataCenter` 的可执行文件，请使用：
-    `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "ui;ui" --add-data "config;config" --add-data "epycon;epycon"`
-- `ui/editor.html`：HTML 前端，用于本地标注编辑。依赖运行时代码请放置在 `ui/vendor/`（例如 `ui/vendor/vue.js`、`ui/vendor/tailwind.js`）。
-- `ui/`：用户界面相关文件
-  - `h5_preview.html`：HDF5 文件预览工具。
-  - `WorkMate Log Parser.html`：WorkMate 日志解析器相关 HTML。
-  - `vendor/`：运行时第三方静态文件（如 Vue.js、Tailwind CSS）。
-- `scripts/`：脚本和工具
-  - `fix_encoding.py`：编码修复脚本。
-  - `WorkMateDataCenter.spec`：PyInstaller 打包配置。
-  - `generate_fake_wmx32.py`：生成假 WMx32 日志文件的脚本。
-  - `README.md`：脚本使用说明。
-- `config/`：配置文件目录
-  - `config.json`：运行时配置。
-  - `schema.json`：配置验证 schema。
-- `docs/`：文档目录
-  - `delimiter_migration.md`：分隔符迁移指南。
-  - `papers/`：相关论文和文档 PDF 存放目录。
-  - `release_notes_v0.0.3-alpha.md`：v0.0.3-alpha 版本发布说明。
-  - `WorkMate_DataCenter-v0.0.3-alpha.zip`：v0.0.3-alpha 版本可分发压缩包。
-  - `开发日记.txt`：开发过程记录。
-- `epycon/`：核心 Python 包
-  - `__main__.py`：命令行批量转换入口。
-  - `cli/`：命令行接口模块。
-  - `config/`：包内配置，如 byteschema.py 和 schema.json。
-  - `core/`：核心工具模块，如数据类、格式化、验证、bins.py、helpers.py。
-  - `iou/`：输入输出模块
-    - `parsers.py`：日志解析器。
-    - `planters.py`：数据导出器（CSV/HDF）。
-    - `constants.py`：常量定义。
-  - `utils/`：工具模块，如装饰器和 person.py。
-- `examples/`：示例目录
-  - `demo.py`：演示脚本，展示 LogParser 使用。
-  - `data/`：示例数据
-    - `study01/`：示例研究文件夹，包含 .log 文件用于测试。
-- `scripts/`：脚本目录
-  - `generate_fake_wmx32.py`：生成假 WMx32 日志文件的脚本。
-  - `README.md`：脚本使用说明。
+## 项目结构（当前）
+
+- `app_gui.py`：Flask Web 应用，项目的图形/HTTP 入口（保留为可执行主入口）。
+- `epycon/`：核心 Python 包，项目实现（`__main__.py`, `core/`, `iou/`, `cli/`, `config/` 等）。
+- `ui/`：前端静态资源目录（运行时界面）
+  - `index.html`：工具集入口页面（现在位于 `ui/index.html`）。
+  - `editor.html`：本地标注编辑器界面（`ui/editor.html`）。
+  - `WorkMate Log Parser.html`：日志解析器界面（`ui/WorkMate Log Parser.html`）。
+  - `h5_preview.html`：HDF5 预览页面（`ui/h5_preview.html`）。
+  - `vendor/`：第三方运行时 bundle（`ui/vendor/vue.js`, `ui/vendor/tailwind.js` 等）。
+- `scripts/`：构建与工具脚本
+  - `WorkMateDataCenter.spec`：PyInstaller 打包配置（现在在 `scripts/`）。
+  - `fix_encoding.py`：编码修复脚本（`scripts/fix_encoding.py`）。
+  - `generate_fake_wmx32.py`：测试数据生成脚本。
+  - `README.md`：脚本目录说明。
+- `config/`：运行时配置（`config.json`, `schema.json`）。
+- `docs/`：项目文档与历史发布档案（`release_notes_v0.0.3-alpha.md`, 压缩包等）。
+- `examples/`：示例和示例数据（`examples/demo.py`, `examples/data/`）。
+- 项目根还包含：`README.md`, `CHANGELOG.md`, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
+
+打包说明：为了简化 PyInstaller 配置，`--add-data "ui;ui"` 可用于包含整个前端目录（示例命令已在上方“打包为可执行文件”部分）。
