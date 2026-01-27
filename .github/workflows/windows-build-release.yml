@@ -9,14 +9,21 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller numpy h5py jsonschema
       - name: Generate test data
-        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
+        run: |
+          python scripts/generate_fake_wmx32.py \
+            --out examples/data/study01/ci_generated.log \
+            --with-entries --with-master \
+            --entries-count 4 --entries-fids 2 \
+            --version 4.3
       - name: Build EXE
         run: pyinstaller --clean --onefile --windowed scripts/WorkMateDataCenter.spec
       - name: Create Release
