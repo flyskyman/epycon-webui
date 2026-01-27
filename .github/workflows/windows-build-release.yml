@@ -2,13 +2,14 @@ name: Build and Release Windows EXE
 on:
   push:
     tags:
-      - 'v*'
+      - v*
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -22,8 +23,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller --clean --noconfirm scripts/WorkMateDataCenter.spec
+        run: pyinstaller --clean --noconfirm scripts/WorkMateDataCenter.spec
 
       - name: Show dist contents
         run: dir dist
