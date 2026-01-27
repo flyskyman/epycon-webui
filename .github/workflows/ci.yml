@@ -19,22 +19,33 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy h5py jsonschema
+          pip install numpy h5py jsonschema pytest pytest-cov
       - name: Run type checks with Pylance
         run: |
           pip install pylance pyright
           pyright epycon/ --pythonversion 3.10
         continue-on-error: true
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          echo "Running basic functionality tests..."
-          python tests/test_type_fixes.py
-          echo "Running edge case tests..."
-          python tests/test_edge_cases.py
-          echo "Running integration tests..."
-          python tests/test_integration.py
+          echo "Running tests with coverage..."
+          pytest tests/ --cov=epycon --cov-report=xml --cov-report=term --cov-report=html -v
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload coverage HTML report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
       - name: Generate test data
         run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
       - name: Validate config

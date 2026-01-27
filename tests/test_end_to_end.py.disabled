@@ -5,24 +5,24 @@ import os
 import sys
 import tempfile
 import shutil
-
-print("=" * 60)
-print("端到端测试：完整数据处理流程")
-print("=" * 60)
+import pytest
 
 # 使用生成的测试数据
 test_file = "examples/data/study01/test_generated.log"
 
-if not os.path.exists(test_file):
-    print(f"✗ 测试数据不存在，请先运行:")
-    print(f"  python scripts\\generate_fake_wmx32.py --out {test_file}")
-    sys.exit(1)
+@pytest.fixture(scope="module")
+def test_data_file():
+    """Fixture to ensure test data exists"""
+    if not os.path.exists(test_file):
+        pytest.skip(f"测试数据不存在: {test_file}")
+    return test_file
 
-from epycon.iou.parsers import LogParser
-import numpy as np
-
-print(f"\n使用测试数据: {test_file}")
-print("-" * 60)
+def test_imports():
+    """Test that required modules can be imported"""
+    from epycon.iou.parsers import LogParser
+    import numpy as np
+    assert LogParser is not None
+    assert np is not None
 
 # 测试 1: 完整读取流程
 print("\n1. 完整读取流程")
