@@ -16,7 +16,7 @@ class Diary:
 @dataclass(frozen=True)
 class Entry:
     fid: str
-    group: int    
+    group: Union[int, str]  # int from binary, but mapped to str label via GROUP_MAP
     timestamp: int
     message: str
 

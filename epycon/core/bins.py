@@ -43,7 +43,7 @@ def readchunk(f_object, chunk_size):
 
 
 def parsebin(
-    barray: bytearray,
+    barray: Union[bytes, bytearray],
     fchar: str,
     ):
 

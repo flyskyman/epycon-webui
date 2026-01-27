@@ -4,12 +4,13 @@ import struct
 from itertools import islice
 from datetime import datetime
 from collections import abc
+from typing import BinaryIO
 
 import numpy as np
 import h5py as h
 
 from epycon.core._typing import (
-    Union, List, Sequence, PathLike, ArrayLike, 
+    Union, List, Sequence, PathLike, ArrayLike, Optional,
 )
 
 from epycon.core._validators import (
@@ -64,10 +65,10 @@ class LogParser(abc.Iterator):
     def __init__(
         self,
         f_path: Union[str, bytes, os.PathLike],
-        version: str = None,        
+        version: Optional[str] = None,        
         samplesize: int = 1024,
         start: int = 0,
-        end: Union[int, None] = None,
+        end: Optional[int] = None,
         **kwargs
         ) -> None:
         super().__init__()
@@ -85,18 +86,18 @@ class LogParser(abc.Iterator):
         
         self.samplesize = _validate_int("chunk size", samplesize, min_value=1024)
         self.start = _validate_int("start sample", start, min_value=0)
-        self.end = _validate_int("end sample", end, min_value=start)
+        self.end = _validate_int("end sample", end, min_value=start) if end is not None else None
             
         
         # file related content required for parsing.        
-        self._f_obj = None
-        self._header = None
-        self._stopbyte = None
-        self._chunksize = None
-        self._blocksize = None
-        self._channel_mapping = None
-        self._mount_negidx = None
-        self._mount_posidx = None                
+        self._f_obj: Optional[BinaryIO] = None
+        self._header: Optional[Header] = None
+        self._stopbyte: Optional[Union[int, float]] = None
+        self._chunksize: Optional[int] = None
+        self._blocksize: Optional[int] = None
+        self._channel_mapping: Optional[object] = None
+        self._mount_negidx: Optional[object] = None
+        self._mount_posidx: Optional[object] = None                
 
 
     def __enter__(self):
@@ -105,6 +106,10 @@ class LogParser(abc.Iterator):
 
             # read and store header in advance
             self._header = self._readheader()
+            
+            # Ensure start is not None (it's validated in __init__)
+            assert self.start is not None
+            assert self.samplesize is not None
             
             # adjust the range of datablocks to read given as the number of active channels times bytes per sample
             self._block_size = self._header.num_channels * self.diary.sample_size 
@@ -119,11 +124,11 @@ class LogParser(abc.Iterator):
                 # convert end sample to byte address
                 stopbyte = self._header.datablock_address + self.end * self._block_size                
             else:
-                # set stop byte to the last one
-                stopbyte = float("Inf")
+                # set stop byte to the last one (use a very large int instead of Inf)
+                stopbyte = sys.maxsize
 
             # get address of the last/user defined byte
-            self._stopbyte = min(stopbyte, self._f_obj.seek(0, 2))                      
+            self._stopbyte = int(min(stopbyte, self._f_obj.seek(0, 2)))                      
             
             # Seek to start position
             self._f_obj.seek(max(self._header.datablock_address, startbyte))
@@ -157,11 +162,17 @@ class LogParser(abc.Iterator):
         Returns:
             np.ndarray: _description_
         """
+        # Type assertions to help type checker
+        assert self._f_obj is not None
+        assert self._chunksize is not None
+        assert self._stopbyte is not None
+        
         try:
             if self._f_obj.tell() >= self._stopbyte:
                 raise StopIteration
             
-            chunksize = min(self._chunksize, self._stopbyte - self._f_obj.tell())                        
+            chunksize_raw = min(self._chunksize, self._stopbyte - self._f_obj.tell())
+            chunksize = int(chunksize_raw)  # Ensure it's an int
             chunk = self._f_obj.read(chunksize)
 
             if not chunk:
@@ -187,11 +198,16 @@ class LogParser(abc.Iterator):
         Returns:
             np.ndarray: _description_
         """
+        # Type assertions
+        assert self._f_obj is not None
+        assert self._stopbyte is not None
         
-        chunk = self._f_obj.read(self._stopbyte-self._f_obj.tell())
+        bytes_to_read = int(self._stopbyte - self._f_obj.tell())
+        chunk = self._f_obj.read(bytes_to_read)
 
         if not chunk:
-            return None
+            # Return empty array instead of None
+            return np.array([], dtype=np.dtype(self.diary.datablock.fmt))
         else:
             chunk = np.frombuffer(
                 bytearray(chunk),
@@ -213,6 +229,9 @@ class LogParser(abc.Iterator):
         Returns:
             _type_: _description_
         """
+        # Type assertion
+        assert self._header is not None
+        
         chunk = _twos_complement(chunk, self.diary.sample_size)
 
         # Multiply signal by resolution to get correct physical units.
@@ -243,15 +262,21 @@ class LogParser(abc.Iterator):
 
         # Get timestamp
         startbyte, endbyte = self.diary.header.timestamp
-        timestamp = parsebin(bheader[startbyte:endbyte], self.timestampfmt) // self.timestampfactor
+        timestamp_raw = parsebin(bheader[startbyte:endbyte], self.timestampfmt)
+        # Handle tuple or scalar return from parsebin
+        if isinstance(timestamp_raw, tuple):
+            timestamp_raw = timestamp_raw[0]
+        timestamp = int(timestamp_raw) // self.timestampfactor
 
         # Get number of active channels
         startbyte, endbyte = self.diary.header.num_channels
-        num_channels = parsebin(bheader[startbyte:endbyte], '<H')
+        num_channels_raw = parsebin(bheader[startbyte:endbyte], '<H')
+        num_channels = int(num_channels_raw) if not isinstance(num_channels_raw, tuple) else int(num_channels_raw[0])
 
         # Get the address of the first data chunk
         startbyte, endbyte = self.diary.datablock.start_address
-        datablock_startbyte = parsebin(bheader[startbyte:endbyte], '<H')
+        datablock_raw = parsebin(bheader[startbyte:endbyte], '<H')
+        datablock_startbyte = int(datablock_raw) if not isinstance(datablock_raw, tuple) else int(datablock_raw[0])
 
         # create mapping from channel id (index) into sample position (value at given index) in the data chunk
         startbyte, endbyte = self.diary.datablock.sample_mapping
@@ -259,25 +284,29 @@ class LogParser(abc.Iterator):
         
         # Get the amplifier hardware settings
         amp_settings = dict()
-        amp_settings["highpass_freq"] = parsebin(
+        hp_raw = parsebin(
             bheader[self.diary.amplifier.highpass_freq[0]:self.diary.amplifier.highpass_freq[1]],
             '<H',
         )
+        amp_settings["highpass_freq"] = int(hp_raw) if not isinstance(hp_raw, tuple) else int(hp_raw[0])
 
-        amp_settings["notch_freq"] = parsebin(
+        notch_raw = parsebin(
             bheader[self.diary.amplifier.notch_freq[0]:self.diary.amplifier.notch_freq[1]],
             '<H',
         )
+        amp_settings["notch_freq"] = int(notch_raw) if not isinstance(notch_raw, tuple) else int(notch_raw[0])
 
-        amp_settings["resolution"] = parsebin(
+        res_raw = parsebin(
             bheader[self.diary.amplifier.resolution[0]:self.diary.amplifier.resolution[1]],
             '<H',
         )
+        amp_settings["resolution"] = int(res_raw) if not isinstance(res_raw, tuple) else int(res_raw[0])
 
-        amp_settings["sampling_freq"] = parsebin(
+        sf_raw = parsebin(
             bheader[self.diary.amplifier.sampling_freq[0]:self.diary.amplifier.sampling_freq[1]],
             '<H',
         )
+        amp_settings["sampling_freq"] = int(sf_raw) if not isinstance(sf_raw, tuple) else int(sf_raw[0])
 
         # for field_name, (startbyte, endbyte) in self.diary.amplifier.items():            
         #     amp_settings[field_name] = parsebin(bheader[startbyte:endbyte], '<H')
@@ -312,9 +341,9 @@ class LogParser(abc.Iterator):
 
             # source of data acquisition
             startbyte, endbyte = self.diary.channels.input_source
-            source = SOURCE_MAP[
-                parsebin(bchunk[startbyte:endbyte], 'B')
-            ]            
+            source_id = parsebin(bchunk[startbyte:endbyte], 'B')
+            source_id_int = int(source_id) if not isinstance(source_id, tuple) else int(source_id[0])
+            source = SOURCE_MAP[source_id_int]            
 
             # retrieve and map bytes into data byte order in the stream data chunk
             startbyte, endbyte = self.diary.channels.ids
@@ -341,7 +370,7 @@ class LogParser(abc.Iterator):
             if any(item is None for item in references):
                 # store single-reference leads (usually unipolar or surface ecg leads)
                 channels.content.append(
-                    Channel(ch_name, references[0], source, pins[0],)
+                    Channel(ch_name, references[0], source, (pins[0],) if pins[0] is not None else tuple(),)
                     )
                 
                 # create mapping computed channel -> index of the original channel in the channels list
@@ -350,8 +379,8 @@ class LogParser(abc.Iterator):
             else:
                 # store bipolar leads as separate unipolar channels
                 channels.content.extend([
-                    Channel("u+"+ch_name, references[0], source, pins[0],),
-                    Channel("u-"+ch_name, references[1], source, pins[1],),
+                    Channel("u+"+ch_name, references[0], source, (pins[0],) if pins[0] is not None else tuple(),),
+                    Channel("u-"+ch_name, references[1], source, (pins[1],) if pins[1] is not None else tuple(),),
                     ])
                 
                 # create mapping computed channel -> index of the original channel in the channels list
@@ -361,10 +390,10 @@ class LogParser(abc.Iterator):
         return Header(
             timestamp,
             num_channels,
-            channels,            
-            amp_settings,
+            channels.content,  # Pass the list of channels, not the Channels object
+            amp_settings,  # type: ignore  # __post_init__ will convert dict to AmplifierSettings
             datablock_startbyte,
-            ) 
+        )
 
     def get_header(self):
         """ Returns pased datalog header.
@@ -398,7 +427,8 @@ def _readdata(
 
     # Extract some of the arguments (pass chunksize on).    
     chunksize = kwargs.get("chunksize", None)
-    chunksize = _validate_int("chunksize", chunksize, min_value=1)
+    if chunksize is not None:
+        chunksize = _validate_int("chunksize", chunksize, min_value=1)
 
     nsamples = kwargs.get("nrows", None)
     
@@ -428,8 +458,13 @@ def _readheader(
     # Instantiate data parser.
     parser = LogParser(f_path)
     
-    # with parser:
-    return parser.get_header()
+    with parser:
+        header = parser.get_header()
+    
+    if header is None:
+        raise ValueError(f"Failed to read header from {f_path}")
+    
+    return header
 
 
 def _readmaster(
@@ -469,7 +504,7 @@ def _readmaster(
 
 def _readentries(
     f_path: Union[str, bytes, os.PathLike],
-    version: str = None,
+    version: Optional[str] = None,
     ):
     """ Parses the content of the ENTRIES file.
 
@@ -543,7 +578,7 @@ def _readentries(
         entries.append(
             Entry(
                 fid=datalog_uid,
-                group=GROUP_MAP.get(group, "UNKNOWN"),
+                group=GROUP_MAP.get(group, 0),  # Returns str label or 0 for unknown
                 timestamp=timestamp,
                 message=message,
                 )
