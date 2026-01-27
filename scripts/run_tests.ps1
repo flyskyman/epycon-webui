@@ -26,7 +26,8 @@ if ($LASTEXITCODE -eq 0) {
     if ($response -eq '' -or $response -eq 'Y' -or $response -eq 'y') {
         Start-Process htmlcov\index.html
     }
-} else {
+}
+else {
     Write-Host "`nTESTS FAILED" -ForegroundColor Red
     exit 1
 }
