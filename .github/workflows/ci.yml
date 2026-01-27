@@ -20,6 +20,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy h5py jsonschema
+      - name: Run type checks with Pylance
+        run: |
+          pip install pylance pyright
+          pyright epycon/ --pythonversion 3.10
+        continue-on-error: true
+      - name: Run unit tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          echo "Running basic functionality tests..."
+          python tests/test_type_fixes.py
+          echo "Running edge case tests..."
+          python tests/test_edge_cases.py
+          echo "Running integration tests..."
+          python tests/test_integration.py
       - name: Generate test data
         run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
       - name: Validate config
