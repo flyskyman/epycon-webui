@@ -21,8 +21,10 @@
 项目支持打包为独立可执行文件，无需安装 Python：
 
 1. 安装 PyInstaller：`pip install pyinstaller`
-2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
+2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon" --add-data "ui/vendor;ui/vendor"`
 3. 生成的文件位于 `dist/WorkMateDataCenter/`
+
+注意：运行时前端第三方 bundle 已集中放置于 `ui/vendor/`，请确保在打包时将该目录一并包含（例如使用 `--add-data "ui/vendor;ui/vendor"`）。
 
 **注意**：这是目录模式打包，包含 EXE 和支持文件。您可以压缩整个文件夹分发。
 
@@ -62,6 +64,7 @@ python -m epycon
   - 兼容说明：若需要生成名为 `WorkMateDataCenter` 的可执行文件，请使用：
     `pyinstaller app_gui.py --name WorkMateDataCenter --add-data "editor.html;." --add-data "h5_preview.html;." --add-data "WorkMate Log Parser.html;." --add-data "index.html;." --add-data "config;config" --add-data "epycon;epycon"`
 - `editor.html`：HTML 前端，用于本地标注编辑。
+ - `editor.html`：HTML 前端，用于本地标注编辑。依赖运行时代码请放置在 `ui/vendor/`（例如 `ui/vendor/vue.js`、`ui/vendor/tailwind.js`）。
 - `h5_preview.html`：HDF5 文件预览工具。
 - `fix_encoding.py`：编码修复脚本。
 - `WorkMate Log Parser.html`：WorkMate 日志解析器相关 HTML。

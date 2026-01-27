@@ -19,6 +19,9 @@
 ### Maintenance
 - ♻️ 清理：从仓库删除了重复入口 `WorkMate_DataCenter.py`，保留 `app_gui.py` 作为唯一实现（变更在分支 `chore/remove-workmate-datacenter`，待 PR 合并）。
 
+### Repo Organization
+- 📁 资产整理：将运行时第三方静态文件（如 `vue.js`、`tailwind.js`）移至 `ui/vendor/` 以便更清晰地区分源码与静态前端资产（见 PR #2）。
+
 ## [0.0.2-alpha] - Previous
 
 See git history for details.
