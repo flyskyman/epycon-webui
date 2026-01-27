@@ -453,9 +453,18 @@ def _readmaster(
     except IOError as e:
         raise IOError
 
-    start_address, end_address = WMx64MasterSchema.subject_id    
+    # Read ID
+    id_start, id_end = WMx64MasterSchema.subject_id    
+    sub_id = barray[id_start:id_end].decode("ascii", "ignore").strip("\x00")
 
-    return barray[start_address:end_address].decode("ascii", "ignore").strip("\x00")
+    # Read Name (Added in V68.1)
+    name_start, name_end = WMx64MasterSchema.subject_name
+    sub_name = barray[name_start:name_end].decode("ascii", "ignore").strip("\x00")
+
+    return {
+        "id": sub_id,
+        "name": sub_name
+    }
 
 
 def _readentries(
