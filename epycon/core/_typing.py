@@ -12,6 +12,7 @@ if sys.version_info >= (3, 6):
         Callable,
         Iterator,
         Optional,
+        cast,
     )
 
     from os import (
