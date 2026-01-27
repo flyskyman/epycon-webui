@@ -1,0 +1,42 @@
+name: Windows Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller numpy h5py jsonschema
+      - name: Generate test data
+        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
+      - name: Build EXE
+        run: pyinstaller --clean --onefile --windowed scripts/WorkMateDataCenter.spec
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dist/WorkMateDataCenter.exe
+          asset_name: WorkMateDataCenter.exe
+          asset_content_type: application/octet-stream
