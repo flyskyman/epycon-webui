@@ -4,6 +4,7 @@ import threading
 import time
 import webbrowser
 import logging
+import io
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from flask import Flask, request, jsonify, send_file
@@ -480,10 +481,14 @@ def open_browser():
 if __name__ == '__main__':
     try:
         for stream in (sys.stdout, sys.stderr):
-            try:
-                stream.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+            # Use a concrete type check so static analyzers (Pylance) know this
+            # object supports `reconfigure`. `io.TextIOWrapper` exposes
+            # reconfigure() on Python 3.7+.
+            if isinstance(stream, io.TextIOWrapper):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
         print("in __main__")
         print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
         print("请手动打开浏览器访问: http://127.0.0.1:5000/")
