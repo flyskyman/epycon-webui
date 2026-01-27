@@ -127,11 +127,12 @@ class EntryPlanter:
             if criteria:
                 for field in ("fids", "groups"):
                     if field in criteria:
-                        if isinstance(criteria[field], str):
-                            criteria[field] = {criteria[field]}
-                        elif isinstance(criteria[field], (list, tuple, set)):
+                        val = criteria[field]
+                        if isinstance(val, str):
+                            criteria[field] = {val}
+                        elif isinstance(val, (list, tuple, set)):
                             normalized_values = set()
-                            for item in criteria[field]:
+                            for item in val:
                                 normalized_values.add(_ensure_hashable(item))
                             criteria[field] = normalized_values
                         else:
@@ -410,10 +411,11 @@ class HDFPlanter(DatalogPlanter):
             if self.units is None:
                 self.units = self._UNITS
             
-            if isinstance(self.units, (tuple, list)):
-                self.units = [item.encode('UTF-8') for item in self.units]
-            elif isinstance(self.units, str):
-                self.units = [self.units.encode('UTF-8')] * len(self.column_names)
+            _units = self.units
+            if isinstance(_units, (tuple, list)):
+                self.units = [item.encode('UTF-8') for item in _units]
+            elif isinstance(_units, str):
+                self.units = [_units.encode('UTF-8')] * len(self.column_names)
             else:
                 raise TypeError
 
