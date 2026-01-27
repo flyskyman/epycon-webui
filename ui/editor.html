@@ -265,9 +265,10 @@
                         <div class="input-group">
                             <label class="input-label">WorkMate 版本</label>
                             <select v-model="config.global_settings.workmate_version" class="input-field">
+                                <option value="4.3.2">4.3.2 (Latest)</option>
+                                <option value="4.3">4.3</option>
                                 <option value="4.2">4.2 (Standard)</option>
                                 <option value="4.1">4.1 (Old)</option>
-                                <option value="4.3">4.3 (New)</option>
                             </select>
                         </div>
                         <div class="input-group">
@@ -331,7 +332,7 @@
                     paths: { input_folder: "", output_folder: "", studies: [] },
                     data: { output_format: "h5", pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {} },
                     entries: { convert: true, output_format: "sel", summary_csv: true, filter_annotation_type: [] },
-                    global_settings: { workmate_version: "4.3", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3", owner: "" } }
+                    global_settings: { workmate_version: "4.3.2", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3.2", owner: "" } }
                 };
 
                 const config = ref(JSON.parse(JSON.stringify(defaultConfig)));

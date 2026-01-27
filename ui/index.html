@@ -4,125 +4,99 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Epycon 工具集</title>
+    <title>Epycon 数据中心</title>
+    <script src="vendor/tailwind.js"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #f8fafc;
-            color: #334155;
-            margin: 0;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
-        .header h1 {
-            color: #0f172a;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #64748b;
-            font-size: 18px;
-        }
-
-        .tools-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-        }
-
-        .tool-card {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            padding: 30px;
-            text-align: center;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .tool-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-        }
-
-        .tool-icon {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-
-        .tool-title {
-            font-size: 24px;
-            font-weight: 600;
-            color: #0f172a;
-            margin-bottom: 10px;
-        }
-
-        .tool-desc {
-            color: #64748b;
-            margin-bottom: 20px;
-            line-height: 1.5;
-        }
-
-        .tool-link {
-            display: inline-block;
-            background: #3b82f6;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-
-        .tool-link:hover {
-            background: #2563eb;
+            font-family: 'Inter', sans-serif;
         }
     </style>
-    <!-- 后端服务在通过 EXE 或 `python app_gui.py` 启动时会自动运行，
-         因此无需在前端手动触发启动。保留该页面为纯入口页面。 -->
 </head>
 
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>⚡ WorkMate 数据处理中心</h1>
-            <p>EP 信号数据转换、日志解析和分析工具集</p>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div class="max-w-6xl mx-auto px-6 py-12">
+        <!-- Header -->
+        <header class="text-center mb-16">
+            <div
+                class="inline-flex items-center space-x-2 bg-blue-50 px-4 py-1.5 rounded-full mb-6 border border-blue-100">
+                <span class="relative flex h-2 w-2">
+                    <span
+                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                <span class="text-xs font-semibold text-blue-700 tracking-wide uppercase">服务运行中</span>
+            </div>
+            <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 tracking-tight mb-4">
+                WorkMate <span
+                    class="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">数据中心</span>
+            </h1>
+            <p class="text-lg text-slate-600 max-w-2xl mx-auto">
+                EP 信号数据转换、日志解析与分析工具集。专为高效、精准的数据流处理设计。
+            </p>
+        </header>
+
+        <!-- Tools Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <!-- Tool: Editor -->
+            <div
+                class="group bg-white rounded-2xl p-8 shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
+                <div
+                    class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform duration-300">
+                    ⚙️
+                </div>
+                <h2 class="text-xl font-bold mb-3 text-slate-900">配置编辑器</h2>
+                <p class="text-slate-600 mb-8 leading-relaxed">
+                    可视化编辑 Epycon 配置，管理转换策略。支持实时校验、批量 Study 处理与核心参数微调。
+                </p>
+                <a href="editor.html"
+                    class="flex items-center justify-center w-full px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-indigo-100">
+                    进入编辑器
+                </a>
+            </div>
+
+            <!-- Tool: Parser -->
+            <div
+                class="group bg-white rounded-2xl p-8 shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
+                <div
+                    class="w-14 h-14 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform duration-300">
+                    📊
+                </div>
+                <h2 class="text-xl font-bold mb-3 text-slate-900">日志解析器</h2>
+                <p class="text-slate-600 mb-8 leading-relaxed">
+                    深度解析 WorkMate 运行日志。提供强大的模式搜索、时间戳对齐以及导出清洗后的标注信息。
+                </p>
+                <a href="WorkMate Log Parser.html"
+                    class="flex items-center justify-center w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-blue-100">
+                    打开解析器
+                </a>
+            </div>
+
+            <!-- Tool: H5 Preview -->
+            <div
+                class="group bg-white rounded-2xl p-8 shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
+                <div
+                    class="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform duration-300">
+                    📁
+                </div>
+                <h2 class="text-xl font-bold mb-3 text-slate-900">HDF5 预览器</h2>
+                <p class="text-slate-600 mb-8 leading-relaxed">
+                    直观查看转换后的 H5 数据结构。浏览波形、通道 Metadata 并校验导出结果的完整性。
+                </p>
+                <a href="h5_preview.html"
+                    class="flex items-center justify-center w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-100">
+                    浏览 H5
+                </a>
+            </div>
         </div>
 
-        <div class="tools-grid">
-            <div class="tool-card">
-                <div class="tool-icon">⚙️</div>
-                <div class="tool-title">配置编辑器</div>
-                <div class="tool-desc">编辑 Epycon 配置，运行数据转换任务。支持 JSON 配置管理和批量处理。<br><strong>注意：</strong>使用前请先启动后端服务。
-                </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <a href="/ui/editor.html" class="tool-link" style="background: #10b981;">打开编辑器</a>
-                </div>
-            </div>
-
-            <div class="tool-card">
-                <div class="tool-icon">📊</div>
-                <div class="tool-title">日志解析器</div>
-                <div class="tool-desc">解析和搜索 WorkMate 日志文件，支持拖拽上传、过滤和深度搜索。</div>
-                <a href="/ui/WorkMate Log Parser.html" class="tool-link">打开解析器</a>
-            </div>
-
-            <div class="tool-card">
-                <div class="tool-icon">📁</div>
-                <div class="tool-title">HDF5 预览器</div>
-                <div class="tool-desc">预览和浏览 HDF5 文件内容，支持数据可视化和结构查看。</div>
-                <a href="/ui/h5_preview.html" class="tool-link">打开预览器</a>
-            </div>
-        </div>
+        <!-- Footer -->
+        <footer class="mt-20 pt-8 border-t border-slate-200 text-center">
+            <p class="text-slate-400 text-sm">
+                Powered by <span class="font-semibold text-slate-600">Epycon Engine</span> &bull; 已针对 WorkMate v4.3.2 优化
+            </p>
+        </footer>
     </div>
 </body>
 
