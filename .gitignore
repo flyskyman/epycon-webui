@@ -18,6 +18,11 @@ eggs/
 lib/
 lib64/
 parts/
+
+# Test outputs and configs
+test_output/
+*_test_config.json
+real_test_config.json
 sdist/
 var/
 wheels/
