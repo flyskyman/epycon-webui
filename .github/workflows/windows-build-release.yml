@@ -20,7 +20,7 @@ jobs:
       - name: Generate test data
         run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
       - name: Build EXE
-        run: pyinstaller --clean --onefile --windowed scripts/WorkMateDataCenter.spec
+        run: pyinstaller --clean scripts/WorkMateDataCenter.spec
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
