@@ -775,7 +775,8 @@
                 setTimeout(() => toast.remove(), 3100);
             }
 
-            // --- Core: Scanning Logic (V3 Recursive Flattening) ---
+            // --- Core: Scanning Logic (Legacy V3 recursive flattening — kept for compatibility) ---
+            // Default target device version: 4.3.2 (backwards compatible with V3 data structures)
             async function scanItems(items) {
                 log(`Scan started. Items detected: ${items.length}`);
                 setDashLoading(true, "Scanning & Flattening files...");
