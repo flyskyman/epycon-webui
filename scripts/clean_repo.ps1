@@ -1,7 +1,5 @@
 <#
 Cleanup repository temporary artifacts (safe):
-- removes: htmlcov, coverage.xml, .coverage, .pytest_cache, __pycache__ directories
-- does NOT remove: `venv`, `.venv`, or any virtualenvs
 
 Usage: Run from repo root in PowerShell:
     .\scripts\clean_repo.ps1
