@@ -122,10 +122,10 @@ def _validate_mount(mount: tuple, max: int):
         ValueError: _description_
         ValueError: _description_
     """
-    if len(tuple) > 2:
-        raise ValueError(f"Too many electrical sources for lead computation. Expected 2, got {len(tuple)}")
+    if len(mount) > 2:
+        raise ValueError(f"Too many electrical sources for lead computation. Expected 2, got {len(mount)}")
     
-    for item in tuple:
+    for item in mount:
         if not isinstance(item, int):
             raise TypeError(f"Electrical sources for lead computation requires type `int` not {type(item)}")
         
@@ -138,7 +138,7 @@ def _validate_tuple(
     arr: Union[List, Tuple],
     size: int,
     dtype: Any = str,    
-    ) -> Union[List, Tuple]:
+    ) -> Union[List, Tuple, None]:
     """_summary_
 
     Args:
@@ -168,7 +168,7 @@ def _validate_tuple(
 def _validate_path(
         f_path: Union[str, bytes, PathLike],
         name: str = "file or directory",
-    ) -> Union[int, None]:
+    ) -> Union[str, bytes, PathLike]:
 
     """ Checks if the path exists and the user has read/write access.
 
