@@ -1,6 +1,7 @@
 # WorkMate 数据处理中心
 
 ![CI](https://github.com/flyskyman/epycon-webui/workflows/CI/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-53%25-yellow)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
