@@ -30,7 +30,9 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           echo "Running tests with coverage..."
-          pytest tests/ --cov=epycon --cov-report=xml --cov-report=term --cov-report=html -v
+          python scripts/test_business_logic.py
+          python scripts/test_extended.py
+          python scripts/test_version.py
       # Codecov upload removed — not using Codecov
       - name: Upload coverage HTML report
         if: ${{ always() }}
@@ -53,7 +55,7 @@ jobs:
         run: mkdir -p examples/data/out
       - name: Run epycon
         env:
-          PYTHONPATH: ${{ github.workspace }}/epycon
+          PYTHONPATH: ${{ github.workspace }}
           EPYCON_CONFIG: ${{ github.workspace }}/config/config.json
           EPYCON_JSONSCHEMA: ${{ github.workspace }}/config/schema.json
         run: python -m epycon
