@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+### Added
+- 🚀 **智能合并模式**: 支持按时间戳排序合并多个日志文件为单个HDF5文件
+  - 自动时间戳排序和文件合并
+  - 支持追加模式 (append) 用于多文件处理
+  - 合并后的元数据完整保留
+- 🔒 **数据匿名化引擎**: 8位伪随机患者ID生成系统
+  - `Tokenize` 类实现可重现的匿名化
+  - 保护医疗数据隐私合规性
+  - 支持全局匿名化配置
+- 📊 **完整元数据导出**: HDF5文件包含完整的文件属性
+  - 作者、设备、机构信息
+  - 时间戳、采样率、通道数等技术参数
+  - SignalPlant兼容的元数据格式
+- 🏷️ **标注数据嵌入**: 可选将标注数据直接嵌入HDF5文件
+  - `pin_entries` 配置选项
+  - SignalPlant `Marks` 数据集格式
+  - 时间同步和数据对齐
+- 🔧 **通道映射优化**: 正确显示标准导联名称
+  - I, II, III, aVR, aVL, aVF, V1-V6标准命名
+  - 自动类型转换和验证
+  - 兼容计算导联和原始导联
+- ✅ **全面测试套件**: 57+ 自动化测试用例
+  - 29个业务逻辑测试用例
+  - 28个扩展边界测试用例
+  - 版本兼容性测试
+  - 数据完整性验证
+- 📚 **完整文档重写**: 全面的README.md和使用指南
+  - 项目概述和架构说明
+  - 详细配置选项文档
+  - 开发指南和贡献规范
+  - 输出格式详细说明
+- 🔄 **CI/CD修复**: 修复GitHub Actions工作流
+  - 正确运行scripts目录下的测试
+  - 修复PYTHONPATH配置
+  - 自动化集成测试和验证
+
+### Changed
+- 🎨 **用户界面增强**: 网页配置器支持新功能选项
+  - 合并模式开关
+  - 匿名化配置选项
+  - 实时配置验证
+- 📋 **配置系统扩展**: 支持更多高级选项
+  - `merge_logs`: 控制文件合并行为
+  - `pseudonymize`: 全局匿名化开关
+  - `credentials`: 元数据配置
+  - `pin_entries`: 标注嵌入选项
+
 ### Fixed
 - 🐛 **类型检查错误修复**: 修复 Pylance 静态类型检查 51 个错误（降至 0 个）
   - `bins.parsebin`: 支持 `Union[bytes, bytearray]` 类型参数
@@ -9,19 +56,13 @@
   - `LogParser`: 所有 `Optional` 参数添加正确类型注解
   - 添加运行时断言保护和 `BinaryIO` 类型注解
 
-### Added
-- ✅ **完整测试套件**: 新增 26 个测试用例覆盖核心功能
-  - 基础功能测试 (`test_type_fixes.py`)
-  - 边缘情况测试 (`test_edge_cases.py`)
-  - 集成测试 (`test_integration.py`)
-  - 端到端测试 (`test_end_to_end.py`)
-- 📄 **测试报告文档**: 详细测试覆盖率和验证结果 (`docs/TEST_REPORT.md`)
-
 ### Technical Details
-- `bins.py`: `parsebin` 参数从 `bytearray` 改为 `Union[bytes, bytearray]`
-- `_dataclasses.py`: `Entry.group` 字段从 `int` 改为 `Union[int, str]`
-- `parsers.py`: 添加 `Optional` 类型、`BinaryIO` 注解和断言保护
-- 100% 向后兼容，无破坏性变更
+- **合并功能**: `HDFPlanter` 支持 `append=True` 参数实现多文件合并
+- **匿名化**: `utils/person.py` 新增 `Tokenize` 类
+- **元数据**: HDF5属性系统完整实现SignalPlant兼容格式
+- **测试覆盖**: 57个测试用例覆盖所有核心功能和边界情况
+- **文档**: 完全重写的README包含详细的项目介绍和使用指南
+- **CI修复**: GitHub Actions现在正确运行所有测试套件
 
 ## [0.0.4-alpha] - 2026-01-27
 
