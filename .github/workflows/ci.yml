@@ -33,7 +33,7 @@ jobs:
           python scripts/test_business_logic.py
           python scripts/test_extended.py
           python scripts/test_version.py
-      # Codecov upload removed â€” not using Codecov
+      # Codecov upload removed â€?not using Codecov
       - name: Upload coverage HTML report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
