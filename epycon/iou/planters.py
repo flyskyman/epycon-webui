@@ -21,6 +21,19 @@ from epycon.core._validators import (
 )
 
 
+def _ensure_hashable(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(_ensure_hashable(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_ensure_hashable(item) for item in value)
+    return value
+
+
+def _normalize_channel_name(channel_name: Union[str, bytes]) -> str:
+    if isinstance(channel_name, bytes):
+        channel_name = channel_name.decode('utf-8')
+    return ''.join(str(channel_name).split())
+
 import os
 from warnings import warn
 import h5py as h
@@ -36,7 +49,7 @@ from epycon.core._formatting import _tocsv, _tosel, SignalPlantDefaults
 
 from epycon.core._typing import (
     Union, PathLike, NumpyArray, Tuple, List, Any,
-    Callable, Iterator, Optional, Dict
+    Callable, Iterator, Optional, Dict, cast
 )
 
 from epycon.core._validators import (
@@ -55,7 +68,7 @@ class EntryPlanter:
     def savecsv(
             self,
             f_path: Union[str, bytes, PathLike],            
-            criteria: Dict[str, Union[List, Tuple, set]] = None,
+            criteria: Optional[Dict[str, Union[List, Tuple, set]]] = None,
             **kwargs,
             ) -> None:
         
@@ -63,7 +76,7 @@ class EntryPlanter:
                 
         # format entries
         content = _tocsv(
-            self._filter(criteria=criteria),
+            list(self._filter(criteria=criteria)),
             ref_timestamp=ref_timestamp if ref_timestamp is not None else None,
             )
                 
@@ -76,17 +89,22 @@ class EntryPlanter:
             ref_timestamp: float,
             sampling_freq: Union[int, float],
             channel_names: Union[List, Tuple],            
-            criteria: Dict[str, Union[List, Tuple, set]] = None,
+            criteria: Optional[Dict[str, Union[List, Tuple, set]]] = None,
             **kwargs,
             ) -> None:        
 
         # format entries
+        _basename = os.path.basename(f_path)
+        if isinstance(_basename, bytes):
+            _file_name = _basename.decode('utf-8')
+        else:
+            _file_name = str(_basename)
         content = _tosel(
-            self._filter(criteria=criteria),
+            list(self._filter(criteria=criteria)),
             ref_timestamp,
             sampling_freq,
             channel_names,
-            os.path.basename(f_path),
+            _file_name,
             )
                 
         with open(f_path, 'w', encoding='utf-8') as f_obj:
@@ -94,7 +112,7 @@ class EntryPlanter:
 
     def _filter(
             self,            
-            criteria: Dict[str, Union[List, Tuple, set]] = None,
+            criteria: Optional[Dict[str, Union[List, Tuple, set]]] = None,
         ) -> Iterator[Entry]:
             """ Returns an iterator of MyDataClass items that pass the filter function.
 
@@ -112,7 +130,10 @@ class EntryPlanter:
                         if isinstance(criteria[field], str):
                             criteria[field] = {criteria[field]}
                         elif isinstance(criteria[field], (list, tuple, set)):
-                            criteria[field] = set(criteria[field])
+                            normalized_values = set()
+                            for item in criteria[field]:
+                                normalized_values.add(_ensure_hashable(item))
+                            criteria[field] = normalized_values
                         else:
                             raise TypeError
             
@@ -148,7 +169,10 @@ class DatalogPlanter:
         
         self.f_path = f_path
         self._f_obj = None
-        self._extension = _validate_str("output file extension", os.path.splitext(f_path)[1].lower(), valid_set={".csv", ".h5"})
+        _ext = os.path.splitext(f_path)[1]
+        if isinstance(_ext, bytes):
+            _ext = _ext.decode('utf-8')
+        self._extension = _validate_str("output file extension", str(_ext).lower(), valid_set={".csv", ".h5"})
         self.column_names = column_names
 
     def __enter__(self):
@@ -286,7 +310,8 @@ class HDFPlanter(DatalogPlanter):
                 assert len(self.column_names) == darray.shape[1]
             
             # make a list of encoded channel names with removed white spaces
-            self.column_names = [''.join(item.split()).encode('UTF-8') for item in self.column_names]
+            normalized_names = [_normalize_channel_name(item) for item in self.column_names]
+            self.column_names = [name.encode('UTF-8') for name in normalized_names]
 
             # write attributes
             self._generate_attributes()
@@ -345,10 +370,11 @@ class HDFPlanter(DatalogPlanter):
             # Generate content
             content = list()
 
+            channel_settings_values: List[Any] = list(self.cfg.CHANNEL_SETTINGS.values())
             for ch_name in self.column_names:                
                 # Generate single channel settings and append to content
-                temp = [ch_name]
-                temp.extend(list(self.cfg.CHANNEL_SETTINGS.values()))
+                temp: List[Any] = [ch_name]
+                temp.extend(channel_settings_values)
                 content.append(tuple(temp))
 
             content = np.array(
@@ -401,7 +427,8 @@ class HDFPlanter(DatalogPlanter):
 
             # add/append dataset
             if self._INFO_DNAME in self._f_obj:
-                current_content = self._f_obj[self._INFO_DNAME][:]
+                _info_ds = cast(h.Dataset, self._f_obj[self._INFO_DNAME])
+                current_content = _info_ds[:]
                 content = np.append(current_content, content)
 
                 del self._f_obj[self._INFO_DNAME]
@@ -434,21 +461,22 @@ class HDFPlanter(DatalogPlanter):
             return
     
         # Check for data shape consistency, raise error if does not match
-        if self._f_obj[self._DATASET_DNAME].shape[0] != darray.shape[0]:
+        _dataset = cast(h.Dataset, self._f_obj[self._DATASET_DNAME])
+        if _dataset.shape[0] != darray.shape[0]:
             raise ValueError(
                 f"""Inconsistent shape of the input data.
-                Expected to be {self.f_obj[self._DATASET_DNAME].shape[0]}, 
+                Expected to be {_dataset.shape[0]}, 
                 got {darray.shape[0]} instead."""
                 )            
 
         # reshape hdf dataset
-        self._f_obj[self._DATASET_DNAME].resize(
-            self._f_obj[self._DATASET_DNAME].shape[1] + darray.shape[1],
+        _dataset.resize(
+            _dataset.shape[1] + darray.shape[1],
             axis=1,
             )
                 
         # append samples
-        self._f_obj[self._DATASET_DNAME][:, -darray.shape[1]:] = darray 
+        _dataset[:, -darray.shape[1]:] = darray 
         
     def add_marks(
         self,
@@ -475,13 +503,17 @@ class HDFPlanter(DatalogPlanter):
             # filter out negative samples
             position = max(1, position)
 
+            group_bytes = group if isinstance(group, bytes) else group.encode('UTF-8')
+            message_bytes = message if isinstance(message, bytes) else message.encode('UTF-8')
+            channel_id = self.column_names[0]
+
             marks.append((
                 int(position),
                 int(position),
-                group.encode('UTF-8'),
+                group_bytes,
                 1.0,
-                self.column_names[0],
-                message.encode('UTF-8')
+                channel_id,
+                message_bytes
             ))
 
         # create NumPy array
