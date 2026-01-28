@@ -1,6 +1,16 @@
 """Test script to verify version 4.3.2 is treated as x64 schema"""
 import sys
-sys.path.insert(0, 'c:/Projects/epycon/epycon')
+from pathlib import Path
+
+# Ensure UTF-8 output on all platforms
+if sys.stdout.encoding != 'utf-8':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+# Add epycon module to path (cross-platform)
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root / 'epycon'))
+sys.path.insert(0, str(project_root))
 
 from iou.parsers import LogParser, _readentries
 from core._validators import _validate_version
