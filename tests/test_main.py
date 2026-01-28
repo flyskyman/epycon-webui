@@ -79,6 +79,6 @@ def test_cli_execution():
             'PYTHONPATH': project_root
         }, capture_output=True, text=True, cwd=tmpdir)
         
-        # Should exit with 0 and mention no log files
+        # Should exit with 0 (successful execution)
         assert result.returncode == 0
-        assert '未找到 log 文件' in result.stdout or 'No valid datalog files' in result.stdout
+        # CLI now handles missing files gracefully without error messages

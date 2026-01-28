@@ -41,3 +41,13 @@ def test_pretty_json_roundtrip():
     # loads back to same structure
     import json
     assert json.loads(s) == d
+
+
+def test_default_log_path():
+    """Test default_log_path function."""
+    log_path = helpers.default_log_path()
+    assert isinstance(log_path, str)
+    assert log_path.endswith("epycon.log")
+    # Path should exist or be creatable
+    log_dir = os.path.dirname(log_path)
+    assert os.path.exists(log_dir) or log_dir == ""
