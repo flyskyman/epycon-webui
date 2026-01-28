@@ -61,10 +61,9 @@ jobs:
               cfg = json.load(f)
           cfg['paths']['input_folder'] = 'examples/data'
           cfg['paths']['output_folder'] = 'examples/data/out'
-          cfg['entries']['convert'] = false  # Skip entries processing in CI to avoid timestamp issues
           with open('config/config.json', 'w') as f:
               json.dump(cfg, f, indent=2)
-          print('Config updated for CI - entries processing disabled')
+          print('Config updated for CI')
           "
       - name: Run epycon
         env:
