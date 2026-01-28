@@ -33,7 +33,8 @@ jobs:
         run: |
           echo "Running basic validation tests..."
           python scripts/test_version.py
-          echo "Note: Comprehensive tests (test_business_logic.py, test_extended.py) require test data files and are skipped in CI. These should be run locally or with proper test fixtures."
+          echo "Running business logic tests..."
+          python scripts/test_business_functions.py
       # Codecov upload removed — not using Codecov
       - name: Upload coverage HTML report
         if: ${{ always() }}
