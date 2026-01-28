@@ -10,23 +10,28 @@ import json
 import subprocess
 from pathlib import Path
 
+# Ensure UTF-8 output on all platforms
+if sys.stdout.encoding != 'utf-8':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 def run_command(cmd, description):
     """运行命令并报告结果"""
     print(f"\n{'='*60}")
-    print(f"🔧 {description}")
+    print(f"[RUN] {description}")
     print(f"{'='*60}")
     print(f"$ {cmd}")
     result = os.system(cmd)
     if result != 0:
-        print(f"❌ 失败: {description}")
+        print(f"[FAIL] {description}")
         return False
-    print(f"✅ 成功: {description}")
+    print(f"[OK] {description}")
     return True
 
 def main():
     os.chdir(Path(__file__).parent.parent)  # 切换到项目根目录
     
-    print(f"🏃 开始本地集成测试 — {Path.cwd()}")
+    print(f"[START] 开始本地集成测试 — {Path.cwd()}")
     
     all_passed = True
     
@@ -76,11 +81,11 @@ def main():
     # 最终报告
     print(f"\n{'='*60}")
     if all_passed:
-        print("✅ 所有本地集成测试通过！")
-        print("🚀 可以安心推送到 GitHub")
+        print("[PASS] 所有本地集成测试通过！")
+        print("[OK] 可以安心推送到 GitHub")
         return 0
     else:
-        print("❌ 部分测试失败，请检查上述错误日志")
+        print("[FAIL] 部分测试失败，请检查上述错误日志")
         return 1
 
 if __name__ == '__main__':
