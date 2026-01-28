@@ -139,18 +139,17 @@ def test_schema_format():
 def test_data_generation():
     """Test that fake data can be generated"""
     try:
-        from scripts.generate_fake_wmx32 import generate_fake_log
+        # Check if the data generator script is available
+        from scripts.generate_fake_wmx32 import generate_wmx
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = os.path.join(tmpdir, 'test.log')
-            
-            # Try to generate test data
-            # This tests if the generator is available
+            # Just verify the function is importable and callable
+            assert callable(generate_wmx), "generate_wmx is not callable"
             
             print("  - Data generator module found")
-            print("  - Available for: test data creation")
-    except ImportError:
-        print("  - Data generator: Module available")
+            print("  - Available function: generate_wmx")
+    except ImportError as e:
+        print(f"  - Warning: Could not import generator: {e}")
 
 
 @test('Example data directory structure')
