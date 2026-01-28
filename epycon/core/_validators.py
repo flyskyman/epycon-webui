@@ -6,7 +6,7 @@ from epycon.core._typing import (
 
 def _validate_int(
     name: str,
-    value: Union[int, float],
+    value: Union[int, float, None],
     min_value: int = 0,
     mxn_value: Union[int, None] = None,
     ) -> Union[int, None]:
@@ -50,7 +50,7 @@ def _validate_int(
 
 def _validate_str(
     name: str,
-    value: str,
+    value: Union[str, None],
     valid_set: set,
     ) -> Union[str, None]:
     """Checks whether the parameter belongs to a set of valid parameters. Raises a ValueError otherwise.

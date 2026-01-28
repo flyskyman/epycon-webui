@@ -89,7 +89,7 @@ class TestHDFPlanter:
             import h5py
             with h5py.File(h5_path, 'r') as f:
                 assert 'Data' in f
-                assert f['Data'].shape == (2, 2)  # channels x samples
+                assert f['Data'].shape == (2, 2)  # channels x samples  # type: ignore
                 assert 'Fs' in f.attrs
                 assert f.attrs['Fs'] == 2000
 
@@ -129,7 +129,7 @@ class TestHDFPlanter:
             # Verify combined data
             import h5py
             with h5py.File(h5_path, 'r') as f:
-                assert f['Data'].shape == (1, 4)  # 1 channel, 4 samples
+                assert f['Data'].shape == (1, 4)  # 1 channel, 4 samples  # type: ignore
 
     def test_hdf_planter_add_marks(self):
         """Test HDFPlanter add_marks method."""
@@ -153,4 +153,4 @@ class TestHDFPlanter:
             with h5py.File(h5_path, 'r') as f:
                 assert 'Marks' in f
                 marks = f['Marks']
-                assert len(marks) == 2
+                assert len(marks) == 2  # type: ignore
