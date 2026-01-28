@@ -35,6 +35,12 @@ jobs:
           python scripts/test_version.py
           echo "Running business logic tests..."
           python scripts/test_business_functions.py
+      - name: Run performance benchmarks
+        env:
+          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
+        run: |
+          echo "Running performance benchmarks..."
+          python scripts/test_performance_regression.py
       # Codecov upload removed — not using Codecov
       - name: Upload coverage HTML report
         if: ${{ always() }}
