@@ -27,7 +27,7 @@ jobs:
         continue-on-error: true
       - name: Run unit tests with coverage
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
         run: |
           echo "Running tests with coverage..."
           python scripts/test_business_logic.py
@@ -67,7 +67,7 @@ jobs:
           "
       - name: Run epycon
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
           EPYCON_CONFIG: ${{ github.workspace }}/config/config.json
           EPYCON_JSONSCHEMA: ${{ github.workspace }}/config/schema.json
         run: python -m epycon
