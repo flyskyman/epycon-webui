@@ -5,6 +5,7 @@ from datetime import datetime
 
 from epycon.core._typing import (
     List,
+    Union,
 )
 
 from re import (
