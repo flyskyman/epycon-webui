@@ -81,12 +81,20 @@ def _validate_str(
 def _validate_version(
     version: Union[str, None],
 ) -> str:
-    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3'}
+    # 完整版本列表 (包含所有子版本)
+    valid_x32 = {'4.1'}
+    valid_x64 = {'4.2', '4.3', '4.3.2'}
 
     if version is None:
         return 'x64'
     
-    # Normalize version to major.minor (e.g., 4.3.2 -> 4.3)
+    # 检查是否是完整版本号 (如 4.3.2)
+    if version in valid_x32:
+        return 'x32'
+    elif version in valid_x64:
+        return 'x64'
+    
+    # 尝试规范化为 major.minor (例如 4.3.2 -> 4.3)
     parts = version.split('.')
     normalized = '.'.join(parts[:2]) if len(parts) >= 2 else version
     

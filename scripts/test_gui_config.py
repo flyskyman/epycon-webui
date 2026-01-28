@@ -140,7 +140,7 @@ def test_data_generation():
     """Test that fake data can be generated"""
     try:
         # Check if the data generator script is available
-        from scripts.generate_fake_wmx32 import generate_wmx
+        from scripts.generate_fake_wmx import generate_wmx
         
         with tempfile.TemporaryDirectory() as tmpdir:
             # Just verify the function is importable and callable

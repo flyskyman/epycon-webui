@@ -390,7 +390,7 @@ class LogParser(abc.Iterator):
         return Header(
             timestamp,
             num_channels,
-            channels.content,  # Pass the list of channels, not the Channels object
+            channels,  # Pass the Channels object with mount mappings
             amp_settings,  # type: ignore  # __post_init__ will convert dict to AmplifierSettings
             datablock_startbyte,
         )

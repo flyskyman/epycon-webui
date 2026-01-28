@@ -11,6 +11,21 @@
         "${workspaceFolder}"
     ],
     "python.analysis.diagnosticsMode": "workspace",
+    "python.analysis.exclude": [
+        "test_h5_marks.py",
+        "debug_entries.py",
+        "test_wmx64_merge.py",
+        "verify_wmx64_integrity.py",
+        "check_marks.py",
+        "generate_matched_data.py",
+        "generate_wmx64_entries.py",
+        "inspect_h5.py",
+        "regenerate_test_data.py",
+        "test_direct.py",
+        "test_http.py",
+        "test_readentries.py",
+        "validate_entries_logic.py"
+    ],
     "editor.formatOnSave": true,
     "python.formatting.provider": "black",
     "github-actions.workflows.pinned.workflows": [],

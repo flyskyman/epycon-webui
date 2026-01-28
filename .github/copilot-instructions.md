@@ -109,14 +109,14 @@ with HDFPlanter("merged.h5", column_names=["CH1"], append=True) as planter:
 
 **生成器（用于无需真实数据时验证流程）**
 
-仓库包含一个可配置的生成脚本： scripts/generate_fake_wmx32.py，用于生成 WMx32 兼容的占位二进制日志（仅用于测试流程，非真实临床数据）。示例用法：
+仓库包含一个可配置的生成脚本： scripts/generate_fake_wmx.py，用于生成 WMx32/WMx64 兼容的占位二进制日志（仅用于测试流程，非真实临床数据）。示例用法：
 
 ```powershell
-# 生成单通道、1024 samples 的默认文件
-python scripts\generate_fake_wmx32.py
+# 生成单通道、1024 samples 的默认文件 (WMx64 4.3.2)
+python scripts\generate_fake_wmx.py
 
 # 生成两通道、512 samples、采样率 500Hz 的文件到指定位置
-python scripts\generate_fake_wmx32.py --out examples/data/study01/00000001.log --channels 2 --samples 512 --value 500 --fs 500
+python scripts\generate_fake_wmx.py --out examples/data/study01/00000001.log --channels 2 --samples 512 --value 500 --fs 500
 ```
 
 生成的文件可以直接放到 `examples/data/<study>` 目录下用于 `python -m epycon` 端到端验证。

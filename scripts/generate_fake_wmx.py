@@ -4,8 +4,8 @@ import struct
 import time
 
 
-def generate_wmx(out_path, version='4.1', num_channels=1, num_samples=1024, sample_value=1000, sampling_freq=1000):
-    """Generate a fake WMx binary log. Supports WMx32 (4.1) and WMx64 (4.2/4.3).
+def generate_wmx(out_path, version='4.3.2', num_channels=1, num_samples=1024, sample_value=1000, sampling_freq=1000):
+    """Generate a fake WMx binary log. Supports WMx32 (4.1) and WMx64 (4.2/4.3/4.3.2).
 
     The generator fills header regions used by the parser (`epycon/config/byteschema.py`).
     It is intentionally minimal but sets timestamp, channel definitions, amplifier settings,
@@ -101,7 +101,7 @@ def write_master(out_dir, subject_id='SUBJ001'):
     return path
 
 
-def write_entries(out_dir, version='4.1', entries=None, datalog_id=1):
+def write_entries(out_dir, version='4.3.2', entries=None, datalog_id=1):
     """Write a minimal binary entries.log compatible with parser.
 
     entries: list of tuples (group:int, timestamp:int, message:str)
@@ -168,7 +168,7 @@ def main():
     parser.add_argument('--samples', '-n', type=int, default=1024)
     parser.add_argument('--value', '-v', type=int, default=1000)
     parser.add_argument('--fs', type=int, default=1000)
-    parser.add_argument('--version', '-V', choices=['4.1', '4.2', '4.3'], default='4.1', help='WorkMate version/schema to generate (4.1=WMx32, 4.2/4.3=WMx64)')
+    parser.add_argument('--version', '-V', choices=['4.1', '4.2', '4.3', '4.3.2'], default='4.3.2', help='WorkMate version/schema to generate (4.1=WMx32, 4.2/4.3/4.3.2=WMx64)')
     parser.add_argument('--with-entries', action='store_true', help='Also write a minimal entries.log')
     parser.add_argument('--with-master', action='store_true', help='Also write a MASTER file')
     parser.add_argument('--entries-count', type=int, default=1, help='Number of entries to generate')

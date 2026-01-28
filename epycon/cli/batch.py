@@ -1,13 +1,13 @@
 import argparse
 
-parser = argparse.ArgumentParser()
-
 def parse_arguments():
     """ Custom CLI definition
 
     Returns:
         parser: CLI arguments
     """
+    parser = argparse.ArgumentParser()
+    
     # Input and output folder paths    
     parser.add_argument("-i", "--input_folder", type=str,)
     parser.add_argument("-o", "--output_folder", type=str,)

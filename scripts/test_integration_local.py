@@ -44,7 +44,7 @@ def main():
     
     # 2. 生成测试数据
     if not run_command(
-        'python scripts/generate_fake_wmx32.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 5 --entries-fids 2 --version 4.3 --channels 2',
+        'python scripts/generate_fake_wmx.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 5 --entries-fids 2 --version 4.3 --channels 2',
         "生成测试数据（5 entries, 2 fids, 2 channels）"
     ):
         all_passed = False

@@ -92,7 +92,7 @@ scripts/                    # 开发和测试脚本
 ├── test_business_logic.py  # 业务逻辑测试
 ├── test_extended.py        # 扩展测试
 ├── test_version.py         # 版本测试
-├── generate_fake_wmx32.py  # 测试数据生成器
+├── generate_fake_wmx.py    # 测试数据生成器（WMx32 和 WMx64）
 ├── run_tests.ps1           # PowerShell 测试脚本
 ├── clean_repo.ps1          # 清理脚本
 └── README.md               # 脚本说明
@@ -288,7 +288,7 @@ python scripts/test_version.py
 ### 生成测试数据
 ```bash
 # 生成模拟 WorkMate 数据用于测试
-python scripts/generate_fake_wmx32.py --channels 12 --samples 10000
+python scripts/generate_fake_wmx.py --channels 12 --samples 10000
 ```
 
 ## 🔧 开发指南

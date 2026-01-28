@@ -204,122 +204,178 @@ if __name__ == "__main__":
         
         if merge_mode and output_fmt == "h5":
             # ===================== MERGE MODE =====================
-            # Sort datalogs by timestamp to ensure correct order
+            # Sort datalogs by timestamp and collect channel info
+            from collections import defaultdict
+            from epycon.core._dataclasses import Channels
+            
             datalog_info = []
             for datalog_path, datalog_id in all_datalogs:
                 with LogParser(
                     datalog_path,
                     version=cfg["global_settings"]["workmate_version"],
-                    samplesize=cfg["global_settings"]["processing"]["chunk_size"],
+                    samplesize=1024,
                 ) as parser:
                     header = parser.get_header()
+                    if header is None:
+                        logger.warning(f"⚠️ Cannot read header: {datalog_id}.log, skipping")
+                        continue
+                    
+                    # Get channel mappings for this file
+                    file_mappings = _get_channel_mappings(header, cfg)
+                    if cfg["data"]["channels"]:
+                        valid_channels = set(cfg["data"]["channels"])
+                        file_mappings = {k: v for k, v in file_mappings.items() if k in valid_channels}
+                    
                     datalog_info.append({
                         'path': datalog_path,
                         'id': datalog_id,
                         'timestamp': header.timestamp,
-                        'header': None,  # Will be populated later
+                        'header': header,
+                        'mappings': file_mappings,
+                        'num_output_channels': len(file_mappings),
                     })
             
             # Sort by timestamp
             datalog_info.sort(key=lambda x: x['timestamp'])
-            logger.info(f"Merge mode: {len(datalog_info)} files to merge, sorted by timestamp")
             
-            # Use first log's timestamp as reference
-            first_timestamp = datalog_info[0]['timestamp'] if datalog_info else 0
-            merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged.h5")
+            # Group by channel count to handle heterogeneous data
+            channel_groups = defaultdict(list)
+            for d in datalog_info:
+                channel_groups[d['num_output_channels']].append(d)
             
-            # Build metadata for merged file
-            hdf_attributes = {
-                "subject_id": subject_id,
-                "subject_name": subject_name,
-                "study_id": study_id,
-                "datalog_ids": ",".join([d['id'] for d in datalog_info]),
-                "timestamp": first_timestamp,
-                "datetime": datetime.fromtimestamp(first_timestamp).isoformat(),
-                "merged": True,
-                "num_files": len(datalog_info),
-            }
+            logger.info(f"Merge mode: {len(datalog_info)} files total, {len(channel_groups)} channel group(s)")
             
-            credentials = cfg["global_settings"].get("credentials", {})
-            if credentials:
-                hdf_attributes.update({
-                    "author": credentials.get("author", ""),
-                    "device": credentials.get("device", ""),
-                    "owner": credentials.get("owner", ""),
-                })
+            if len(channel_groups) > 1:
+                logger.warning(f"⚠️ Multiple channel counts detected, will create separate merged files:")
+                for num_ch, files in channel_groups.items():
+                    logger.warning(f"   {num_ch} channels: {len(files)} file(s)")
             
-            # Process each file and append to merged output
-            is_first_file = True
-            total_samples = 0
-            
-            for idx, dlog_info in enumerate(datalog_info):
-                datalog_path = dlog_info['path']
-                datalog_id = dlog_info['id']
+            # Process each channel group separately
+            for group_channel_count, group_files in channel_groups.items():
+                logger.info(f"\n📦 Processing channel group: {group_channel_count} channels, {len(group_files)} file(s)")
                 
-                print(f"Merging {datalog_id} ({idx+1}/{len(datalog_info)}): ", end="")
+                # Use first file's mappings as template for this group
+                first_mappings = group_files[0]['mappings']
+                merged_column_names = list(first_mappings.keys())
+                first_timestamp = group_files[0]['timestamp']
                 
-                with LogParser(
-                    datalog_path,
-                    version=cfg["global_settings"]["workmate_version"],
-                    samplesize=cfg["global_settings"]["processing"]["chunk_size"],
-                ) as parser:
-                    header = parser.get_header()
-                    
-                    # Create channel mappings
-                    mappings = _get_channel_mappings(header, cfg)
-                    
-                    if cfg["data"]["channels"]:
-                        valid_channels = set(cfg["data"]["channels"])
-                        mappings = {key: value for key, value in mappings.items() if key in valid_channels}
-                    
-                    column_names = list(mappings.keys())
-                    
-                    # Update attributes with sampling info from first file
-                    if is_first_file:
-                        hdf_attributes["sampling_freq"] = header.amp.sampling_freq
-                        hdf_attributes["num_channels"] = header.num_channels
-                    
-                    # Open planter in write mode for first file, append mode for subsequent
-                    with HDFPlanter(
-                        merged_output_path,
-                        column_names=column_names,
-                        sampling_freq=header.amp.sampling_freq,
-                        factor=1000,
-                        units="mV",
-                        attributes=hdf_attributes if is_first_file else {},
-                        append=not is_first_file,
-                    ) as planter:
-                        # Write data chunks
-                        for chunk in parser:
-                            chunk = mount_channels(chunk, mappings)
-                            planter.write(chunk)
-                            total_samples += chunk.shape[0]
-                        
-                        # Write entries for this datalog
-                        if cfg["data"]["pin_entries"] and hasattr(planter, "add_marks") and is_first_file:
-                            if entries:
-                                try:
-                                    filtered_entries = [e for e in entries if e.fid in [d['id'] for d in datalog_info]]
-                                    if filtered_entries:
-                                        groups, positions, messages = zip(
-                                            *[(
-                                                e.group,
-                                                header.amp.sampling_freq * difftimestamp((e.timestamp, first_timestamp)),
-                                                e.message,
-                                            ) for e in filtered_entries])
-                                        planter.add_marks(
-                                            positions=positions,
-                                            groups=groups,
-                                            messages=messages,
-                                        )
-                                except ValueError:
-                                    pass  # No matching entries
+                # Build metadata for merged file
+                hdf_attributes = {
+                    "subject_id": subject_id,
+                    "subject_name": subject_name,
+                    "study_id": study_id,
+                    "datalog_ids": ",".join([d['id'] for d in group_files]),
+                    "timestamp": first_timestamp,
+                    "datetime": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+                    "merged": True,
+                    "num_files": len(group_files),
+                }
                 
-                is_first_file = False
-                print("OK")
-            
-            logger.info(f"Merged {len(datalog_info)} files into {merged_output_path} ({total_samples} total samples)")
-            print(f"DONE (merged {len(datalog_info)} files)")
+                credentials = cfg["global_settings"].get("credentials", {})
+                if credentials:
+                    hdf_attributes.update({
+                        "author": credentials.get("author", ""),
+                        "device": credentials.get("device", ""),
+                        "owner": credentials.get("owner", ""),
+                    })
+                
+                # Determine output filename
+                if len(channel_groups) > 1:
+                    merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged_{group_channel_count}ch.h5")
+                else:
+                    merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged.h5")
+                
+                # Process each file and append to merged output
+                is_first_file = True
+                total_samples = 0
+                group_start_time = group_files[0]['timestamp']
+                
+                for idx, dlog_info in enumerate(group_files):
+                    datalog_path = dlog_info['path']
+                    datalog_id = dlog_info['id']
+                    header = dlog_info['header']
+                    file_mappings = dlog_info['mappings']
+                    
+                    print(f"Merging {datalog_id} ({idx+1}/{len(group_files)}): ", end="")
+                    
+                    # Calculate file time range for entries filtering
+                    file_start_sec = float(header.timestamp)
+                    file_size = os.path.getsize(datalog_path)
+                    n_channels = header.num_channels
+                    fs = header.amp.sampling_freq
+                    
+                    if n_channels > 0 and fs > 0:
+                        n_samples = (file_size - 32) // (n_channels * 2)
+                        file_duration_sec = n_samples / fs
+                    else:
+                        file_duration_sec = 0
+                    file_end_sec = file_start_sec + file_duration_sec
+                    
+                    # Filter entries for this file's time range
+                    is_last_file = (idx == len(group_files) - 1)
+                    if entries:
+                        if is_last_file:
+                            file_entries = [e for e in entries if file_start_sec <= e.timestamp <= file_end_sec]
+                        else:
+                            file_entries = [e for e in entries if file_start_sec <= e.timestamp < file_end_sec]
+                    else:
+                        file_entries = []
+                    
+                    with LogParser(
+                        datalog_path,
+                        version=cfg["global_settings"]["workmate_version"],
+                        samplesize=cfg["global_settings"]["processing"]["chunk_size"],
+                    ) as parser:
+                        # Update attributes with sampling info from first file
+                        if is_first_file:
+                            hdf_attributes["sampling_freq"] = header.amp.sampling_freq
+                            hdf_attributes["num_channels"] = len(merged_column_names)
+                        # Open planter with unified column names for this group
+                        with HDFPlanter(
+                            merged_output_path,
+                            column_names=merged_column_names,
+                            sampling_freq=header.amp.sampling_freq,
+                            factor=1000,
+                            units="mV",
+                            attributes=hdf_attributes if is_first_file else {},
+                            append=not is_first_file,
+                        ) as planter:
+                            file_sample_count = 0
+                            # Write data chunks
+                            for chunk in parser:
+                                chunk = mount_channels(chunk, file_mappings)
+                                planter.write(chunk)
+                                file_sample_count += chunk.shape[0]
+                                total_samples += chunk.shape[0]
+                            
+                            # Inject entries for this specific file
+                            if cfg["data"]["pin_entries"] and file_entries and hasattr(planter, "add_marks"):
+                                # Calculate global positions for this file's entries
+                                global_base = total_samples - file_sample_count
+                                file_end_global = global_base + file_sample_count
+                                
+                                valid_marks = []
+                                for e in file_entries:
+                                    relative_pos = round((e.timestamp - file_start_sec) * fs)
+                                    global_pos = global_base + relative_pos
+                                    
+                                    if global_base <= global_pos < file_end_global:
+                                        valid_marks.append((global_pos, str(e.group), str(e.message)))
+                                
+                                if valid_marks:
+                                    positions, groups, messages = zip(*valid_marks)
+                                    planter.add_marks(
+                                        positions=list(positions),
+                                        groups=list(groups),
+                                        messages=list(messages),
+                                    )
+                                    logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id} (time range: {file_start_sec:.2f}-{file_end_sec:.2f})")
+                            
+                            is_first_file = False
+                            print("OK")
+                
+                logger.info(f"Merged {len(group_files)} files into {merged_output_path} ({total_samples} total samples)")
+                print(f"DONE (merged {len(group_files)} files)")
         
         else:
             # ===================== NORMAL MODE (per-file) =====================

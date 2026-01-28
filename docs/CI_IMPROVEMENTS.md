@@ -39,7 +39,7 @@
 
 ### 测试数据参数
 ```bash
-python scripts/generate_fake_wmx32.py \
+python scripts/generate_fake_wmx.py \
   --out examples/data/study01/00000000.log \
   --with-entries \
   --with-master \
@@ -81,6 +81,6 @@ python scripts/generate_fake_wmx32.py \
 |------|------|
 | `.github/workflows/ci.yml` | 更新测试参数（5 entries, 2 fids, 2 channels），简化验证脚本调用 |
 | `scripts/validate_ci_output.py` | 新增独立验证脚本 |
-| `scripts/generate_fake_wmx32.py` | 之前修复的时间戳和二进制格式问题 |
+| `scripts/generate_fake_wmx.py` | 之前修复的时间戳和二进制格式问题 |
 | `config/config.json` | entries.convert 启用，输出路径配置 |
 

@@ -20,7 +20,7 @@ python scripts/test_business_functions.py
 
 ```bash
 # 1. 生成测试数据
-python scripts/generate_fake_wmx32.py --out examples/data/study01/00000000.log --with-entries --with-master --version 4.3 --channels 2
+python scripts/generate_fake_wmx.py --out examples/data/study01/00000000.log --with-entries --with-master --version 4.3 --channels 2
 
 # 2. 运行业务逻辑测试
 python scripts/test_business_functions.py

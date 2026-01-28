@@ -1,14 +1,18 @@
 {
-    "include": [
-        "epycon",
-        "scripts",
-        "app_gui.py"
-    ],
     "exclude": [
         "**/node_modules",
         "**/__pycache__",
         ".venv",
-        "venv"
+        "venv",
+        "tests/test_direct.py",
+        "tests/test_h5_marks.py",
+        "tests/test_http.py",
+        "tests/test_readentries.py",
+        "tests/test_wmx64_merge.py",
+        "tests/check_marks.py",
+        "tests/debug_entries.py",
+        "tests/validate_entries_logic.py",
+        "tests/verify_wmx64_integrity.py"
     ],
     "pythonVersion": "3.10",
     "pythonPlatform": "Windows",

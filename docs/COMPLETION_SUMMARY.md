@@ -7,12 +7,12 @@
 1. **修复时间戳计算错误**
    - 问题：base_timestamp_ms 为 1704067200000（错误），导致日期溢出
    - 解决：改正为 1704038400000（2024-01-01 UTC 的正确毫秒数）
-   - 文件：`scripts/generate_fake_wmx32.py`
+   - 文件：`scripts/generate_fake_wmx.py`
 
 2. **修复 WMx64 二进制格式 bug**
    - 问题：write_entries 使用错误的文本字段偏移 (0xE)，覆盖时间戳数据
    - 解决：根据时间戳格式使用正确的偏移 (0x12 for WMx64, 0xE for WMx32)
-   - 文件：`scripts/generate_fake_wmx32.py`
+   - 文件：`scripts/generate_fake_wmx.py`
 
 3. **启用完整的 Entries 处理**
    - `config/config.json` 中设置 `entries.convert = true`
@@ -77,7 +77,7 @@ NOTE,00000002,2024-01-01_00:03:00,example entry #4
 
 修改文件：
   ~ .github/workflows/ci.yml           — 更新测试参数和验证流程
-  ~ scripts/generate_fake_wmx32.py     — 时间戳和二进制格式修复
+  ~ scripts/generate_fake_wmx.py     — 时间戳和二进制格式修复
   ~ config/config.json                 — 启用 entries 处理
 
 不变：

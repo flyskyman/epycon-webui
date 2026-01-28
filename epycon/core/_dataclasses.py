@@ -97,7 +97,7 @@ class AmplifierSettings:
 class Header:
     timestamp: int
     num_channels: int
-    channels: List    
+    channels: Union[List, 'Channels']    
     amp: AmplifierSettings
     datablock_address: int
 
