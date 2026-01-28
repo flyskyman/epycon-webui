@@ -98,3 +98,16 @@
 小结：完成版本对齐、文档与 UI 注释修正、分组提交、打 tag 与覆盖 release、EXE 构建与上传，以及仓库清理，为下一阶段（CI + 功能迭代）做好准备。
 
 2026年1月27日 — 结束。
+
+2026年1月28日 补记：
+- 🚀 性能回归检测系统：创建 `scripts/test_performance_regression.py`，包含 5 个关键性能基准（HDF5/CSV I/O、配置操作、数组运算），自动检测 15% 性能回归，基准数据存储在 `scripts/benchmarks.json`。
+- 🔧 CI/CD 集成：更新 `.github/workflows/ci.yml` 集成性能基准测试，自动在每次提交时运行性能检测。
+- 📚 文档完善：创建 `docs/PERFORMANCE_REGRESSION.md` 详细指南，包含工作原理、本地运行方式、基准更新流程和故障排除。
+- 🧪 测试增强：修复 `test_gui_config.py` 中的导入错误（`generate_fake_log` → `generate_wmx`），确保所有 57+ 测试用例通过。
+- 🧹 主目录整理：清理被忽略的文件（`.coverage`、`real_test_config.json`、`test_output/`、`__pycache__/`、`.pytest_cache/`），将 `PROJECT_COMPLETED.md` 移动到 `docs/` 目录。
+- 📊 项目质量评估：分析当前状态，识别缺失项（代码覆盖率报告、Linting 配置、安全检查、API 文档），制定优先级改进路线图。
+- 📝 提交管理：创建 4 个逻辑提交（性能检测系统、主目录整理、测试修复、质量评估），推送至 `feature/enhanced-conversion` 分支。
+
+小结：完成性能监控体系建设、代码质量评估和项目整理，为后续代码质量提升（代码覆盖率、Linting、安全检查、API 文档）奠定基础。项目已具备完整的测试 + 性能监控 + CI/CD 工具链。
+
+2026年1月28日 — 休息。
