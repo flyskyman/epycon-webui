@@ -33,7 +33,8 @@ def validate_outputs(output_dir="examples/data/out/study01"):
                     if ds not in datasets:
                         errors.append(f"HDF5 缺少必需数据集: {ds}")
                     else:
-                        shape = f[ds].shape
+                        dataset = f[ds]
+                        shape = dataset.shape  # type: ignore
                         print(f"    [{ds}] 形状={shape}")
         except Exception as e:
             errors.append(f"读取 HDF5 文件失败: {e}")
