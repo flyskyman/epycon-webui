@@ -53,6 +53,18 @@ jobs:
           PY
       - name: Create output directory
         run: mkdir -p examples/data/out
+      - name: Update config for CI
+        run: |
+          python -c "
+          import json
+          with open('config/config.json', 'r') as f:
+              cfg = json.load(f)
+          cfg['paths']['input_folder'] = 'examples/data'
+          cfg['paths']['output_folder'] = 'examples/data/out'
+          with open('config/config.json', 'w') as f:
+              json.dump(cfg, f, indent=2)
+          print('Config updated for CI')
+          "
       - name: Run epycon
         env:
           PYTHONPATH: ${{ github.workspace }}
