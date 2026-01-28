@@ -41,7 +41,7 @@ jobs:
           name: coverage-report
           path: htmlcov/
       - name: Generate test data
-        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 2 --entries-fids 1 --version 4.3 --channels 1
+        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 5 --entries-fids 2 --version 4.3 --channels 2
       - name: Validate config
         run: |
           python - <<'PY'
@@ -71,6 +71,8 @@ jobs:
           EPYCON_CONFIG: ${{ github.workspace }}/config/config.json
           EPYCON_JSONSCHEMA: ${{ github.workspace }}/config/schema.json
         run: python -m epycon
+      - name: Verify epycon output
+        run: python scripts/validate_ci_output.py examples/data/out/study01
       - name: Upload output artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
