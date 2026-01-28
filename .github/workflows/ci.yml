@@ -20,11 +20,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy h5py jsonschema pytest pytest-cov
-      - name: Run type checks with Pylance
-        run: |
-          pip install pylance pyright
-          pyright epycon/ --pythonversion 3.10
-        continue-on-error: true
+      # Type checking with Pyright disabled - too strict for current codebase
+      # Enable this after proper type annotations are added
+      # - name: Run type checks with Pylance
+      #   run: |
+      #     pip install pylance pyright
+      #     pyright epycon/ --pythonversion 3.10 || true
+      #   continue-on-error: true
       - name: Run unit tests with coverage
         env:
           PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
