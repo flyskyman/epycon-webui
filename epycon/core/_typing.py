@@ -18,13 +18,13 @@ if sys.version_info >= (3, 6):
     from os import (
         PathLike as PathLike,
     )
-    
-    from numpy import (        
+
+    from numpy import (
         ndarray as NumpyArray
     )
 
     from numpy.typing import (
-        ArrayLike as ArrayLike,        
+        ArrayLike as ArrayLike,
     )
 
 else:

@@ -1,10 +1,12 @@
 from .parsers import (
-    LogParser,
+    LogParser as LogParser,
     _readmaster as readmaster,
     _readentries as readentries,
     _mount_channels as mount_channels
 )
 
 from .planters import (
-    EntryPlanter, CSVPlanter, HDFPlanter
+    EntryPlanter as EntryPlanter,
+    CSVPlanter as CSVPlanter,
+    HDFPlanter as HDFPlanter,
 )

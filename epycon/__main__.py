@@ -1,6 +1,5 @@
 if __name__ == "__main__":
     import os
-    import sys
     import json
     import logging
     import jsonschema
@@ -138,7 +137,7 @@ if __name__ == "__main__":
         try:
             # make output directory
             os.makedirs(os.path.join(output_folder, study_id), exist_ok=True)
-        except OSError as e:
+        except OSError:
             logger.error(f"Unable to create output folder {study_id} in {output_folder}.")
             continue
 
@@ -166,8 +165,8 @@ if __name__ == "__main__":
                     f_path=os.path.join(study_path, ENTRIES_FILENAME),
                     version=cfg["global_settings"]["workmate_version"],
                     )
-            except OSError as e:                
-                logger.warning(f"Could not find ENTRIES log file. Annotation export will be skipped.")
+            except OSError:                
+                logger.warning("Could not find ENTRIES log file. Annotation export will be skipped.")
                 entries = list()
         else:
             entries = list()
@@ -208,7 +207,6 @@ if __name__ == "__main__":
             # ===================== MERGE MODE =====================
             # Sort datalogs by timestamp and collect channel info
             from collections import defaultdict
-            from epycon.core._dataclasses import Channels
             
             datalog_info = []
             for datalog_path, datalog_id in all_datalogs:
@@ -248,7 +246,7 @@ if __name__ == "__main__":
             logger.info(f"Merge mode: {len(datalog_info)} files total, {len(channel_groups)} channel group(s)")
             
             if len(channel_groups) > 1:
-                logger.warning(f"⚠️ Multiple channel counts detected, will create separate merged files:")
+                logger.warning("⚠️ Multiple channel counts detected, will create separate merged files:")
                 for num_ch, files in channel_groups.items():
                     logger.warning(f"   {num_ch} channels: {len(files)} file(s)")
             
@@ -328,8 +326,8 @@ if __name__ == "__main__":
                         out_of_range = [e for e in entries if e.fid == datalog_id and not (file_start_sec <= e.timestamp <= file_end_sec)]
                         if out_of_range:
                             logger.warning(f"   ⚠️ {len(out_of_range)} entries with fid={datalog_id} are outside time range [{file_start_sec:.0f}, {file_end_sec:.0f}]")
-                            for e in out_of_range[:3]:  # Show first 3 examples
-                                logger.warning(f"      Entry at {e.timestamp:.0f}s: {e.message[:50]}...")
+                            for entry in out_of_range[:3]:  # Show first 3 examples
+                                logger.warning(f"      Entry at {entry.timestamp:.0f}s: {entry.message[:50]}...")
                     else:
                         file_entries = []
                     
@@ -367,9 +365,9 @@ if __name__ == "__main__":
                                 file_end_global = global_base + file_sample_count
                                 
                                 valid_marks = []
-                                for e in file_entries:
+                                for entry in file_entries:
                                     # Calculate relative position from file start
-                                    relative_pos = round((e.timestamp - file_start_sec) * fs)
+                                    relative_pos = round((entry.timestamp - file_start_sec) * fs)
                                     global_pos = global_base + relative_pos
                                     
                                     # Clamp position to valid range (handles minor timestamp inaccuracies)
@@ -380,7 +378,7 @@ if __name__ == "__main__":
                                         logger.debug(f"   Entry position {global_pos} >= {file_end_global}, clamping to file end-1")
                                         global_pos = file_end_global - 1
                                     
-                                    valid_marks.append((global_pos, str(e.group), str(e.message)))
+                                    valid_marks.append((global_pos, str(entry.group), str(entry.message)))
                                 
                                 if valid_marks:
                                     # Accumulate marks instead of adding immediately
@@ -460,6 +458,7 @@ if __name__ == "__main__":
                     # instantiate planter and write data chunks
                     column_names = list(mappings.keys())
 
+                    DataPlanter: type[CSVPlanter] | type[HDFPlanter]
                     if output_fmt == "csv":
                         DataPlanter = CSVPlanter
                     elif output_fmt == "h5":                    
@@ -551,5 +550,5 @@ if __name__ == "__main__":
                     else:
                         pass
 
-                print(f"DONE")
+                print("DONE")
 

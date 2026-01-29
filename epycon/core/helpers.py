@@ -4,13 +4,12 @@ from datetime import datetime
 # from yaml.constructor import SafeConstructor
 
 from epycon.core._typing import (
-    List,
     Union,
+    Sequence,
 )
 
 from re import (
     sub,
-    match,
 )
 from json import (
     dumps,
@@ -70,7 +69,7 @@ def deep_override(cfg_dict: dict, keys: list, value):
     return cfg_dict
 
 
-def difftimestamp(timestamps: List[Union[int, float]]) -> float:
+def difftimestamp(timestamps: Sequence[Union[int, float]]) -> float:
     assert len(timestamps) == 2
     return abs((datetime.fromtimestamp(timestamps[0]) - datetime.fromtimestamp(timestamps[1])).total_seconds())
 

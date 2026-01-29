@@ -1,19 +1,12 @@
-import os
-import json
-from numpy import savetxt
 from datetime import datetime
 from collections import OrderedDict
 
 from dataclasses import dataclass
 
-from epycon.utils.decorators import checktypes
 from epycon.core._dataclasses import Entry
-from epycon.core._validators import (
-    _validate_str,
-)
 
 from epycon.core._typing import (
-    Union, PathLike, List, Dict, Tuple
+    Union, List, Tuple
 )
 
 @dataclass

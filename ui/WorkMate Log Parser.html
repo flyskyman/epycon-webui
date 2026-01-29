@@ -646,8 +646,8 @@
         </div>
 
         <script>
-            const GROUP_MAP = { 1: 'PROTOCOL', 2: 'EVENT', 3: 'NOTE', 4: 'DEBUG', 5: 'SYS', 6: 'PACE', 17: 'RATE' };
-            const DEFAULT_HIDDEN = new Set(['SYS', 'DEBUG', 'UNK', 'IDK', 'ERROR', 'UNKNOWN']);
+            const GROUP_MAP = { 1: 'PROTOCOL', 2: 'EVENT', 3: 'NOTE', 4: 'DEBUG', 5: 'HIDDEN_NOTE', 6: 'PACE', 17: 'RATE' };
+            const DEFAULT_HIDDEN = new Set(['SYS', 'DEBUG', 'UNK', 'IDK', 'ERROR', 'UNKNOWN', 'HIDDEN_NOTE']);
             const PAGE_SIZE = 100;
 
             // --- State Management ---
@@ -977,24 +977,31 @@
 
                     let row = { ts: 0, timeStr: '', group: 'UNK', msg: '' };
 
-                    try {
-                        const gid = view.getUint16(ptr, true);
-                        row.group = GROUP_MAP[gid] || `UNK(${gid})`;
+                    // SAFE: Pre-checked boundary (line 976) guarantees read safety. Removed try-catch for V8 optimization.
+                    const gid = view.getUint16(ptr, true);
+                    row.group = GROUP_MAP[gid] || `UNK(${gid})`;
 
-                        let ts = (spec === V_x64) ? Number(view.getBigUint64(ptr + spec.tsOff, true)) : view.getUint32(ptr + spec.tsOff, true) * 1000;
-                        row.ts = ts;
+                    let ts = (spec === V_x64) ? Number(view.getBigUint64(ptr + spec.tsOff, true)) : view.getUint32(ptr + spec.tsOff, true) * 1000;
+                    row.ts = ts;
 
-                        if (ts > 0 && ts < 4102444800000) {
-                            const d = new Date(ts + (8 * 3600 * 1000));
-                            row.timeStr = d.toISOString().substring(11, 19);
-                            if (!detectedDate) detectedDate = d.toISOString().substring(0, 10);
-                        }
+                    if (ts > 0 && ts < 4102444800000) {
+                        const d = new Date(ts);
+                        // Convert to HH:mm:ss (24h)
+                        row.timeStr = d.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' });
+                        if (!detectedDate) detectedDate = d.toLocaleDateString('zh-CN');
+                    }
 
-                        const textBytes = new Uint8Array(buffer, ptr + spec.txtOff, spec.txtLen);
-                        row.msg = decoder.decode(textBytes).replace(/\x00/g, '').trim();
+                    const textBytes = new Uint8Array(buffer, ptr + spec.txtOff, spec.txtLen);
+                    // Decode and clean text
+                    let rawText = decoder.decode(textBytes);
 
-                    } catch (err) { }
-                    rows.push(row);
+                    // Mimic Python: filter non-printable (keep only ASCII printable + tab)
+                    row.msg = rawText.replace(/[^\x20-\x7E\t]/g, '').trim();
+
+                    // OPTIMIZATION: Filter empty messages (matches Python logic)
+                    if (row.msg) {
+                        rows.push(row);
+                    }
                 }
                 return { rows: rows, date: detectedDate };
             }

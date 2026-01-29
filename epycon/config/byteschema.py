@@ -15,7 +15,7 @@ GROUP_MAP = {
     2: 'EVENT',
     3: 'NOTE',
     4: 'IDK',
-    5: 'NOTE',
+    5: 'HIDDEN_NOTE',
     6: 'PACE',
     17: 'RATE',
 }

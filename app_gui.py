@@ -204,7 +204,10 @@ try:
     from epycon.utils.person import Tokenize
 except ImportError as e:
     print(f"无法加载 Epycon。\n{e}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        sys.exit(1)
+    else:
+        raise  # 在测试环境中抛出异常供 pytest 捕获
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)

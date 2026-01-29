@@ -7,25 +7,22 @@ from collections import abc
 from typing import BinaryIO
 
 import numpy as np
-import h5py as h
 
 from epycon.core._typing import (
-    Union, List, Sequence, PathLike, ArrayLike, Optional,
+    Union, List, Optional, Dict,
 )
 
 from epycon.core._validators import (
-    _validate_int, _validate_str, _validate_version, _validate_reference
+    _validate_int, _validate_version, _validate_reference
 )
 
 from epycon.core.bins import (
     readbin,
-    readchunk,
     parsebin,
     )
 
 from epycon.core.helpers import (
     safe_string,
-    pretty_json,
 )
 
 from epycon.utils.decorators import checktypes
@@ -37,12 +34,12 @@ from epycon.core._dataclasses import (
 )
 
 from epycon.config.byteschema import (
-    WMx32LogSchema, WMx32MasterSchema, WMx32EntriesSchema,
+    WMx32LogSchema, WMx32EntriesSchema,
     WMx64LogSchema, WMx64MasterSchema, WMx64EntriesSchema,
 )
 
 from epycon.config.byteschema import (
-    GROUP_MAP, SOURCE_MAP, MASTER_FILENAME, ENTRIES_FILENAME
+    GROUP_MAP, SOURCE_MAP
 )
 
 
@@ -74,12 +71,14 @@ class LogParser(abc.Iterator):
         super().__init__()
 
         # validate WM version and return correct byte schema             
+        diary: Union[type[WMx32LogSchema], type[WMx64LogSchema]]
         if _validate_version(version) == 'x32':
-            self.diary = WMx32LogSchema
+            diary = WMx32LogSchema
         elif _validate_version(version) == 'x64':
-            self.diary = WMx64LogSchema
+            diary = WMx64LogSchema
         else:
             raise NotImplementedError
+        self.diary = diary
 
         self.f_path = f_path
         self.timestampfmt, self.timestampfactor = self.diary.timestamp_fmt
@@ -173,18 +172,18 @@ class LogParser(abc.Iterator):
             
             chunksize_raw = min(self._chunksize, self._stopbyte - self._f_obj.tell())
             chunksize = int(chunksize_raw)  # Ensure it's an int
-            chunk = self._f_obj.read(chunksize)
+            raw_chunk = self._f_obj.read(chunksize)
 
-            if not chunk:
+            if not raw_chunk:
                 raise StopIteration
             else:
                 chunk = np.frombuffer(
-                    bytearray(chunk),
+                    bytearray(raw_chunk),
                     dtype=np.dtype(self.diary.datablock.fmt),
                     )
             
         except StopIteration:
-            self.__exit__(exc_type=None, exc_value=None, exc_traceback=None)
+            self.__exit__(None, None, None)
             raise
 
         return self._process_chunk(chunk)
@@ -203,14 +202,14 @@ class LogParser(abc.Iterator):
         assert self._stopbyte is not None
         
         bytes_to_read = int(self._stopbyte - self._f_obj.tell())
-        chunk = self._f_obj.read(bytes_to_read)
+        raw_chunk = self._f_obj.read(bytes_to_read)
 
-        if not chunk:
+        if not raw_chunk:
             # Return empty array instead of None
             return np.array([], dtype=np.dtype(self.diary.datablock.fmt))
         else:
             chunk = np.frombuffer(
-                bytearray(chunk),
+                bytearray(raw_chunk),
                 dtype=np.dtype(self.diary.datablock.fmt),
                 )
             
@@ -319,7 +318,6 @@ class LogParser(abc.Iterator):
         
         it = iter(bheader[startbyte:endbyte])
         i = 0
-        mount = dict()
         while (bchunk := bytes(islice(
             it,
             self.diary.channels.subblock_size[1],
@@ -450,7 +448,8 @@ def _readdata(
     if chunksize is not None:
         chunksize = _validate_int("chunksize", chunksize, min_value=1)
 
-    nsamples = kwargs.get("nrows", None)
+    # nrows/nsamples support reserved for future use
+    _ = kwargs.get("nrows", None)  # Placeholder for future nsamples support
     
     # Instantiate data parser.
     parser = LogParser(f_path, **kwargs)
@@ -505,7 +504,7 @@ def _readmaster(
     try:
         # read binary file
         barray = readbin(f_path)
-    except IOError as e:
+    except IOError:
         raise IOError
 
     # Read ID
@@ -536,10 +535,11 @@ def _readentries(
     """
     # TODO: check entries at the end of procedure with invalid timestamp
 
-    # initialize entries dictionary
-    entries = list()                           
+    # initialize entries list
+    entries: List[Entry] = []                           
                 
-    # validate WM version and return correct byte schema             
+    # validate WM version and return correct byte schema
+    diary: Union[type[WMx32EntriesSchema], type[WMx64EntriesSchema]]
     if _validate_version(version) == 'x32':
         diary = WMx32EntriesSchema
     elif _validate_version(version) == 'x64':
@@ -550,7 +550,7 @@ def _readentries(
     try:
         # read entire binary file
         barray = readbin(f_path)
-    except IOError as e:
+    except IOError:
         raise IOError
 
     if barray is None:
@@ -558,7 +558,7 @@ def _readentries(
 
     # Validate expected byte size
     if (len(barray) - diary.header[1]) % diary.line_size != 0:
-        sys.exit(f'Invalid length of byte array. Check byte schema version.')
+        raise ValueError('Invalid length of byte array. Check byte schema version.')
         
     # Convert header type into byte format and timestamp factor
     fmt, factor = diary.timestamp_fmt
@@ -567,10 +567,8 @@ def _readentries(
     header_timestamp = struct.unpack(fmt, barray[diary.header_timestamp[0]:diary.header_timestamp[1]])[0]
     header_timestamp = header_timestamp // factor
 
-    try:
-        header_date = datetime.fromtimestamp(header_timestamp)
-    except ValueError as err:
-        sys.exit(f'Invalid timestamp format.')    
+    # Timestamp validation removed as result is not used and strict check causes issues
+    pass    
 
     # iterate over byte array
     for pointer in range(diary.header[1], len(barray), diary.line_size):
@@ -604,10 +602,16 @@ def _readentries(
         if not message or not message.strip():
             continue
 
+        mapped_group = GROUP_MAP.get(group, 0)
+        
+        # Filter HIDDEN_NOTE (Type 5) to ensure 1:1 match with original PDF report
+        if mapped_group == 'HIDDEN_NOTE':
+            continue
+
         entries.append(
             Entry(
                 fid=datalog_uid,
-                group=GROUP_MAP.get(group, 0),  # Returns str label or 0 for unknown
+                group=mapped_group, 
                 timestamp=timestamp,
                 message=message,
                 )

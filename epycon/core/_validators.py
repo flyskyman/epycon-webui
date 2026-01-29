@@ -1,7 +1,7 @@
 import os
 
 from epycon.core._typing import (
-    Union, List, Any, Tuple, PathLike, ArrayLike, 
+    Union, List, Any, Tuple, PathLike, 
 )
 
 def _validate_int(
@@ -176,11 +176,13 @@ def _validate_tuple(
     if not all(isinstance(item, dtype) for item in arr):
         raise TypeError(messsage)
     
+    return arr
+    
 
 def _validate_path(
         f_path: Union[str, bytes, PathLike],
         name: str = "file or directory",
-    ) -> Union[str, bytes, PathLike]:
+    ) -> str:
 
     """ Checks if the path exists and the user has read/write access.
 
@@ -190,7 +192,9 @@ def _validate_path(
     Raises:
         ValueError: If the path does not exist, is not readable, or not writable.
     """
-    message = f"Path to {name} does not exist or user does not have read/write permisson: {f_path}"
+    # Convert bytes path to string for error message
+    path_str = f_path.decode('utf-8') if isinstance(f_path, bytes) else str(f_path)
+    message = f"Path to {name} does not exist or user does not have read/write permisson: {path_str}"
     
     if not os.path.exists(f_path):
         raise ValueError(message)
@@ -201,13 +205,15 @@ def _validate_path(
         try:
             with open(f_path, "r"):
                 pass
-        except OSError as e:
+        except OSError:
             raise ValueError(message)
     else:
         # Check if it's a directory and user has access (can list contents)
         try:
             os.listdir(f_path)
-        except PermissionError as e:
+        except PermissionError:
             raise ValueError(message)
         
-    return f_path
+    # Ensure return type is str
+    result = os.fspath(f_path)
+    return result.decode('utf-8') if isinstance(result, bytes) else result

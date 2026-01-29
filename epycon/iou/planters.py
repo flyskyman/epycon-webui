@@ -1,23 +1,19 @@
 import os
-from warnings import warn
 import h5py as h
 import numpy as np
-from dataclasses import fields
 
 
-from epycon.iou.constants import HDFConfig
-from epycon.utils.decorators import checktypes
 
 from epycon.core._dataclasses import Entry
 from epycon.core._formatting import _tocsv, _tosel, SignalPlantDefaults
 
 from epycon.core._typing import (
     Union, PathLike, NumpyArray, Tuple, List, Any,
-    Callable, Iterator, Optional, Dict, cast
+    Iterator, Optional, Dict, cast
 )
 
 from epycon.core._validators import (
-    _validate_str, _validate_int, _validate_tuple,
+    _validate_str,
 )
 
 
@@ -191,7 +187,7 @@ class DatalogPlanter:
         if exc_type:
             print(f"Exception occurred: {exc_type}, {exc_value}")
 
-    def write(self):
+    def write(self, darray: NumpyArray, **kwargs: Any) -> None:
         raise NotImplementedError
 
 
@@ -329,7 +325,8 @@ class HDFPlanter(DatalogPlanter):
     
     def write(
             self,
-            darray: NumpyArray,            
+            darray: NumpyArray,
+            **kwargs: Any,
         ) -> None:
                 
         # write header
@@ -453,10 +450,10 @@ class HDFPlanter(DatalogPlanter):
                 raise TypeError
 
             # Generate content
-            content = list(zip(_col_names, datacache_names, self.units))
+            content_list = list(zip(_col_names, datacache_names, self.units))
 
-            content = np.array(
-                content,
+            content_array = np.array(
+                content_list,
                 dtype=self.cfg.INFO_DTYPES,
                 )    
 
@@ -464,11 +461,11 @@ class HDFPlanter(DatalogPlanter):
             if self._INFO_DNAME in self._f_obj:
                 _info_ds = cast(h.Dataset, self._f_obj[self._INFO_DNAME])
                 current_content = _info_ds[:]
-                content = np.append(current_content, content)
+                content_array = np.append(current_content, content_array)
 
                 del self._f_obj[self._INFO_DNAME]
             
-            self._f_obj.create_dataset(self._INFO_DNAME, data=content)
+            self._f_obj.create_dataset(self._INFO_DNAME, data=content_array)
 
     def add_samples(
             self,
@@ -491,7 +488,7 @@ class HDFPlanter(DatalogPlanter):
             darray = darray.astype(np.float32) / self.factor
 
         # Create new dataset if not exists
-        if not self._DATASET_DNAME in self._f_obj:
+        if self._DATASET_DNAME not in self._f_obj:
             self._f_obj.create_dataset(self._DATASET_DNAME, data=darray, shape=darray.shape, dtype=self.cfg.DATASET_DTYPE, chunks=True, maxshape=(darray.shape[0], None))            
             return
     
