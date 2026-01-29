@@ -34,7 +34,8 @@ print("\n[1] Reading entries...")
 entries = readentries("examples/data/study01/entries.log", version=version)
 print(f"    Found {len(entries)} entries")
 for i, e in enumerate(entries):
-    dt = datetime.fromtimestamp(e.timestamp) if e.timestamp > 100 else "unknown"
+    et = e.timestamp / 1000.0
+    dt = datetime.fromtimestamp(et) if et > 100 else "unknown"
     print(f"      Entry {i}: {dt}")
 
 # Prepare merge data collection
@@ -63,7 +64,7 @@ for idx, log_path in enumerate(log_paths):
             num_samples += chunk.shape[0] if hasattr(chunk, 'shape') else len(chunk)
             all_chunks.append(chunk)
         
-        print(f"      Timestamp: {datetime.fromtimestamp(header.timestamp)}")
+        print(f"      Timestamp: {datetime.fromtimestamp(header.timestamp/1000.0)}")
         print(f"      Samples: {num_samples}")
         file_infos.append((log_path, header, num_samples))
 
@@ -93,16 +94,17 @@ with HDFPlanter(
         marks = []
         for e in entries:
             # Find which file this entry belongs to
-            entry_ts = e.timestamp
+            entry_ts = e.timestamp / 1000.0
             global_sample_pos = None
             
             sample_offset = 0
             for file_idx, (log_path, header, num_samples) in enumerate(file_infos):
-                file_start_sec = header.timestamp
+                file_start_sec = header.timestamp / 1000.0
                 file_end_sec = file_start_sec + (num_samples / sampling_freq)
-                
+
                 if file_start_sec <= entry_ts < file_end_sec or (file_idx == len(file_infos) - 1 and entry_ts <= file_end_sec):
                     relative_pos = round((entry_ts - file_start_sec) * sampling_freq)
+                    
                     global_sample_pos = sample_offset + relative_pos
                     print(f"      Entry at {datetime.fromtimestamp(entry_ts)}: pos={global_sample_pos}")
                     marks.append(global_sample_pos)

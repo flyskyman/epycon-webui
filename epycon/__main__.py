@@ -8,7 +8,7 @@ if __name__ == "__main__":
     import numpy as np
 
     from epycon.core._validators import _validate_path
-    from epycon.core.helpers import default_log_path, deep_override, difftimestamp
+    from epycon.core.helpers import default_log_path, deep_override, difftimestamp, to_unix_seconds
     from epycon.cli import batch
 
     config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
@@ -268,7 +268,7 @@ if __name__ == "__main__":
                     "study_id": study_id,
                     "datalog_ids": ",".join([d['id'] for d in group_files]),
                     "timestamp": first_timestamp,
-                    "datetime": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+                    "datetime": datetime.fromtimestamp(to_unix_seconds(first_timestamp)).isoformat() if first_timestamp else "",
                     "merged": True,
                     "num_files": len(group_files),
                 }
@@ -303,8 +303,8 @@ if __name__ == "__main__":
                     
                     print(f"Merging {datalog_id} ({idx+1}/{len(group_files)}): ", end="")
                     
-                    # Calculate file time range for entries filtering
-                    file_start_sec = float(header.timestamp)
+                    # Calculate file time range for entries filtering (normalize header timestamp to seconds)
+                    file_start_sec = to_unix_seconds(header.timestamp)
                     file_size = os.path.getsize(datalog_path)
                     n_channels = header.num_channels
                     fs = header.amp.sampling_freq
@@ -321,15 +321,15 @@ if __name__ == "__main__":
                         # Filter by fid (datalog file ID) and strict time range
                         file_entries = [
                             e for e in entries 
-                            if e.fid == datalog_id and file_start_sec <= e.timestamp <= file_end_sec
+                            if e.fid == datalog_id and file_start_sec <= to_unix_seconds(e.timestamp) <= file_end_sec
                         ]
                         
                         # Warn if entries outside time range (should not happen with correct timestamps)
-                        out_of_range = [e for e in entries if e.fid == datalog_id and not (file_start_sec <= e.timestamp <= file_end_sec)]
+                        out_of_range = [e for e in entries if e.fid == datalog_id and not (file_start_sec <= to_unix_seconds(e.timestamp) <= file_end_sec)]
                         if out_of_range:
                             logger.warning(f"   ⚠️ {len(out_of_range)} entries with fid={datalog_id} are outside time range [{file_start_sec:.0f}, {file_end_sec:.0f}]")
                             for e in out_of_range[:3]:  # Show first 3 examples
-                                logger.warning(f"      Entry at {e.timestamp:.0f}s: {e.message[:50]}...")
+                                logger.warning(f"      Entry at {to_unix_seconds(e.timestamp):.0f}s: {e.message[:50]}...")
                     else:
                         file_entries = []
                     
@@ -369,7 +369,7 @@ if __name__ == "__main__":
                                 valid_marks = []
                                 for e in file_entries:
                                     # Calculate relative position from file start
-                                    relative_pos = round((e.timestamp - file_start_sec) * fs)
+                                    relative_pos = round((to_unix_seconds(e.timestamp) - file_start_sec) * fs)
                                     global_pos = global_base + relative_pos
                                     
                                     # Clamp position to valid range (handles minor timestamp inaccuracies)
@@ -474,7 +474,7 @@ if __name__ == "__main__":
                         "study_id": study_id,
                         "datalog_id": datalog_id,
                         "timestamp": ref_timestamp,
-                        "datetime": datetime.fromtimestamp(ref_timestamp).isoformat(),
+                        "datetime": datetime.fromtimestamp(to_unix_seconds(ref_timestamp)).isoformat(),
                         "sampling_freq": header.amp.sampling_freq,
                         "num_channels": header.num_channels,
                     }

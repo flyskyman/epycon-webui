@@ -440,7 +440,7 @@ def export_global_csv(entries, output_folder, study_id):
             writer = csv.writer(f)
             writer.writerow(['UnixSeconds', 'Group', 'Message'])
             for e in entries:
-                writer.writerow([f"{e.timestamp:.3f}", e.group, e.message])
+                writer.writerow([f"{to_unix_seconds(e.timestamp):.3f}", e.group, e.message])
         return filename
     except: return None
 
@@ -748,7 +748,7 @@ def execute_epycon_conversion(cfg):
                             conv_logger.info(f"   合并 {idx+1}/{len(group_files)}: {datalog_id}.log")
                             
                             # 计算当前文件的时间范围
-                            file_start_sec = float(header.timestamp)
+                            file_start_sec = to_unix_seconds(header.timestamp)
                             n_channels = get_safe_n_channels(header)
                             file_size = os.path.getsize(datalog_path)
                             if n_channels > 0 and fs > 0:

@@ -260,13 +260,14 @@ class LogParser(abc.Iterator):
         start_byte, bytes_to_read = self.diary.header.block_size
         bheader = readbin(self.f_path, start_byte, bytes_to_read)        
 
-        # Get timestamp
+        # Get timestamp (preserve original units, typically milliseconds)
         startbyte, endbyte = self.diary.header.timestamp
         timestamp_raw = parsebin(bheader[startbyte:endbyte], self.timestampfmt)
         # Handle tuple or scalar return from parsebin
         if isinstance(timestamp_raw, tuple):
             timestamp_raw = timestamp_raw[0]
-        timestamp = int(timestamp_raw) // self.timestampfactor
+        # Preserve raw timestamp (milliseconds) instead of converting to seconds
+        timestamp = int(timestamp_raw)
 
         # Get number of active channels
         startbyte, endbyte = self.diary.header.num_channels
@@ -563,12 +564,12 @@ def _readentries(
     # Convert header type into byte format and timestamp factor
     fmt, factor = diary.timestamp_fmt
 
-    # Read and validate timestamp format
-    header_timestamp = struct.unpack(fmt, barray[diary.header_timestamp[0]:diary.header_timestamp[1]])[0]
-    header_timestamp = header_timestamp // factor
+    # Read and validate timestamp format (preserve milliseconds)
+    header_timestamp = int(struct.unpack(fmt, barray[diary.header_timestamp[0]:diary.header_timestamp[1]])[0])
 
     try:
-        header_date = datetime.fromtimestamp(header_timestamp)
+        # header_timestamp is stored in milliseconds; convert to seconds for datetime
+        header_date = datetime.fromtimestamp(header_timestamp / factor)
     except ValueError as err:
         sys.exit(f'Invalid timestamp format.')    
 
@@ -583,9 +584,9 @@ def _readentries(
         datalog_uid = struct.unpack("<L", barray[pointer + start_byte:pointer + end_byte])[0]
         datalog_uid = f"{datalog_uid:08x}"
 
-        # timestamp
+        # timestamp (preserve milliseconds)
         start_byte, end_byte = diary.timestamp
-        timestamp = int(struct.unpack(fmt, barray[pointer + start_byte:pointer + end_byte])[0]) // factor
+        timestamp = int(struct.unpack(fmt, barray[pointer + start_byte:pointer + end_byte])[0])
 
         # retrieve text annotation
         # Text is null-terminated, decode as latin-1 (single-byte encoding)

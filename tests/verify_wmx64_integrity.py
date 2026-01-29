@@ -82,7 +82,7 @@ print(f"Total entries: {len(entries)}")
 
 entry_timestamps = []
 for i, e in enumerate(entries):
-    ts = e.timestamp
+    ts = e.timestamp / 1000.0
     dt = datetime.fromtimestamp(ts)
     entry_timestamps.append(ts)
     print(f"  Entry {i}: {ts:.3f} ({dt})")

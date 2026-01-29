@@ -24,7 +24,7 @@
 		{
 			"label": "Run Coverage Tests",
 			"type": "shell",
-			"command": "python",
+			"command": "${workspaceFolder}\\venv\\Scripts\\python.exe",
 			"args": [
 				"-m",
 				"pytest",
