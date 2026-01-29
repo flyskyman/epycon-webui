@@ -368,6 +368,10 @@ if __name__ == "__main__":
                                 
                                 valid_marks = []
                                 for e in file_entries:
+                                    # 跳过空白消息的entries
+                                    if not e.message or not e.message.strip():
+                                        continue
+                                    
                                     # Calculate relative position from file start
                                     relative_pos = round((e.timestamp - file_start_sec) * fs)
                                     global_pos = global_base + relative_pos
