@@ -4,6 +4,8 @@ if __name__ == "__main__":
     import json
     import logging
     import jsonschema
+    import h5py
+    import numpy as np
 
     from epycon.core._validators import _validate_path
     from epycon.core.helpers import default_log_path, deep_override, difftimestamp
@@ -290,6 +292,9 @@ if __name__ == "__main__":
                 total_samples = 0
                 group_start_time = group_files[0]['timestamp']
                 
+                # Accumulate all marks from all files for final injection
+                accumulated_marks = []
+                
                 for idx, dlog_info in enumerate(group_files):
                     datalog_path = dlog_info['path']
                     datalog_id = dlog_info['id']
@@ -356,7 +361,7 @@ if __name__ == "__main__":
                                 total_samples += chunk.shape[0]
                             
                             # Inject entries for this specific file
-                            if cfg["data"]["pin_entries"] and file_entries and hasattr(planter, "add_marks"):
+                            if cfg["data"]["pin_entries"] and file_entries:
                                 # Calculate global positions for this file's entries
                                 global_base = total_samples - file_sample_count
                                 file_end_global = global_base + file_sample_count
@@ -378,18 +383,53 @@ if __name__ == "__main__":
                                     valid_marks.append((global_pos, str(e.group), str(e.message)))
                                 
                                 if valid_marks:
-                                    positions, groups, messages = zip(*valid_marks)
-                                    planter.add_marks(
-                                        positions=list(positions),
-                                        groups=list(groups),
-                                        messages=list(messages),
-                                    )
-                                    logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id}")
+                                    # Accumulate marks instead of adding immediately
+                                    accumulated_marks.extend(valid_marks)
+                                    logger.info(f"   ✅ Accumulated {len(valid_marks)} entries for {datalog_id}")
                                 elif file_entries:
                                     logger.warning(f"   ⚠️ {datalog_id}: {len(file_entries)} entries matched by fid but all had invalid positions")
                             
                             is_first_file = False
                             print("OK")
+                
+                # After all files processed, inject all accumulated marks at once
+                if accumulated_marks and cfg["data"]["pin_entries"]:
+                    with h5py.File(merged_output_path, "a") as f_obj:
+                        positions, groups, messages = zip(*accumulated_marks)
+                        
+                        # Prepare marks array
+                        marks_data = []
+                        for pos, grp, msg in zip(positions, groups, messages):
+                            group_bytes = grp.encode('UTF-8') if isinstance(grp, str) else grp
+                            message_bytes = msg.encode('UTF-8') if isinstance(msg, str) else msg
+                            channel_id = merged_column_names[0] if merged_column_names else b''
+                            
+                            marks_data.append((
+                                int(pos),
+                                int(pos),
+                                group_bytes,
+                                1.0,
+                                channel_id,
+                                message_bytes
+                            ))
+                        
+                        # Create marks dataset
+                        marks_dtype = np.dtype([
+                            ('SampleLeft', '<i4'),
+                            ('SampleRight', '<i4'),
+                            ('Group', 'S256'),
+                            ('Validity', '<f4'),
+                            ('Channel', 'S256'),
+                            ('Info', 'S256'),
+                        ])
+                        marks_array = np.array(marks_data, dtype=marks_dtype)
+                        
+                        # Remove old marks if exists and create new
+                        if 'Marks' in f_obj:
+                            del f_obj['Marks']
+                        f_obj.create_dataset('Marks', data=marks_array)
+                        
+                    logger.info(f"   ✅ Total {len(accumulated_marks)} entries injected into merged file")
                 
                 logger.info(f"Merged {len(group_files)} files into {merged_output_path} ({total_samples} total samples)")
                 print(f"DONE (merged {len(group_files)} files)")
