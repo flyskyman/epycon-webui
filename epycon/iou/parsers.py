@@ -585,7 +585,7 @@ def _readentries(
 
         # timestamp
         start_byte, end_byte = diary.timestamp
-        timestamp = struct.unpack(fmt, barray[pointer + start_byte:pointer + end_byte])[0] / factor
+        timestamp = int(struct.unpack(fmt, barray[pointer + start_byte:pointer + end_byte])[0]) // factor
 
         # retrieve text annotation
         # Text is null-terminated, decode as latin-1 (single-byte encoding)

@@ -311,23 +311,20 @@ if __name__ == "__main__":
                         file_duration_sec = 0
                     file_end_sec = file_start_sec + file_duration_sec
                     
-                    # Filter entries by fid (precise match), then validate time range
+                    # Filter entries by fid (precise match) - no time tolerance
                     if entries:
-                        # Primary filter: match by fid (datalog file ID)
-                        file_entries = [e for e in entries if e.fid == datalog_id]
+                        # Filter by fid (datalog file ID) and strict time range
+                        file_entries = [
+                            e for e in entries 
+                            if e.fid == datalog_id and file_start_sec <= e.timestamp <= file_end_sec
+                        ]
                         
-                        # Validate time range and warn if significantly out of range
-                        validated_entries = []
-                        for e in file_entries:
-                            time_diff = abs(e.timestamp - (file_start_sec + file_end_sec) / 2)
-                            max_acceptable_diff = file_duration_sec / 2 + 300  # Half duration + 5min tolerance
-                            
-                            if time_diff <= max_acceptable_diff:
-                                validated_entries.append(e)
-                            else:
-                                logger.warning(f"   ⚠️ Entry timestamp significantly out of range for {datalog_id}: {e.timestamp:.2f} (expected: {file_start_sec:.2f}-{file_end_sec:.2f})")
-                        
-                        file_entries = validated_entries
+                        # Warn if entries outside time range (should not happen with correct timestamps)
+                        out_of_range = [e for e in entries if e.fid == datalog_id and not (file_start_sec <= e.timestamp <= file_end_sec)]
+                        if out_of_range:
+                            logger.warning(f"   ⚠️ {len(out_of_range)} entries with fid={datalog_id} are outside time range [{file_start_sec:.0f}, {file_end_sec:.0f}]")
+                            for e in out_of_range[:3]:  # Show first 3 examples
+                                logger.warning(f"      Entry at {e.timestamp:.0f}s: {e.message[:50]}...")
                     else:
                         file_entries = []
                     
