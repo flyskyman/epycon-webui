@@ -1,0 +1,8 @@
+
+>>> /run-direct CALLED
+config_data.get('paths')={'input_folder': 'examples/data', 'output_folder': 'examples/data/out'}
+execute_epycon_conversion returned success=True
+
+>>> /run-direct CALLED
+config_data.get('paths')={'input_folder': 'examples/data', 'output_folder': 'examples/data/out'}
+execute_epycon_conversion returned success=True

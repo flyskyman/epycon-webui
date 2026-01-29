@@ -1,4 +1,4 @@
-generate_fake_wmx32.py — generator for fake WorkMate logs
+generate_fake_wmx.py — generator for fake WorkMate logs
 
 Purpose
 - Produce minimal WMx32/WMx64 binary logs that `epycon` can parse.
@@ -8,7 +8,7 @@ Usage
 - Default (creates `examples/data/study01/00000000.log`):
 
   ```powershell
-  python scripts\generate_fake_wmx32.py
+  python scripts\generate_fake_wmx.py
   ```
 
 - Options:
@@ -23,13 +23,13 @@ Examples
 
 ```powershell
 # single-channel, 1024 samples
-python scripts\generate_fake_wmx32.py --out examples/data/study01/00000000.log
+python scripts\generate_fake_wmx.py --out examples/data/study01/00000000.log
 
 # two-channel, 512 samples, fs=500
-python scripts\generate_fake_wmx32.py --out examples/data/study01/00000001.log --channels 2 --samples 512 --fs 500 --version 4.1
+python scripts\generate_fake_wmx.py --out examples/data/study01/00000001.log --channels 2 --samples 512 --fs 500 --version 4.1
 
 # WMx64-style
-python scripts\generate_fake_wmx32.py --out examples/data/study01/00000002.log --version 4.3
+python scripts\generate_fake_wmx.py --out examples/data/study01/00000002.log --version 4.3
 ```
 
 Notes
@@ -58,5 +58,5 @@ Advanced entries options
 Example: generate log + entries + master
 
 ```powershell
-python scripts\generate_fake_wmx32.py --out examples/data/study01/00000004.log --with-entries --with-master
+python scripts\generate_fake_wmx.py --out examples/data/study01/00000004.log --with-entries --with-master
 ```

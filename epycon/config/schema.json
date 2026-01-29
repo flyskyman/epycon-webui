@@ -67,6 +67,11 @@
             "type": "string",
             "description": "List of channels to include in the output files."
           }
+        },
+        "merge_logs": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, merge all log files in each study into a single HDF5 file (sorted by timestamp)."
         }
       }
     },
