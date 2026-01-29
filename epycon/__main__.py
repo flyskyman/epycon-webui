@@ -311,13 +311,23 @@ if __name__ == "__main__":
                         file_duration_sec = 0
                     file_end_sec = file_start_sec + file_duration_sec
                     
-                    # Filter entries for this file's time range
+                    # Filter entries for this file's time range with tolerance
+                    # Add 1 hour tolerance before and after to handle timestamp misalignment
+                    tolerance_sec = 3600  # 1 hour
+                    extended_start = file_start_sec - tolerance_sec
+                    extended_end = file_end_sec + tolerance_sec
+                    
                     is_last_file = (idx == len(group_files) - 1)
                     if entries:
                         if is_last_file:
-                            file_entries = [e for e in entries if file_start_sec <= e.timestamp <= file_end_sec]
+                            file_entries = [e for e in entries if extended_start <= e.timestamp <= extended_end]
                         else:
-                            file_entries = [e for e in entries if file_start_sec <= e.timestamp < file_end_sec]
+                            file_entries = [e for e in entries if extended_start <= e.timestamp < extended_end]
+                        
+                        # Log filtering results for debugging
+                        original_count = len([e for e in entries if file_start_sec <= e.timestamp <= file_end_sec])
+                        extended_count = len(file_entries)
+                        logger.info(f"   📊 {datalog_id}: {original_count} entries in strict range, {extended_count} with tolerance")
                     else:
                         file_entries = []
                     
@@ -356,10 +366,12 @@ if __name__ == "__main__":
                                 
                                 valid_marks = []
                                 for e in file_entries:
-                                    relative_pos = round((e.timestamp - file_start_sec) * fs)
+                                    # Use extended time range for position calculation
+                                    relative_pos = round((e.timestamp - extended_start) * fs)
                                     global_pos = global_base + relative_pos
                                     
-                                    if global_base <= global_pos < file_end_global:
+                                    # More lenient range check: allow entries within the file's global range
+                                    if 0 <= global_pos < total_samples:
                                         valid_marks.append((global_pos, str(e.group), str(e.message)))
                                 
                                 if valid_marks:
@@ -369,7 +381,7 @@ if __name__ == "__main__":
                                         groups=list(groups),
                                         messages=list(messages),
                                     )
-                                    logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id} (time range: {file_start_sec:.2f}-{file_end_sec:.2f})")
+                                    logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id} (global range: {global_base}-{file_end_global})")
                             
                             is_first_file = False
                             print("OK")
