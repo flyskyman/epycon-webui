@@ -599,8 +599,10 @@ def _readentries(
         # Filter out non-printable characters (keep ASCII printable range)
         message = "".join(c for c in message if c.isprintable() or c in ' \t')
         
-        # if re.match('[\x00-\x1f\x7f]+', text):
-        #     continue
+        # Skip entries with empty or whitespace-only messages
+        # These are typically device-generated markers (e.g., IDK type with \x06)
+        if not message or not message.strip():
+            continue
 
         entries.append(
             Entry(
