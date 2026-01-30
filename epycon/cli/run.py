@@ -26,32 +26,31 @@ from ..core._validators import (
     _validate_path,
 )
 
-from core.helpers import (
-    default_log_path
-)
 
 import numpy as np
 
-config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
-jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
-
-# Instantiate basic logger
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    filename=default_log_path(),
-)
-
 logger = logging.getLogger(__name__)
 
-# Load jsonschema
-try:
-    with open("schema.json", "r") as f:
-        schema = json.load(f)
-except FileNotFoundError:
-    raise FileNotFoundError(f"Config file not found: {jsonschema_path}")
+# Schema will be loaded inside main block
 
 if __name__ == '__main__':
+    config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
+    jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
+    
+    # Instantiate basic logger
+    from ..core.helpers import default_log_path as get_default_log_path
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        filename=get_default_log_path(),
+    )
+    
+    # Load jsonschema
+    try:
+        with open(jsonschema_path, "r") as f:
+            schema = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Config file not found: {jsonschema_path}")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input_folder", type=str,)

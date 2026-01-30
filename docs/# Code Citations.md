@@ -1,4 +1,12 @@
-import argparse
+# Code Citations
+
+## License: MIT
+https://github.com/fnusa-icrc-ice/epycon/blob/e4bb3a55dbfa9d9597c3b5bf155089ca450fb409/epycon/cli/batch.py
+
+```
+argparse
+
+parser = argparse.ArgumentParser()
 
 def parse_arguments():
     """ Custom CLI definition
@@ -6,9 +14,6 @@ def parse_arguments():
     Returns:
         parser: CLI arguments
     """
-    # Create a new parser instance each time to avoid conflicts
-    parser = argparse.ArgumentParser()
-    
     # Input and output folder paths    
     parser.add_argument("-i", "--input_folder", type=str,)
     parser.add_argument("-o", "--output_folder", type=str,)
@@ -22,11 +27,8 @@ def parse_arguments():
     # Output format of the entries/annotations
     parser.add_argument("-e", "--entries", type=bool,)
     parser.add_argument("-efmt", "--entries_format", type=str, choices=['csv', 'sel'])
-    
-    # Merge mode - combine multiple log files into one output
-    parser.add_argument("--merge", action="store_true", help="Merge multiple log files into a single output file")
 
     # Overwrite settings with custom config file
-    parser.add_argument("--custom_config_path", type=str, help="Path to configuration file")
+    parser.add_argument("--custom_config_path", type=str, help="Path
+```
 
-    return parser.parse_args()

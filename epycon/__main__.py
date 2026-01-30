@@ -93,6 +93,7 @@ if __name__ == "__main__":
     valid_studies = set(cfg["paths"]["studies"])
     valid_datalogs = set(cfg["data"]["data_files"])
     output_fmt = cfg["data"]["output_format"]
+    merge_mode = cfg["data"].get("merge_logs", False)
 
     for study_path in iglob(os.path.join(input_folder, '**')):
         study_id = os.path.basename(study_path)
@@ -137,6 +138,14 @@ if __name__ == "__main__":
         # iterate over datalog files
         logger.info(f"Converting study {study_id}")
         
+        # Collect all datalogs first
+        all_datalogs = []
+        for datalog_path in iglob(os.path.join(study_path, LOG_PATTERN)):
+            datalog_id = os.path.basename(datalog_path).split(".")[0]
+            if valid_datalogs and datalog_id not in valid_datalogs:
+                continue
+            all_datalogs.append((datalog_path, datalog_id))
+
         if merge_mode and output_fmt == "h5":
             # ===================== MERGE MODE =====================
             # Sort datalogs by timestamp and collect channel info
@@ -444,9 +453,10 @@ if __name__ == "__main__":
                         sampling_freq=header.amp.sampling_freq,
                         factor=1000,
                         units="mV",
-                ) as planter:
-                    # create mandatory datasets
-                    
+                    ) as planter:
+                        # create mandatory datasets
+                        for chunk in parser:
+                            planter.write(chunk)
 
                 print("DONE")
 
