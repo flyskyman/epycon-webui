@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 # Schema will be loaded inside main block
 
-if __name__ == '__main__':
+
+def main():
     config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
     jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
     
@@ -67,10 +68,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Validate custom config path if provided
-    if args.config_file:
+    if hasattr(args, 'config_file') and args.config_file:
         _validate_path(args.config_file)
 
-    config_path = args.config_path if args.config_path else config_path
+    config_path = args.config_path if hasattr(args, 'config_path') and args.config_path else config_path
 
     # Load JSON configuration if provided
     try:
@@ -79,10 +80,10 @@ if __name__ == '__main__':
     except FileNotFoundError:
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    config = {**cfg, **vars(parser.parse_args())}
+    config = {**cfg, **vars(args)}
 
     # Override arguments from command line interface if provided
-    overrides = {"arg1": args.arg1, "arg2": args.arg2}
+    overrides = {"arg1": getattr(args, 'arg1', None), "arg2": getattr(args, 'arg2', None)}
     for arg, value in overrides.items():
         if value is not None:
             config[arg] = value
@@ -338,3 +339,7 @@ if __name__ == '__main__':
     # with open(os.path.join(r'C:\Users\jakub\Research\Data', 'ire_res.json'), "w") as outfile:
     #     json.dump(res, outfile)
     print()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,4 @@
-if __name__ == "__main__":
+def main():
     import os
     import sys
     import json
@@ -495,4 +495,8 @@ if __name__ == "__main__":
                         pass
 
                 print(f"DONE")
+
+
+if __name__ == "__main__":
+    main()
 
