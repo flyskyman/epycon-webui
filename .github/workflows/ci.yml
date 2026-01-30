@@ -56,7 +56,9 @@ jobs:
           name: coverage-report
           path: htmlcov/
       - name: Generate test data
-        run: python scripts/generate_fake_wmx.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 5 --entries-fids 2 --version 4.3 --channels 2
+        run: |
+          python scripts/generate_fake_wmx.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 5 --entries-fids 2 --version 4.3 --channels 2
+          python scripts/generate_fake_wmx.py --out examples/data/study01/00000001.log --version 4.3 --channels 2
       - name: Validate config
         run: |
           python - <<'PY'
