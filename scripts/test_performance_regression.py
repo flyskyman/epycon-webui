@@ -9,6 +9,7 @@ import os
 import json
 import time
 import tempfile
+import psutil
 from pathlib import Path
 
 # Ensure UTF-8 output on all platforms
@@ -64,12 +65,26 @@ class PerformanceBenchmark:
         avg_time = np.mean(times)
         std_time = np.std(times)
         
+        # Measure Memory & CPU (single pass estimation)
+        process = psutil.Process(os.getpid())
+        mem_before = process.memory_info().rss / 1024 / 1024
+        process.cpu_percent(interval=None)
+        
+        # Run once more for resource measurement
+        func()
+        
+        mem_after = process.memory_info().rss / 1024 / 1024
+        cpu_usage = process.cpu_percent(interval=None)
+        mem_diff = max(0, mem_after - mem_before)
+
         self.results[name] = {
             'avg': avg_time,
             'std': std_time,
             'min': min(times),
             'max': max(times),
-            'iterations': iterations
+            'iterations': iterations,
+            'avg_mem_mb': mem_diff,
+            'avg_cpu_percent': cpu_usage
         }
         
         return avg_time, std_time
@@ -98,6 +113,8 @@ class PerformanceBenchmark:
         for name, result in sorted(self.results.items()):
             avg = result['avg']
             std = result['std']
+            mem = result.get('avg_mem_mb', 0)
+            cpu = result.get('avg_cpu_percent', 0)
             
             is_regressed, msg = self.check_regression(name, avg)
             
@@ -105,6 +122,7 @@ class PerformanceBenchmark:
             
             print(f"\n{status} {name}")
             print(f"   Average: {avg*1000:.2f}ms (±{std*1000:.2f}ms)")
+            print(f"   Mem: {mem:.2f} MB | CPU: {cpu:.1f}%")
             print(f"   Status: {msg}")
             
             if name in self.baseline:
@@ -234,12 +252,19 @@ def main():
     # Generate report
     benchmark.report()
     
+    # Check for update flag
+    if "--update" in sys.argv:
+        print("\nUsing current results as new baseline...")
+        benchmark.save_baseline()
+    
     # Summary
     print("\n" + "="*70)
-    if regressions > 0:
+    if regressions > 0 and "--update" not in sys.argv:
         print(f"⚠️  REGRESSION DETECTED: {regressions} benchmark(s) regressed")
         print(f"   Threshold: {REGRESSION_THRESHOLD*100:.0f}%")
         print("   Consider investigating performance issues")
+    elif "--update" in sys.argv:
+        print("✅ Baseline updated. Future runs will compare against these results.")
     else:
         print("✅ NO REGRESSIONS DETECTED")
     

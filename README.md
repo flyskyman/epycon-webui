@@ -1,425 +1,131 @@
-# Epycon - WorkMate EP 信号数据转换工具
+# WorkMate 数据处理中心
 
+![CI](https://github.com/flyskyman/epycon-webui/workflows/CI/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-53%25-yellow)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-57%2B%20passed-brightgreen)
 
-**Epycon** (EP signal converter) 是一个专为 Abbott WorkMate 心电生理系统设计的高性能数据转换工具。它能够将 WorkMate 记录的二进制日志文件转换为标准科学数据格式，支持 HDF5 和 CSV 输出，并提供完整的标注数据导出功能。
+一个基于 epycon 的 Web UI 工具集，用于解析和转换 Abbott WorkMate 系统记录的 EP 信号数据。提供便捷的图形界面，支持数据转换、日志解析和 HDF5 预览。
 
-## 📖 项目概述
+## 特性
 
-### 🎯 设计目标
-Epycon 的核心目标是将复杂的 WorkMate 二进制数据转换为科研和临床分析的标准格式：
+- **数据转换**：将 WorkMate 日志文件转换为 CSV 或 HDF5 格式
+- **日志解析**：深度搜索和过滤 WorkMate 日志条目
+- **WorkMate Version**: 4.3.2 (Recommended for x64 support) / 4.1 (Legacy x32)
+- **Supported Formats**: WMx32, WMx64
+- **HDF5 预览**：浏览和可视化 HDF5 文件内容
+- **Web 界面**：本地 Flask 服务，支持配置管理和批量处理
+- **跨平台**：优化 Windows 兼容性，处理编码和时间戳问题
 
-- **标准化输出**: 将专有二进制格式转换为 HDF5 (SignalPlant 兼容) 和 CSV
-- **数据完整性**: 保留所有原始信号数据、时间戳和标注信息
-- **隐私保护**: 提供可选的患者数据匿名化功能
-- **易用性**: 图形界面 + 命令行双模式，支持批量处理
-- **可扩展性**: 模块化设计，易于集成和扩展
+## 快速开始
 
-### 🔬 适用场景
-- **科研数据分析**: 将临床数据转换为标准格式供科研使用
-- **批量数据处理**: 处理大量 WorkMate 研究数据
-- **数据迁移**: 从 WorkMate 系统导出数据到其他分析平台
-- **质量控制**: 验证数据转换的完整性和准确性
+1. 安装依赖：`pip install -r requirements.txt`
+2. 运行工具集：打开 `ui/index.html` 或运行 `python app_gui.py`
+3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
 
-### 🏗️ 架构特点
-- **模块化设计**: 核心功能与界面分离，便于维护和扩展
-- **类型安全**: 完整的类型注解，提高代码质量
-- **测试驱动**: 57+ 自动化测试用例，确保可靠性
-- **跨平台**: 支持 Windows、Linux、macOS
+## 开发：运行测试与生成覆盖率
 
-## ✨ 核心功能
+- 使用项目内的 PowerShell 脚本（推荐，保留在 `scripts/`）：
 
-### 🔄 数据转换引擎
-- **多格式支持**: WorkMate 4.1/4.2/4.3/4.3.2+ 版本兼容
-- **智能合并**: 按时间戳排序合并多个日志文件为单个 HDF5
-- **通道映射**: 自动识别和正确命名标准导联 (I, II, III, aVR, aVL, aVF, V1-V6)
-- **数据验证**: 完整性检查和错误检测
-
-### 🏷️ 标注处理系统
-- **智能解析**: ASCII + SNR 双重算法净化乱码标注
-- **多格式导出**: SignalPlant (.sel) 和标准 CSV 格式
-- **时间对齐**: 精确标注与信号数据的时间同步
-- **汇总导出**: 生成包含所有标注的汇总文件
-
-### 🔒 数据隐私与安全
-- **匿名化引擎**: 生成 8 位伪随机患者 ID
-- **元数据管理**: 完整的文件属性 (作者、设备、机构、时间戳)
-- **合规性支持**: 满足医疗数据隐私保护要求
-
-### 🎨 用户界面
-- **网页配置器**: Vue.js 实现的现代化配置界面
-- **拖拽操作**: 直观的文件夹选择和文件管理
-- **实时反馈**: 详细的处理进度和错误日志
-- **一键转换**: 简化批量处理工作流
-
-## 📁 项目文件结构
-
-```
-epycon/
-├── __main__.py              # CLI 入口，批量转换主程序
-├── cli/
-│   ├── batch.py            # 批处理逻辑
-│   └── run.py              # 命令行参数处理
-├── core/
-│   ├── _dataclasses.py     # 数据结构定义
-│   ├── _validators.py      # 数据验证和类型检查
-│   ├── _typing.py          # 类型定义
-│   ├── helpers.py          # 工具函数
-│   └── bins.py             # 二进制数据处理
-├── iou/
-│   ├── parsers.py          # 文件解析器 (WorkMate 日志)
-│   └── planters.py         # 输出格式器 (HDF5/CSV)
-├── utils/
-│   └── person.py           # 匿名化工具
-└── config/
-    ├── config.json         # 默认配置
-    ├── schema.json         # 配置验证模式
-    └── byteschema.py       # 二进制格式定义
-
-app_gui.py                   # Flask Web 应用
-ui/
-├── index.html              # 主页
-├── editor.html             # 配置编辑器 (Vue.js)
-├── h5_preview.html         # HDF5 预览器
-└── vendor/
-    ├── tailwind.js         # CSS 框架
-    └── vue.js              # 前端框架
-
-config/                     # 全局配置文件
-scripts/                    # 开发和测试脚本
-├── test_business_logic.py  # 业务逻辑测试
-├── test_extended.py        # 扩展测试
-├── test_version.py         # 版本测试
-├── generate_fake_wmx.py    # 测试数据生成器（WMx32 和 WMx64）
-├── run_tests.ps1           # PowerShell 测试脚本
-├── clean_repo.ps1          # 清理脚本
-└── README.md               # 脚本说明
-
-examples/                   # 示例数据和演示
-├── demo.py                 # 演示脚本
-└── data/                   # 示例数据目录
-
-docs/                       # 文档和发布历史
-├── 开发日记.txt            # 开发日志
-├── delimiter_migration.md  # 迁移文档
-└── release_notes_*.md      # 版本发布说明
-
-CHANGELOG.md                # 变更日志
-LICENSE                     # 许可证
-README.md                   # 项目说明 (本文件)
-requirements.txt            # Python 依赖
-setup.py                    # 包安装配置
+```powershell
+.\scripts\run_tests.ps1
 ```
 
-## 🚀 快速开始
+- 或使用 Python/pytest 直接运行（在虚拟环境中）：
 
-### 环境要求
-- **Python**: 3.10 或更高版本
-- **依赖**: NumPy, h5py, jsonschema
-- **存储**: 至少 2GB 可用空间 (处理大数据集时)
-
-### 安装依赖
-```bash
-# 克隆项目
-git clone https://github.com/yourusername/epycon.git
-cd epycon
-
-# 创建虚拟环境 (推荐)
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-
-# 安装依赖
-pip install -r requirements.txt
+```powershell
+python -m pytest --cov=epycon --cov-report=term-missing --cov-report=html --cov-report=xml
 ```
 
-### 基础使用
+生成的 HTML 报告位于 `htmlcov/index.html`，XML 报告为 `coverage.xml`，这些输出已被添加到 `.gitignore`。
 
-#### 1. 网页界面模式 (推荐新用户)
-```bash
-python app_gui.py
+## 清理仓库临时文件
+
+在开发或 CI 运行后，可以安全地清理本地产生的临时测试产物：
+
+- 推荐（PowerShell，仓库根目录运行）：
+
+```powershell
+.\scripts\clean_repo.ps1
 ```
-然后在浏览器中访问 `http://127.0.0.1:5000`
 
-#### 2. 命令行模式 (高级用户)
-```bash
-# 使用默认配置
+- 手动（如果不使用脚本）：
+
+```powershell
+# 删除覆盖率报告与缓存
+Remove-Item -LiteralPath htmlcov -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath coverage.xml -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath .coverage -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath .pytest_cache -Recurse -Force -ErrorAction SilentlyContinue
+# 删除仓库内的 __pycache__（跳过虚拟环境）
+Get-ChildItem -Recurse -Directory -Force | Where-Object { $_.Name -eq '__pycache__' -and $_.FullName -notlike '*\\venv\\*' -and $_.FullName -notlike '*\\.venv\\*' } | ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
+```
+
+注意：该清理不会删除虚拟环境（`venv` / `.venv`）或源码文件。若需要删除临时脚本或已合并的临时文件（例如本地 `PR_BODY.md`），请使用 `git rm <file>` 并提交，然后推送到远端：
+
+```powershell
+git rm PR_BODY.md
+git commit -m "chore: remove temporary PR body file"
+git push origin <branch>
+```
+
+
+## 打包为可执行文件
+
+项目支持打包为独立可执行文件，无需安装 Python：
+
+1. 安装 PyInstaller：`pip install pyinstaller`
+2. 运行打包：`pyinstaller app_gui.py --name WorkMateDataCenter --add-data "ui;ui" --add-data "config;config" --add-data "epycon;epycon"`
+3. 生成的文件位于 `dist/WorkMateDataCenter/`
+
+注意：运行时前端第三方 bundle 已集中放置于 `ui/vendor/`，请确保在打包时将该目录一并包含（例如使用 `--add-data "ui/vendor;ui/vendor"`）。
+
+**注意**：这是目录模式打包，包含 EXE 和支持文件。您可以压缩整个文件夹分发。
+
+运行 EXE 后，自动打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
+
+下载与分发
+
+- 已在 GitHub Releases 上传可分发压缩包：WorkMateDataCenter-v0.0.2-alpha.zip（包含 `WorkMateDataCenter.exe` 及必要支持文件）。
+- Release 页面： https://github.com/flyskyman/epycon-webui/releases/tag/v0.0.2-alpha
+
+快速下载安装并运行（Windows）：
+
+1. 从上面 Release 页面下载 `WorkMateDataCenter-v0.0.2-alpha.zip`。
+2. 右键解压到任意目录（例如 `C:\Tools\WorkMateDataCenter`）。
+3. 双击 `WorkMateDataCenter.exe` 启动，或在 PowerShell 中运行：
+
+```powershell
+Start-Process -FilePath "C:\path\to\WorkMateDataCenter.exe"
+```
+
+4. 程序会启动本地服务并在默认浏览器打开 `http://127.0.0.1:5000`，可在界面中选择示例数据或上传自己的 `.log` 文件进行转换。
+
+提示：若你希望在无浏览器（服务器）环境使用批处理功能，请使用源码方式运行：
+
+```powershell
 python -m epycon
-
-# 指定配置和模式
-EPYCON_CONFIG=./config/config.json python -m epycon --merge
 ```
 
-## 📋 详细配置指南
 
-### 核心配置结构
+## 项目结构（当前）
 
-```json
-{
-  "paths": {
-    "input_folder": "/path/to/workmate/data",
-    "output_folder": "/path/to/output",
-    "studies": ["study01", "study02"]  // 可选: 只处理指定study
-  },
-  "data": {
-    "output_format": "h5",           // "h5" 或 "csv"
-    "merge_logs": true,              // 是否合并为单文件
-    "pin_entries": true,             // 标注嵌入 HDF5
-    "leads": "computed",             // "computed" 或 "original"
-    "data_files": [],                // 可选: 指定文件列表
-    "channels": []                   // 可选: 指定通道列表
-  },
-  "entries": {
-    "convert": true,                 // 是否导出标注
-    "output_format": "sel",          // "sel" 或 "csv"
-    "summary_csv": true,             // 生成汇总 CSV
-    "filter_annotation_type": []     // 可选: 标注类型过滤
-  },
-  "global_settings": {
-    "workmate_version": "4.3.2",     // WorkMate 版本
-    "pseudonymize": false,           // 是否匿名化
-    "processing": {
-      "chunk_size": 1024000          // 处理块大小
-    },
-    "credentials": {                 // 元数据
-      "author": "researcher@email.com",
-      "device": "Abbott WorkMate 4.3.2",
-      "owner": "Institution Name"
-    }
-  }
-}
-```
+- `app_gui.py`：Flask Web 应用，项目的图形/HTTP 入口（保留为可执行主入口）。
+- `epycon/`：核心 Python 包，项目实现（`__main__.py`, `core/`, `iou/`, `cli/`, `config/` 等）。
+- `ui/`：前端静态资源目录（运行时界面）
+  - `index.html`：工具集入口页面（现在位于 `ui/index.html`）。
+  - `editor.html`：本地标注编辑器界面（`ui/editor.html`）。
+  - `WorkMate Log Parser.html`：日志解析器界面（`ui/WorkMate Log Parser.html`）。
+  - `h5_preview.html`：HDF5 预览页面（`ui/h5_preview.html`）。
+  - `vendor/`：第三方运行时 bundle（`ui/vendor/vue.js`, `ui/vendor/tailwind.js` 等）。
+- `scripts/`：构建与工具脚本
+  - `WorkMateDataCenter.spec`：PyInstaller 打包配置（现在在 `scripts/`）。
+  - `fix_encoding.py`：编码修复脚本（`scripts/fix_encoding.py`）。
+  - `generate_fake_wmx32.py`：测试数据生成脚本。
+  - `README.md`：脚本目录说明。
+- `config/`：运行时配置（`config.json`, `schema.json`）。
+- `docs/`：项目文档与历史发布档案（`release_notes_v0.0.3-alpha.md`, 压缩包等）。
+- `examples/`：示例和示例数据（`examples/demo.py`, `examples/data/`）。
+- 项目根还包含：`README.md`, `CHANGELOG.md`, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
 
-### 配置选项详解
-
-#### 📂 路径设置 (paths)
-- **input_folder**: WorkMate 数据根目录
-- **output_folder**: 输出目录 (自动创建子目录)
-- **studies**: 可选，指定要处理的 study 子文件夹
-
-#### 📊 数据设置 (data)
-- **output_format**: 输出格式选择
-  - `"h5"`: HDF5 格式 (推荐，功能完整)
-  - `"csv"`: CSV 格式 (兼容性好)
-- **merge_logs**: 合并模式
-  - `true`: 所有日志合并为单个文件
-  - `false`: 每个日志生成独立文件
-- **pin_entries**: 标注嵌入 (仅 HDF5)
-- **leads**: 导联模式
-  - `"computed"`: 计算导联 (标准 12 导联)
-  - `"original"`: 原始单极导联
-- **data_files**: 文件过滤器 (留空处理所有)
-- **channels**: 通道过滤器 (留空导出所有)
-
-#### 🏷️ 标注设置 (entries)
-- **convert**: 是否导出标注文件
-- **output_format**: 标注文件格式
-  - `"sel"`: SignalPlant 格式
-  - `"csv"`: 标准 CSV 格式
-- **summary_csv**: 生成汇总标注文件
-- **filter_annotation_type**: 标注类型过滤
-
-#### ⚙️ 全局设置 (global_settings)
-- **workmate_version**: WorkMate 软件版本
-- **pseudonymize**: 患者数据匿名化
-- **processing.chunk_size**: 内存处理块大小
-- **credentials**: 文件元数据
-
-## 📊 输出文件格式
-
-### HDF5 输出结构
-```
-study_output.h5 (合并模式) 或 datalog_id.h5 (单文件模式)
-├── Data                    # 主要数据集 [channels × samples]
-├── Info                    # 通道信息和设置
-├── ChannelSettings         # 通道配置
-├── Marks                   # 标注数据 (如果启用)
-└── 属性 (Attributes)
-    ├── subject_id          # 患者 ID (可能匿名化)
-    ├── subject_name        # 患者姓名
-    ├── study_id            # 研究 ID
-    ├── timestamp           # 文件时间戳
-    ├── datetime            # ISO 格式时间
-    ├── sampling_freq       # 采样频率
-    ├── num_channels        # 通道数量
-    ├── merged              # 是否为合并文件
-    ├── datalog_ids         # 合并的文件列表
-    ├── author              # 作者信息
-    ├── device              # 设备信息
-    └── owner               # 机构信息
-```
-
-### CSV 输出结构
-```
-datalog_id.csv              # 信号数据
-datalog_id_entries.csv      # 单个文件标注
-entries_summary.csv         # 汇总标注 (如果启用)
-```
-
-### SignalPlant (.sel) 格式
-- 兼容 SignalPlant 软件的标准标注格式
-- 包含时间戳、标注类型和消息内容
-
-## 🧪 测试和验证
-
-### 运行测试套件
-```bash
-# 业务逻辑测试 (29 个用例)
-python scripts/test_business_logic.py
-
-# 扩展边界测试 (28 个用例)
-python scripts/test_extended.py
-
-# 版本兼容性测试
-python scripts/test_version.py
-```
-
-### 测试覆盖范围
-- ✅ **数据解析**: 所有 WorkMate 版本格式
-- ✅ **通道映射**: 导联名称正确性
-- ✅ **标注处理**: 解析和时间对齐
-- ✅ **文件输出**: HDF5/CSV 格式完整性
-- ✅ **错误处理**: 异常情况和边界条件
-- ✅ **性能测试**: 大文件处理效率
-- ✅ **匿名化**: ID 生成和一致性
-
-### 生成测试数据
-```bash
-# 生成模拟 WorkMate 数据用于测试
-python scripts/generate_fake_wmx.py --channels 12 --samples 10000
-```
-
-## 🔧 开发指南
-
-### 代码结构说明
-
-#### 核心模块
-- **`parsers.py`**: 实现 WorkMate 二进制格式解析
-  - `LogParser`: 流式读取日志文件
-  - `_readmaster()`: 解析 MASTER 文件
-  - `_readentries()`: 解析标注数据
-
-- **`planters.py`**: 实现输出格式生成
-  - `HDFPlanter`: HDF5 文件写入
-  - `CSVPlanter`: CSV 文件写入
-  - `EntryPlanter`: 标注文件导出
-
-- **`_validators.py`**: 数据验证和类型检查
-  - 版本号归一化
-  - 配置参数验证
-  - 文件完整性检查
-
-#### 工具模块
-- **`person.py`**: 匿名化功能
-  - `Tokenize`: 伪随机 ID 生成器
-- **`helpers.py`**: 通用工具函数
-- **`bins.py`**: 二进制数据处理
-
-### 添加新功能
-
-#### 1. 新输出格式
-```python
-# 在 planters.py 中实现新 Planter 类
-class NewFormatPlanter:
-    def __init__(self, path, **kwargs):
-        # 初始化代码
-
-    def write(self, chunk):
-        # 写入数据块
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        # 清理资源
-```
-
-#### 2. 新数据验证
-```python
-# 在 _validators.py 中添加验证函数
-def validate_new_parameter(value):
-    if not isinstance(value, expected_type):
-        raise ValueError(f"Invalid parameter: {value}")
-    return value
-```
-
-#### 3. 扩展配置
-在 `schema.json` 中添加新配置项，并在相关代码中使用。
-
-### 调试技巧
-
-#### 启用详细日志
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-#### 检查中间数据
-```python
-# 在关键位置添加调试输出
-print(f"Parsed header: {header}")
-print(f"Channel mappings: {mappings}")
-print(f"Data shape: {chunk.shape}")
-```
-
-## 📦 打包和分发
-
-### 创建可执行文件
-```bash
-# 安装 PyInstaller
-pip install pyinstaller
-
-# 打包为单文件可执行程序
-pyinstaller app_gui.py \
-  --name WorkMateDataCenter \
-  --onefile \
-  --windowed \
-  --add-data "ui;ui" \
-  --add-data "config;config" \
-  --add-data "epycon;epycon"
-```
-
-### 发布检查清单
-- [ ] 所有测试通过
-- [ ] 文档更新完整
-- [ ] 示例数据包含
-- [ ] 版本号更新
-- [ ] 发布说明编写
-
-## 🤝 贡献指南
-
-### 开发工作流
-1. Fork 项目
-2. 创建功能分支: `git checkout -b feature/amazing-feature`
-3. 提交更改: `git commit -m 'Add amazing feature'`
-4. 推送分支: `git push origin feature/amazing-feature`
-5. 创建 Pull Request
-
-### 代码规范
-- 使用类型注解
-- 添加文档字符串
-- 编写测试用例
-- 遵循 PEP 8 风格
-
-### 报告问题
-- 使用 GitHub Issues
-- 提供详细的错误信息
-- 包含重现步骤
-- 附上相关配置文件
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 🙏 致谢
-
-- **Abbott Medical**: WorkMate 系统开发团队
-- **开源社区**: 贡献者和维护者
-- **医疗研究者**: 反馈和使用案例提供者
-
----
-
-**项目状态**: ✅ 生产就绪 | **测试覆盖**: 57+ 用例 | **兼容性**: WorkMate 4.1-4.3.2+
-**最后更新**: 2026年1月28日 | **维护者**: Epycon 开发团队
+打包说明：为了简化 PyInstaller 配置，`--add-data "ui;ui"` 可用于包含整个前端目录（示例命令已在上方“打包为可执行文件”部分）。

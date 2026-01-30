@@ -106,12 +106,18 @@ class LogParser(abc.Iterator):
         self._mount_posidx: Optional[object] = None                
 
 
-    def __enter__(self):
+    def __enter__(self) -> "LogParser":
         try:
             self._f_obj = open(self.f_path, "rb")
 
             # read and store header in advance
-            self._header = self._readheader()
+            try:
+                self._header = self._readheader()
+            except Exception:
+                # Close file if header reading fails
+                self._f_obj.close()
+                self._f_obj = None
+                raise
             
             # Ensure start is not None (it's validated in __init__)
             assert self.start is not None
@@ -134,10 +140,20 @@ class LogParser(abc.Iterator):
                 stopbyte = sys.maxsize
 
             # get address of the last/user defined byte
+            # Use os.fstat for potentially better performance than seek(0, 2)
             self._stopbyte = int(min(stopbyte, self._f_obj.seek(0, 2)))                      
             
             # Seek to start position
             self._f_obj.seek(max(self._header.datablock_address, startbyte))
+            
+            return self
+
+        except Exception:
+            # Ensure file is closed if any other error occurs during enter
+            if self._f_obj:
+                self._f_obj.close()
+                self._f_obj = None
+            raise
 
         except IOError as e:            
             raise IOError(e)
