@@ -722,91 +722,94 @@ def execute_epycon_conversion(cfg):
                         else:
                             merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged.h5")
                         
-                        is_first_file = True
-                        total_samples = 0
+                        # 获取第一个文件的采样率作为基准，并补全元数据
+                        base_fs = group_files[0]['header'].amp.sampling_freq
+                        hdf_attributes.update({
+                            "sampling_freq": base_fs,
+                            "num_channels": len(merged_column_names),
+                            "PatientName": subject_name,
+                            "PatientID": subject_id,
+                            "StudyDate": datetime.fromtimestamp(first_timestamp).strftime("%Y-%m-%d") if first_timestamp else ""
+                        })
                         
-                        for idx, dlog_info in enumerate(group_files):
-                            datalog_path = dlog_info['path']
-                            datalog_id = dlog_info['id']
-                            header = dlog_info['header']
-                            fs = header.amp.sampling_freq
-                            
-                            processed_count += 1
-                            conv_logger.info(f"   合并 {idx+1}/{len(group_files)}: {datalog_id}.log")
-                            
-                            # 计算当前文件的时间范围
-                            file_start_sec = float(header.timestamp)
-                            n_channels = get_safe_n_channels(header)
-                            file_size = os.path.getsize(datalog_path)
-                            if n_channels > 0 and fs > 0:
-                                n_samples = (file_size - 32) // (n_channels * 2)
-                                file_duration_sec = n_samples / fs
-                            else:
-                                file_duration_sec = 0
-                            file_end_sec = file_start_sec + file_duration_sec
-                            
-                            conv_logger.info(f"   ⏱️ 文件时间范围: {file_start_sec:.0f} - {file_end_sec:.2f} ({file_duration_sec:.3f}s)")
-                            
-                            # --- [核心逻辑] 严格 FID 匹配机制 ---
-                            # 仅选择 FID 匹配的文件，确保标注归属 100% 准确
-                            file_entries = [e for e in all_entries_norm if str(e.fid) == str(datalog_id)]
-                            conv_logger.info(f"   📊 标注匹配: {len(file_entries)} 条 (按 FID 筛选)")
-                            
-                            with LogParser(
-                                datalog_path, 
-                                version=cfg["global_settings"]["workmate_version"], 
-                                samplesize=cfg["global_settings"]["processing"]["chunk_size"]
-                            ) as parser:
-                                file_mappings = dlog_info['mappings']
+                        # 合并输出文件名
+                        if len(channel_groups) > 1:
+                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged_{group_channel_count}ch.h5")
+                        else:
+                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged.h5")
+                        
+                        total_samples = 0
+                        all_group_marks = []
+                        
+                        # [FIX] 将 HDFPlanter 移到文件循环外部：避免合并时文件被反复覆盖、丢失属性和标注
+                        with HDFPlanter(
+                            merged_output_path,
+                            column_names=merged_column_names,
+                            sampling_freq=base_fs,
+                            factor=1000,
+                            units="mV",
+                            attributes=hdf_attributes,
+                        ) as planter:
+                            for idx, dlog_info in enumerate(group_files):
+                                datalog_path = dlog_info['path']
+                                datalog_id = dlog_info['id']
+                                header = dlog_info['header']
+                                fs = header.amp.sampling_freq
                                 
-                                if is_first_file:
-                                    hdf_attributes["sampling_freq"] = fs
-                                    hdf_attributes["num_channels"] = len(merged_column_names)
+                                processed_count += 1
+                                conv_logger.info(f"   合并 {idx+1}/{len(group_files)}: {datalog_id}.log")
                                 
-                                with HDFPlanter(
-                                    merged_output_path,
-                                    column_names=merged_column_names,
-                                    sampling_freq=fs,
-                                    factor=1000,
-                                    units="mV",
-                                    attributes=hdf_attributes if is_first_file else {},
-                                    append=not is_first_file,
-                                ) as planter:
+                                # 计算当前文件的时间范围
+                                file_start_sec = float(header.timestamp)
+                                n_channels = get_safe_n_channels(header)
+                                file_size = os.path.getsize(datalog_path)
+                                if n_channels > 0 and fs > 0:
+                                    n_samples = (file_size - 32) // (n_channels * 2)
+                                    file_duration_sec = n_samples / fs
+                                else:
+                                    file_duration_sec = 0
+                                file_end_sec = file_start_sec + file_duration_sec
+                                
+                                conv_logger.info(f"   ⏱️ 文件时间范围: {file_start_sec:.0f} - {file_end_sec:.2f} ({file_duration_sec:.3f}s)")
+                                
+                                # 筛选匹配当前文件的标注
+                                file_entries = [e for e in all_entries_norm if str(e.fid) == str(datalog_id)]
+                                if file_entries:
+                                    conv_logger.info(f"   📊 匹配标注: {len(file_entries)} 条")
+                                
+                                with LogParser(
+                                    datalog_path, 
+                                    version=cfg["global_settings"]["workmate_version"], 
+                                    samplesize=cfg["global_settings"]["processing"]["chunk_size"]
+                                ) as parser:
+                                    file_mappings = dlog_info['mappings']
                                     file_sample_count = 0
                                     for chunk in parser:
                                         chunk = mount_channels(chunk, file_mappings)
                                         planter.write(chunk)
                                         file_sample_count += chunk.shape[0]
-                                        total_samples += chunk.shape[0]
                                     
-                                    # 为这个文件嵌入对应的标注
+                                    # 预处理当前文件的标注，转换为 H5 里的全局采样点偏移
                                     if cfg["data"]["pin_entries"] and file_entries:
-                                        conv_logger.info(f"📌 文件 {datalog_id}: 嵌入 {len(file_entries)} 条标注 (文件时间范围: {file_start_sec:.2f}-{file_end_sec:.2f})")
-                                        
-                                        global_base = total_samples - file_sample_count
+                                        global_base = total_samples 
                                         file_end_global = global_base + file_sample_count
                                         
-                                        valid = []
                                         for e in file_entries:
-                                            # 计算相对于当前组起始时间的偏移 (秒)
-                                            # 注意：first_timestamp 为该组第一个文件的时间戳基准
+                                            # 计算相对于整组起始点的时间偏移
                                             offset_sec = e.timestamp - first_timestamp
                                             global_p = int(offset_sec * fs)
                                             
-                                            # 严格校验：必须落在当前文件的全局采样点范围内
+                                            # 校验：标注必须落在此文件实际跨越的采样区间内
                                             if global_base <= global_p < file_end_global:
-                                                valid.append((global_p, str(e.group), str(e.message)))
-                                            else:
-                                                conv_logger.warning(f"   ⚠️ FID {datalog_id} 匹配但时间戳偏移 {offset_sec:.3f}s 落在文件范围 [{global_base/fs:.3f}, {file_end_global/fs:.3f}] 之外")
-                                        
-                                        if valid:
-                                            p, g, m = zip(*valid)
-                                            planter.add_marks(list(p), list(g), list(m))
-                                            conv_logger.info(f"   ✅ 已将 {len(valid)} 条标注精确嵌入")
-                                        elif file_entries:
-                                            conv_logger.warning(f"   ❌ {len(file_entries)} 条 FID 匹配的标注均因时间范围不符被剔除。数据一致性检查失败！")
+                                                all_group_marks.append((global_p, str(e.group), str(e.message)))
+                                    
+                                    total_samples += file_sample_count
                             
-                            is_first_file = False
+                            # [FIX] 在所有数据写入完成后，统一写入所有标注
+                            if all_group_marks:
+                                p, g, m = zip(*all_group_marks)
+                                planter.add_marks(list(p), list(g), list(m))
+                                conv_logger.info(f"   ✅ 已统一嵌入 {len(all_group_marks)} 条标注")
                         
                         conv_logger.info(f"   ✅ 合并完成: {merged_output_path} ({total_samples} samples)")
                 
