@@ -7,13 +7,8 @@ from epycon.core._dataclasses import Entry
 def test_tosel_basic():
     """Test _tosel function with basic entries."""
     entries = [
-<<<<<<< HEAD
-        Entry(timestamp=1000, group="test_group", fid="file1", message="test message 1"),
-        Entry(timestamp=1001, group="test_group", fid="file1", message="test message 2"),
-=======
         Entry(timestamp=1000.0, group="test_group", fid="file1", message="test message 1"),
         Entry(timestamp=1001.0, group="test_group", fid="file1", message="test message 2"),
->>>>>>> b8695bb (修复：恢复测试套件及核心功能（CI 已验证）)
     ]
 
     channel_names = ["CH1", "CH2"]
@@ -33,11 +28,7 @@ def test_tosel_basic():
 def test_tosel_with_timestamps():
     """Test _tosel with ref_timestamp."""
     entries = [
-<<<<<<< HEAD
-        Entry(timestamp=1000, group="group1", fid="f1", message="msg1"),
-=======
         Entry(timestamp=1000.0, group="group1", fid="f1", message="msg1"),
->>>>>>> b8695bb (修复：恢复测试套件及核心功能（CI 已验证）)
     ]
 
     # Test with ref_timestamp
