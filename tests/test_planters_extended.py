@@ -129,10 +129,7 @@ class TestHDFPlanter:
             # Verify combined data
             import h5py
             with h5py.File(h5_path, 'r') as f:
-                # HDFPlanter stores data as (channels, samples), and append doesn't work as expected in current implementation
-                # This test verifies the last write only, not cumulative append
-                assert f['Data'].shape[0] == 1  # 1 channel
-                assert f['Data'].shape[1] == 2  # 2 samples from last write
+                assert f['Data'].shape == (1, 4)  # 1 channel, 4 samples
 
     def test_hdf_planter_add_marks(self):
         """Test HDFPlanter add_marks method."""
