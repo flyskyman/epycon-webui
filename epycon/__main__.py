@@ -348,31 +348,51 @@ def main():
                                 file_sample_count += chunk.shape[0]
                                 total_samples += chunk.shape[0]
                             
-                            # Inject entries for this specific file
-                            if cfg["data"]["pin_entries"] and file_entries and hasattr(planter, "add_marks"):
-                                # Calculate global positions for this file's entries
-                                global_base = total_samples - file_sample_count
-                                file_end_global = global_base + file_sample_count
-                                
-                                valid_marks = []
-                                for e in file_entries:
-                                    relative_pos = round((e.timestamp - file_start_sec) * fs)
-                                    global_pos = global_base + relative_pos
-                                    
-                                    if global_base <= global_pos < file_end_global:
-                                        valid_marks.append((global_pos, str(e.group), str(e.message)))
-                                
-                                if valid_marks:
-                                    positions, groups, messages = zip(*valid_marks)
-                                    planter.add_marks(
-                                        positions=list(positions),
-                                        groups=list(groups),
-                                        messages=list(messages),
-                                    )
-                                    logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id} (time range: {file_start_sec:.2f}-{file_end_sec:.2f})")
-                            
                             is_first_file = False
                             print("OK")
+                
+                # After all files processed, inject all accumulated marks at once
+                if accumulated_marks and cfg["data"]["pin_entries"]:
+                    import h5py
+                    import numpy as np
+                    from epycon.core.utils import difftimestamp
+
+                    with h5py.File(merged_output_path, "a") as f_obj:
+                        positions, groups, messages = zip(*accumulated_marks)
+                        
+                        # Prepare marks array
+                        marks_data = []
+                        for pos, grp, msg in zip(positions, groups, messages):
+                            group_bytes = grp.encode('UTF-8') if isinstance(grp, str) else grp
+                            message_bytes = msg.encode('UTF-8') if isinstance(msg, str) else msg
+                            channel_id = merged_column_names[0].encode('UTF-8') if merged_column_names else b''
+                            
+                            marks_data.append((
+                                int(pos),
+                                int(pos),
+                                group_bytes,
+                                1.0,
+                                channel_id,
+                                message_bytes
+                            ))
+                        
+                        # Create marks dataset
+                        marks_dtype = np.dtype([
+                            ('SampleLeft', '<i4'),
+                            ('SampleRight', '<i4'),
+                            ('Group', 'S256'),
+                            ('Validity', '<f4'),
+                            ('Channel', 'S256'),
+                            ('Info', 'S256'),
+                        ])
+                        marks_array = np.array(marks_data, dtype=marks_dtype)
+                        
+                        # Remove old marks if exists and create new
+                        if 'Marks' in f_obj:
+                            del f_obj['Marks']
+                        f_obj.create_dataset('Marks', data=marks_array)
+                        
+                    logger.info(f"   ✅ Total {len(accumulated_marks)} entries injected into merged file")
                 
                 logger.info(f"Merged {len(group_files)} files into {merged_output_path} ({total_samples} total samples)")
                 print(f"DONE (merged {len(group_files)} files)")
@@ -400,103 +420,110 @@ def main():
                         valid_channels = set(cfg["data"]["channels"])
                         mappings = {key: value for key, value in mappings.items() if key in valid_channels}
 
-                    # instantiate planter and write data chunks
-                    column_names = list(mappings.keys())
-
-                    if output_fmt == "csv":
-                        DataPlanter = CSVPlanter
-                    elif output_fmt == "h5":                    
-                        DataPlanter = HDFPlanter
-                    else:
-                        raise ValueError
                     
-                    # build metadata attributes for HDF5
-                    hdf_attributes = {
-                        "subject_id": subject_id,
-                        "subject_name": subject_name,
-                        "study_id": study_id,
-                        "datalog_id": datalog_id,
-                        "timestamp": ref_timestamp,
-                        "datetime": datetime.fromtimestamp(ref_timestamp).isoformat(),
-                        "sampling_freq": header.amp.sampling_freq,
-                        "num_channels": header.num_channels,
-                    }
-                    
-                    # add credentials if available
-                    credentials = cfg["global_settings"].get("credentials", {})
-                    if credentials:
-                        hdf_attributes.update({
-                            "author": credentials.get("author", ""),
-                            "device": credentials.get("device", ""),
-                            "owner": credentials.get("owner", ""),
-                        })
+                    # Ref timestamp for this file
+                    ref_timestamp = header.timestamp
 
-                    # instantiate planter with coversion factor for HDF of 1000 -> uV to mV
-                    with DataPlanter(
-                        os.path.join(output_folder, study_id, datalog_id + "." + output_fmt),
-                        column_names=column_names,
-                        sampling_freq=header.amp.sampling_freq,
-                        factor=1000,
-                        units="mV",
-                        attributes=hdf_attributes,
-                    ) as planter:
-                        # iterate over chunks of data and write to disk
-                        for chunk in parser:                        
-                            # compute leads                        
-                            chunk = mount_channels(chunk, mappings)                                                
-                            planter.write(chunk)
+                    with LogParser(datalog_path) as parser:
+                        # instantiate planter and write data chunks
+                        column_names = list(mappings.keys())
 
-                        # write entries to hdf file
-                        if cfg["data"]["pin_entries"] and hasattr(planter, "add_marks"):
-                            # convert timestamps -> datetimediff -> samples
-                            if entries:
-                                try:
-                                    groups, positions, messages = zip(
-                                        *[(
-                                            e.group,
-                                            header.amp.sampling_freq*difftimestamp((e.timestamp, ref_timestamp)),
-                                            e.message,
-                                        ) for e in entries if e.fid == datalog_id
-                                        ])
-                                    # write marks
-                                    planter.add_marks(
-                                        positions=positions,
-                                        groups=groups,
-                                        messages=messages,
-                                    )
-                                except ValueError:
-                                    pass  # No matching entries
+                        DataPlanter: type[CSVPlanter] | type[HDFPlanter]
+                        if output_fmt == "csv":
+                            DataPlanter = CSVPlanter
+                        elif output_fmt == "h5":                    
+                            DataPlanter = HDFPlanter
+                        else:
+                            raise ValueError(f"Unsupported output format: {output_fmt}")
+
+                        # Create output filename
+                        if study_id == "root":
+                            output_target_dir = output_folder
+                        else:
+                            output_target_dir = os.path.join(output_folder, study_id)
+                            os.makedirs(output_target_dir, exist_ok=True)
+                            
+                        output_filename = datalog_id + "." + output_fmt
+                        full_output_path = os.path.join(output_target_dir, output_filename)
+
+                        with DataPlanter(
+                            f_path=full_output_path,
+                            chnames=column_names,
+                            sampling_freq=header.amp.sampling_freq,
+                            factor=1000,
+                            units="mV",
+                        ) as planter:
+                            # create mandatory datasets
+                            for chunk in parser:
+                                planter.write(chunk)
+
+                            # write entries to hdf file
+                            if cfg["data"]["pin_entries"] and hasattr(planter, "add_marks"):
+                                # convert timestamps -> datetimediff -> samples
+                                if entries:
+                                    try:
+                                        marked_entries = [e for e in entries if e.fid == datalog_id]
+                                        if marked_entries:
+                                            # Strict calculation of file boundaries relative to the file's reference timestamp
+                                            file_start_sec = 0.0 # Relative to ref_timestamp of the current file
+                                            file_duration_sec = header.num_samples / header.amp.sampling_freq
+                                            file_end_sec = file_start_sec + file_duration_sec
+                                            
+                                            valid_marks = []
+                                            for entry in marked_entries:
+                                                offset_sec = float(difftimestamp((int(entry.timestamp), int(ref_timestamp))))
+                                                
+                                                # Strict validation: No clamping. If it's outside, it's an error or belongs to another file.
+                                                if file_start_sec <= offset_sec < file_end_sec:
+                                                    local_pos = int(offset_sec * header.amp.sampling_freq)
+                                                    valid_marks.append((entry.group, local_pos, entry.message))
+                                                else:
+                                                    logger.warning(f"   ⚠️ {datalog_id}: Entry '{entry.message}' timestamp {offset_sec}s outside file range [{file_start_sec}, {file_end_sec}]. Integrity check failed.")
+                                            
+                                            if valid_marks:
+                                                groups, positions, messages = zip(*valid_marks)
+                                                # write marks
+                                                planter.add_marks(
+                                                    positions=list(positions),
+                                                    groups=list(groups),
+                                                    messages=list(messages),
+                                                )
+                                                logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id}")
+                                            else:
+                                                logger.info(f"   ℹ️ No valid entries to inject for {datalog_id}")
+                                    except (ValueError, TypeError) as e:
+                                        logger.error(f"   ❌ Error injecting marks for {datalog_id}: {e}")
                 
-                # convert and store entries | csv or sel per each file            
-                if cfg["entries"]["convert"] and entries:                
-                    criteria = {
-                        "fids": [datalog_id],
-                        "groups": cfg["entries"]["filter_annotation_type"],
-                    }                
-                    file_fmt = cfg["entries"]["output_format"]
-                    
-                    if file_fmt == "csv":
-                        # store as .csv file
-                        entryplanter.savecsv(
-                            os.path.join(output_folder, study_id, datalog_id + "." + file_fmt),
-                            criteria=criteria,
-                            ref_timestamp=ref_timestamp,
-                        )
-                    elif file_fmt == "sel":
-                        # store as SignalPlant .sel text file
-                        entryplanter.savesel(
-                            os.path.join(output_folder, study_id, datalog_id + "." + file_fmt),
-                            ref_timestamp,
-                            header.amp.sampling_freq,
-                            list(mappings.keys()),
-                            criteria=criteria,                        
-                        )
-                    else:
-                        pass
+                    # convert and store entries | csv or sel per each file            
+                    if cfg["entries"]["convert"] and entries:                
+                        criteria = {
+                            "fids": [datalog_id],
+                            "groups": cfg["entries"]["filter_annotation_type"],
+                        }                
+                        file_fmt = cfg["entries"]["output_format"]
+                        
+                        try:
+                            if file_fmt == "csv":
+                                # store as .csv file
+                                entryplanter.savecsv(
+                                    os.path.join(output_folder, study_id, datalog_id + "." + file_fmt),
+                                    criteria=criteria,
+                                    ref_timestamp=ref_timestamp,
+                                )
+                            elif file_fmt == "sel":
+                                # store as SignalPlant .sel text file
+                                entryplanter.savesel(
+                                    os.path.join(output_folder, study_id, datalog_id + "." + file_fmt),
+                                    ref_timestamp,
+                                    header.amp.sampling_freq,
+                                    list(mappings.keys()),
+                                    criteria=criteria,                        
+                                )
+                        except Exception as e:
+                            logger.error(f"   ❌ Error exporting entry file for {datalog_id}: {e}")
 
-                print(f"DONE")
+                print("DONE")
 
 
 if __name__ == "__main__":
     main()
-

@@ -115,7 +115,7 @@ python -m epycon
 - `ui/`：前端静态资源目录（运行时界面）
   - `index.html`：工具集入口页面（现在位于 `ui/index.html`）。
   - `editor.html`：本地标注编辑器界面（`ui/editor.html`）。
-  - `WorkMate Log Parser.html`：日志解析器界面（`ui/WorkMate Log Parser.html`）。
+  - `WorkMate_Log_Parser.html`：日志解析器界面（`ui/WorkMate_Log_Parser.html`）。
   - `h5_preview.html`：HDF5 预览页面（`ui/h5_preview.html`）。
   - `vendor/`：第三方运行时 bundle（`ui/vendor/vue.js`, `ui/vendor/tailwind.js` 等）。
 - `scripts/`：构建与工具脚本

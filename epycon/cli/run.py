@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # Schema will be loaded inside main block
 
 
+
 def main():
     config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
     jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
@@ -58,7 +59,7 @@ def main():
     parser.add_argument("-o", "--output_folder", type=str,)
     parser.add_argument("-s", "--studies", type=list,)
 
-    parser.add_argument("-fmt", "--output_format", type=str, choices=['csv', 'hdf'])
+    parser.add_argument("-fmt", "--output_format", type=str)
     
     parser.add_argument("-e", "--entries", type=bool,)
     parser.add_argument("-efmt", "--entries_format", type=str, choices=['csv', 'sel'])
@@ -97,7 +98,6 @@ def main():
 
     import time
     from glob import glob
-    from epycon.iou.planters import HDFPlantercinc
     
     # 可选的 scipy 导入（仅用于加速度数据处理）
     try:
@@ -112,9 +112,6 @@ def main():
         HAS_SCIPY = False
         filtfilt = None  # type: ignore
         b, a = None, None  # type: ignore
-    
-    # path = r'C:\Users\jakub\Research\Data\WorkMate'
-    # out_path = r'C:\Users\jakub\Research\Data\WorkMate_export'
     
     path = '/backup/data/VuVeL/WorkMate'
     out_path = '/backup/data/VuVeL/WorkMate_export'
@@ -149,9 +146,7 @@ def main():
         except FileExistsError:            
             pass
 
-        # entryparser = EpParser(folder)
-        # marks = entryparser.read_entries()
-        marks = {}
+        marks = _readentries(folder)
         t_marks = time.time() - start
 
         
@@ -166,47 +161,27 @@ def main():
             header = _readheader(logfile)            
             data = cast(np.ndarray, _readdata(logfile, version='4.2', mount=False))
                         
-            # planter = HDFPlanter(f_path=r'C:\Users\jakub\Research\Codes\Python\epycon\data\Pigs_export\27-15\00000000.h5')
-            #
-            #
             # ---------------- read header ---------------
-            #
-            # 
-            if file_id in marks:        
-                # temp = [(item.group, _samplefromtimestamp([item.timestamp, header.timestamp], 2000), item.message) for item in marks[file_id].content]
-                # group, start_sample, info = list(zip(*temp))
-                group = ()
-                start_sample = ()
-                info = ()        
+            if file_id in [entry.fid for entry in marks]:        
+                entries_for_file = [entry for entry in marks if entry.fid == file_id]
+                temp = [(item.group, int(cast(float, difftimestamp([int(item.timestamp), int(header.timestamp)])) * 2000), item.message) for item in entries_for_file]
+                group, start_sample, info = list(zip(*temp))        
             else:
-                group = ()
-                start_sample = ()
-                info = ()
+                group, start_sample, info = list(), list(), list()
             
             t_header = time.time() - start
             
 
-            #
-            #
             # ---------------- create hdf with no compression ---------------
-            #
-            # 
             start = time.time()
             planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '.h5'))
             with planter:
-                planter.create(
-                    data,
-                    # chnames=[ch.name for ch in header.mount],
-                    chnames=None,
-                    sampling_freq=header.amp.sampling_freq,
-                    compression=None,
-                )
+                planter.write(data)
 
-                planter.addmark(
-                    startsample=start_sample,
-                    endsample=start_sample,
-                    info=info,
-                    group=group,
+                planter.add_marks(
+                    positions=[start_sample],
+                    groups=[group],
+                    messages=[info],
                 )
 
             t_h5 = time.time() - start            
@@ -219,28 +194,16 @@ def main():
 
 
 
-            #
-            #
             # ---------------- create hdf with gzip compression ---------------
-            #
-            # 
-
             start = time.time()
             planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '_gzip.h5'))
             with planter:
-                planter.create(
-                    data,
-                    # chnames=[ch.name for ch in header.mount],
-                    chnames=None,
-                    sampling_freq=header.amp.sampling_freq,
-                    compression=None,
-                )
+                planter.write(data)
 
-                planter.addmark(
-                    startsample=start_sample,
-                    endsample=start_sample,
-                    info=info,
-                    group=group,
+                planter.add_marks(
+                    positions=[start_sample],
+                    groups=[group],
+                    messages=[info],
                 )
 
 
@@ -252,18 +215,14 @@ def main():
             except OSError:
                 pass
 
-            #
-            #
             # ---------------- create csv  ---------------
-            #
-            #          
             csv_data = np.transpose(data).astype(np.int32)
             start = time.time()
-            # _tocsv(                
-            #     f_path=os.path.join(out_path, fold_id, file_id + '.csv'),
-            #     chunk=csv_data,
-            #     chnames=[ch.name for ch in header.mount],                
-            #     )
+            _tocsv(                
+                f_path=os.path.join(out_path, fold_id, file_id + '.csv'),
+                chunk=csv_data,
+                chnames=[ch.name for ch in header.mount],                
+                )
             t_csv = time.time() - start            
             size_csv = os.path.getsize(os.path.join(out_path, fold_id, file_id + '.csv'))
 
@@ -272,8 +231,6 @@ def main():
             except OSError:
                 pass
                 
-            # Aggregate stats
-            # Aggregate stats
             # Aggregate stats
             stat['size_orig'].append(size_orig)
             stat['size_h5'].append(size_h5)
@@ -293,12 +250,9 @@ def main():
 
 
             # Analyze accelerometry
-            # Analyze accelerometry
-            # Analyze accelerometry
-            # Analyze accelerometry
-            if file_id in marks:
-                # cuk = [(entry.message, _samplefromtimestamp([entry.timestamp, header.timestamp], 2000)) for entry in marks[file_id].content if entry.message.startswith('IRE Cuk')]
-                cuk = []
+            if file_id in [entry.fid for entry in marks]:
+                entries_for_file = [entry for entry in marks if entry.fid == file_id]
+                cuk = [(entry.message, int(difftimestamp([entry.timestamp, header.timestamp]) * 2000)) for entry in entries_for_file if entry.message.startswith('IRE Cuk')]
             else:
                 continue
 

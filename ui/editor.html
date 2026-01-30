@@ -327,6 +327,13 @@
                                 :class="{'text-green-600': lastStatus==='success', 'text-red-600': lastStatus==='error'}"
                                 class="text-xs font-bold">{{ statusMessage }}</span>
                         </div>
+
+                        <!-- Progress Bar -->
+                        <div v-if="isRunning" class="w-full bg-gray-200 h-2 px-0">
+                            <div class="bg-indigo-600 h-2 transition-all duration-300"
+                                :style="{ width: taskProgress + '%' }"></div>
+                        </div>
+
                         <div class="p-4 flex-grow overflow-auto bg-gray-900 font-mono text-xs text-green-400 whitespace-pre-wrap"
                             id="log-container">{{ logs || "> 等待指令..." }}</div>
                     </div>
@@ -336,7 +343,7 @@
     </div>
 
     <script>
-        const { createApp, ref, computed } = Vue;
+        const { createApp, ref, computed, nextTick } = Vue;
 
         createApp({
             setup() {
@@ -350,6 +357,8 @@
 
                 const config = ref(JSON.parse(JSON.stringify(defaultConfig)));
                 const isRunning = ref(false);
+                const taskProgress = ref(0);
+                const taskId = ref(null);
                 const logs = ref("");
                 const statusMessage = ref("");
                 const lastStatus = ref("");
@@ -379,7 +388,7 @@
                 // 打开文件夹选择
                 const selectFolder = async (target) => {
                     try {
-                        const res = await fetch('http://127.0.0.1:5000/api/select-folder');
+                        const res = await fetch('/api/select-folder');
                         const data = await res.json();
                         if (data.path) {
                             if (target === 'input') config.value.paths.input_folder = data.path;
@@ -390,35 +399,77 @@
                     }
                 };
 
+                // 轮询任务状态
+                const pollTaskStatus = async (id) => {
+                    if (!id || !isRunning.value) return;
+                    try {
+                        const res = await fetch(`/api/task-status/${id}`);
+                        if (res.status === 404) return;
+                        const data = await res.json();
+
+                        // 追加新日志
+                        if (data.logs && data.logs.length > 0) {
+                            logs.value += data.logs.join('\n') + '\n';
+                            nextTick(() => {
+                                const el = document.getElementById('log-container');
+                                if (el) el.scrollTop = el.scrollHeight;
+                            });
+                        }
+
+                        taskProgress.value = data.progress;
+
+                        if (data.status === 'completed') {
+                            isRunning.value = false;
+                            lastStatus.value = 'success';
+                            statusMessage.value = "✅ 转换圆满完成";
+                            taskProgress.value = 100;
+                        } else if (data.status === 'failed') {
+                            isRunning.value = false;
+                            lastStatus.value = 'error';
+                            statusMessage.value = "❌ 转换失败";
+                        } else {
+                            // 继续轮询
+                            setTimeout(() => pollTaskStatus(id), 800);
+                        }
+                    } catch (e) {
+                        console.error("Polling error:", e);
+                        setTimeout(() => pollTaskStatus(id), 2000);
+                    }
+                };
+
                 // 运行转换
                 const runOnServer = async () => {
                     if (!config.value.paths.input_folder || !config.value.paths.output_folder) {
                         alert("请先设置输入和输出文件夹！"); return;
                     }
                     isRunning.value = true;
-                    logs.value = "> 正在连接后台...\n";
-                    statusMessage.value = "运行中...";
+                    taskProgress.value = 0;
+                    logs.value = "> 正在提交加速任务...\n";
+                    statusMessage.value = "任务已提交...";
 
                     try {
-                        const response = await fetch('http://127.0.0.1:5000/run-direct', {
+                        const response = await fetch('/run-direct', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(config.value)
                         });
                         const result = await response.json();
-                        logs.value = result.logs || "无日志返回";
-                        lastStatus.value = result.status;
-                        statusMessage.value = result.status === 'success' ? "✅ 转换成功" : "❌ 发生错误";
+
+                        if (result.status === 'accepted') {
+                            taskId.value = result.task_id;
+                            pollTaskStatus(result.task_id);
+                        } else {
+                            throw new Error(result.message || "请求被拒绝");
+                        }
                     } catch (error) {
-                        lastStatus.value = "error";
-                        statusMessage.value = "连接失败";
-                        logs.value += `\n❌ 无法连接到服务器: ${error.message}`;
-                    } finally {
                         isRunning.value = false;
+                        lastStatus.value = "error";
+                        statusMessage.value = "提交失败";
+                        logs.value += `\n❌ 错误: ${error.message}`;
                     }
                 };
 
-                return { config, jsonOutput, addArrayItem, removeArrayItem, resetToDefault, downloadJson, copyToClipboard, runOnServer, selectFolder, isRunning, logs, statusMessage, lastStatus };
+                return { config, jsonOutput, addArrayItem, removeArrayItem, resetToDefault, downloadJson, copyToClipboard, runOnServer, selectFolder, isRunning, taskProgress, logs, statusMessage, lastStatus };
             }
         }).mount('#app');
     </script>

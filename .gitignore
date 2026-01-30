@@ -171,3 +171,5 @@ examples/data/
 # Build/dist artifacts
 dist/
 build/
+.DS_Store
+temp_test/

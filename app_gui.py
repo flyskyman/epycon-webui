@@ -20,6 +20,9 @@ from datetime import datetime, timezone
 import socket
 import atexit
 import signal
+import uuid
+import concurrent.futures
+import subprocess
 
 # ========================================================
 # 🛡️ 运行时环境
@@ -130,36 +133,67 @@ def check_port_available(port=5000):
         return False
 
 def kill_port_occupier(port=5000):
-    """尝试终止占用端口的进程"""
-    if os.name != 'nt':
-        return False
-    
+    """
+    尝试终止占用端口的进程。
+    返回: (bool, str) -> (是否成功/跳过, 占用者名称)
+    """
+    import subprocess
     try:
-        import subprocess
-        # 查找占用端口的进程
-        result = subprocess.run(
-            ['netstat', '-ano'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        # 获取当前进程 PID 和父进程 PID
+        my_pid = os.getpid()
+        ppid = os.getppid()
         
-        for line in result.stdout.split('\n'):
-            if f':{port}' in line and 'LISTENING' in line:
-                parts = line.split()
-                if parts:
-                    pid = parts[-1]
+        if os.name == 'nt':
+            # Windows 逻辑
+            result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=5)
+            for line in result.stdout.split('\n'):
+                if f':{port}' in line and 'LISTENING' in line:
+                    parts = line.split()
+                    if parts:
+                        pid_str = parts[-1]
+                        try:
+                            target_pid = int(pid_str)
+                            # 禁止自杀或杀父（Reloader 环境下常见）
+                            if target_pid == my_pid or target_pid == ppid:
+                                return False, "Self/Parent"
+                                
+                            pname = "Unknown Windows Process"
+                            print(f"发现占用者: {pname} (PID: {target_pid})")
+                            subprocess.run(['taskkill', '/F', '/PID', str(target_pid)], timeout=5)
+                            time.sleep(1.5)
+                            return True, pname
+                        except: pass
+        else:
+            # macOS / Linux 逻辑 (使用 lsof)
+            try:
+                cmd = ['lsof', '-i', f':{port}', '-sTCP:LISTEN', '-n', '-P']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                lines = [l for l in result.stdout.split('\n') if l.strip()]
+                if len(lines) > 1:
+                    parts = lines[1].split()
+                    pname = parts[0]
+                    pid_str = parts[1]
                     try:
-                        pid = int(pid)
-                        print(f"🔪 正在终止占用端口 {port} 的进程 (PID: {pid})...")
-                        subprocess.run(['taskkill', '/F', '/PID', str(pid)], timeout=5)
-                        time.sleep(2)
-                        return True
-                    except:
-                        pass
+                        target_pid = int(pid_str)
+                        if target_pid == my_pid or target_pid == ppid:
+                            # 端口是被自己或父进程占用的（例如 Flask Reloader 启动中），跳过清理
+                            return False, "Self/Parent"
+                            
+                        system_services = ['ControlCe', 'ControlCenter', 'launchd', 'rapportd']
+                        if pname in system_services:
+                            print(f"🏷️  端口 {port} 被系统服务 '{pname}' 占用，将尝试规避。")
+                            return False, pname
+                        
+                        print(f"发现占用者: {pname} (PID: {target_pid})")
+                        subprocess.run(['kill', '-9', str(target_pid)], timeout=5)
+                        time.sleep(1.5)
+                        return True, pname
+                    except: pass
+            except FileNotFoundError:
+                print("⚠️  系统缺少 'lsof' 指令。")
     except Exception as e:
-        print(f"终止端口占用进程失败: {e}")
-    return False
+        print(f"清理端口失败: {e}")
+    return False, "None"
 
 def cleanup_on_exit():
     """程序退出时的清理工作"""
@@ -203,6 +237,7 @@ try:
     from epycon.iou import LogParser, EntryPlanter, CSVPlanter, HDFPlanter, readentries, mount_channels
     from epycon.iou.parsers import _readmaster
     from epycon.utils.person import Tokenize
+    from epycon.core.helpers import difftimestamp
 except ImportError as e:
     print(f"无法加载 Epycon。\n{e}")
     if __name__ == "__main__":
@@ -236,7 +271,10 @@ class MemoryLogHandler(logging.Handler):
         self.logs.append(self.format(record))
 
 # ========================================================
-# 🏗️ [核心] 自定义可变 Entry 对象
+# 🚀 异步任务管理
+# ========================================================
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+TASKS = {} # taskId -> { 'status': 'running', 'progress': 0, 'logs': [], 'result': None }
 # ========================================================
 @dataclasses.dataclass
 class MutableEntry:
@@ -362,7 +400,7 @@ def clean_entries_content(entries):
     # 系统底层数据组黑名单
     GROUP_BLACKLIST = {
         'SYS', 'SYSTEM', 'DEBUG', 'DBG', 
-        'UNK', 'UNKNOWN', 'IDK', 
+        'UNK', 'UNKNOWN', 'IDK', '0',
         'ERROR', 'ERR', 'WARN', 
         'DATA', 'BLOB', 'ALARM'
     }
@@ -410,7 +448,8 @@ def clean_entries_content(entries):
         new_e = MutableEntry(
             timestamp=to_unix_seconds(e.timestamp),
             group=raw_grp,
-            message=raw_msg
+            message=raw_msg,
+            fid=getattr(e, 'fid', '0')
         )
         cleaned_list.append(new_e)
 
@@ -458,65 +497,20 @@ def execute_epycon_conversion(cfg):
     conv_logger.setLevel(logging.DEBUG)  # 确保捕获所有级别
     conv_logger.propagate = False  # 不传播到父 logger，只用我们的处理器
     
-    # 临时添加内存处理器，任务结束后移除
-    conv_logger.addHandler(mem_handler)
+    # [MODIFIED] 现在接受 task_id 以更新状态
+    task_id = cfg.get("_task_id")
     
-    # 确保工作目录是项目根目录（在 Flask 环境中可能会变化）
+    def update_progress(p, log_msg=None):
+        if task_id in TASKS:
+            TASKS[task_id]['progress'] = p
+            if log_msg:
+                TASKS[task_id]['logs'].append(log_msg)
+
+    # [FIX] 定义 script_dir 供配置初始化使用
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
     
-    # 确保所有配置键都存在（关键！）
-    if not isinstance(cfg, dict):
-        cfg = {}
-    
-    if "paths" not in cfg or not isinstance(cfg["paths"], dict):
-        cfg["paths"] = {}
-    if "input_folder" not in cfg["paths"]:
-        cfg["paths"]["input_folder"] = "examples/data"
-    if "output_folder" not in cfg["paths"]:
-        cfg["paths"]["output_folder"] = "examples/data/out"
-    cfg["paths"].setdefault("studies", [])
-    
-    if "data" not in cfg or not isinstance(cfg["data"], dict):
-        cfg["data"] = {}
-    cfg["data"].setdefault("output_format", "h5")
-    cfg["data"].setdefault("data_files", [])
-    cfg["data"].setdefault("channels", [])
-    cfg["data"].setdefault("custom_channels", {})
-    cfg["data"].setdefault("leads", "original")
-    cfg["data"].setdefault("merge_logs", False)
-    cfg["data"].setdefault("pin_entries", True)  # 默认启用：嵌入标注到 H5 文件
-    
-    if "entries" not in cfg or not isinstance(cfg["entries"], dict):
-        cfg["entries"] = {}
-    cfg["entries"].setdefault("filter_annotation_type", [])
-    cfg["entries"].setdefault("convert", False)
-    cfg["entries"].setdefault("output_format", "csv")
-    cfg["entries"].setdefault("summary_csv", False)
-    
-    if "global_settings" not in cfg or not isinstance(cfg["global_settings"], dict):
-        cfg["global_settings"] = {}
-    cfg["global_settings"].setdefault("credentials", {})
-    cfg["global_settings"].setdefault("workmate_version", "4.3.2")
-    cfg["global_settings"].setdefault("pseudonymize", False)
-    cfg["global_settings"].setdefault("processing", {})
-    if "processing" not in cfg["global_settings"] or not isinstance(cfg["global_settings"]["processing"], dict):
-        cfg["global_settings"]["processing"] = {}
-    cfg["global_settings"]["processing"].setdefault("chunk_size", 1024)
-    
-    # 转换相对路径为绝对路径
-    input_folder_raw = cfg["paths"]["input_folder"]
-    output_folder_raw = cfg["paths"]["output_folder"]
-    
-    conv_logger.info(f"🔍 路径转换前: input={input_folder_raw}, is_abs={os.path.isabs(input_folder_raw)}")
-    
-    if not os.path.isabs(input_folder_raw):
-        cfg["paths"]["input_folder"] = os.path.join(script_dir, input_folder_raw)
-        conv_logger.info(f"✅ 路径已转换: {input_folder_raw} -> {cfg['paths']['input_folder']}")
-    if not os.path.isabs(output_folder_raw):
-        cfg["paths"]["output_folder"] = os.path.join(script_dir, output_folder_raw)
-    
-    # 现在验证转换后的路径
+    # 确保配置格式正确
+    cfg = _prepare_conversion_config(cfg, script_dir)
     input_folder = cfg["paths"]["input_folder"]
     output_folder = cfg["paths"]["output_folder"]
     
@@ -524,6 +518,7 @@ def execute_epycon_conversion(cfg):
     
     if not input_folder or not os.path.exists(input_folder):
         conv_logger.error(f"❌ [v2024] 输入文件夹不存在: {input_folder}")
+        update_progress(0, "输入文件夹不存在")
         res_logs = mem_handler.logs
         conv_logger.removeHandler(mem_handler)
         return False, res_logs
@@ -539,24 +534,12 @@ def execute_epycon_conversion(cfg):
                 for f in cfg["data"]["data_files"]
             )
             
-            # 获取 studies 过滤列表
             valid_studies = set(cfg["paths"].get("studies", []))
-            
-            direct_logs = list(iglob(os.path.join(input_folder, "*.log")))
-            study_list = []
-            if direct_logs:
-                study_list.append(input_folder)
-            else:
-                for sub_path in iglob(os.path.join(input_folder, '**')):
-                    if os.path.isdir(sub_path):
-                        # 应用 studies 过滤
-                        study_name = os.path.basename(sub_path)
-                        if valid_studies and study_name not in valid_studies:
-                            continue
-                        study_list.append(sub_path)
+            study_list = _get_study_list(input_folder, valid_studies)
             
             if not study_list:
-                conv_logger.warning("⚠️ 未找到 log 文件。")
+                conv_logger.warning("⚠️ 未找到任何有效的学习文件 (study folders)。")
+                update_progress(0, "未找到任何学习文件")
                 res_logs = mem_handler.logs
                 conv_logger.removeHandler(mem_handler)
                 return False, res_logs
@@ -571,8 +554,13 @@ def execute_epycon_conversion(cfg):
             pseudonymize = cfg["global_settings"].get("pseudonymize", False)
             credentials = cfg["global_settings"].get("credentials", {})
 
-            for study_path in study_list:
+            total_studies = len(study_list)
+            for idx, study_path in enumerate(study_list):
                 study_id = os.path.basename(study_path)
+                # 计算总进度百分比 (0-100)
+                current_p = int((idx / total_studies) * 100)
+                update_progress(current_p, f"正在处理 study ({idx+1}/{total_studies}): {study_id}")
+                
                 logs_in_study = sorted(list(iglob(os.path.join(study_path, LOG_PATTERN))))
                 if not logs_in_study: continue
 
@@ -764,13 +752,10 @@ def execute_epycon_conversion(cfg):
                             
                             conv_logger.info(f"   ⏱️ 文件时间范围: {file_start_sec:.0f} - {file_end_sec:.2f} ({file_duration_sec:.3f}s)")
                             
-                            # 筛选这个文件对应的标注
-                            is_last_file = (idx == len(group_files) - 1)
-                            if is_last_file:
-                                file_entries = [e for e in all_entries_norm if file_start_sec <= e.timestamp <= file_end_sec]
-                            else:
-                                file_entries = [e for e in all_entries_norm if file_start_sec <= e.timestamp < file_end_sec]
-                            conv_logger.info(f"   📊 标注匹配: {len(file_entries)}/{len(all_entries_norm)} 符合时间范围 (最后一个文件: {is_last_file})")
+                            # --- [核心逻辑] 严格 FID 匹配机制 ---
+                            # 仅选择 FID 匹配的文件，确保标注归属 100% 准确
+                            file_entries = [e for e in all_entries_norm if str(e.fid) == str(datalog_id)]
+                            conv_logger.info(f"   📊 标注匹配: {len(file_entries)} 条 (按 FID 筛选)")
                             
                             with LogParser(
                                 datalog_path, 
@@ -808,21 +793,23 @@ def execute_epycon_conversion(cfg):
                                         
                                         valid = []
                                         for e in file_entries:
-                                            relative_pos = round((e.timestamp - file_start_sec) * fs)
-                                            global_p = global_base + relative_pos
+                                            # 计算相对于当前组起始时间的偏移 (秒)
+                                            # 注意：first_timestamp 为该组第一个文件的时间戳基准
+                                            offset_sec = e.timestamp - first_timestamp
+                                            global_p = int(offset_sec * fs)
                                             
+                                            # 严格校验：必须落在当前文件的全局采样点范围内
                                             if global_base <= global_p < file_end_global:
                                                 valid.append((global_p, str(e.group), str(e.message)))
                                             else:
-                                                conv_logger.debug(f"   ⚠️ 标注超出范围: ts={e.timestamp}, rel_pos={relative_pos}, global_pos={global_p}, valid_range=[{global_base}, {file_end_global})")
+                                                conv_logger.warning(f"   ⚠️ FID {datalog_id} 匹配但时间戳偏移 {offset_sec:.3f}s 落在文件范围 [{global_base/fs:.3f}, {file_end_global/fs:.3f}] 之外")
                                         
-                                        conv_logger.info(f"   标注验证: {len(file_entries)} → {len(valid)} 有效 (base={global_base}, samples={file_sample_count}, end={file_end_global})")
                                         if valid:
                                             p, g, m = zip(*valid)
                                             planter.add_marks(list(p), list(g), list(m))
-                                            conv_logger.info(f"   ✅ 已将 {len(valid)} 条标注嵌入")
-                                        elif len(file_entries) > 0:
-                                            conv_logger.warning(f"   ⚠️ {len(file_entries)} 条标注都超出有效范围！")
+                                            conv_logger.info(f"   ✅ 已将 {len(valid)} 条标注精确嵌入")
+                                        elif file_entries:
+                                            conv_logger.warning(f"   ❌ {len(file_entries)} 条 FID 匹配的标注均因时间范围不符被剔除。数据一致性检查失败！")
                             
                             is_first_file = False
                         
@@ -854,15 +841,18 @@ def execute_epycon_conversion(cfg):
                             
                             log_end_sec = log_start_sec + duration_sec
                             
-                            # 选择该文件对应的标注（使用闭区间包括边界）
-                            # 在常规模式中，每个文件独立处理，所以使用闭区间是安全的
+                            # --- [核心逻辑] 独立文件下的严格匹配 ---
                             target_entries_rel = [] 
                             for e in all_entries_norm:
-                                if log_start_sec <= e.timestamp <= log_end_sec:
-                                    diff_seconds = e.timestamp - log_start_sec
-                                    new_e = dataclasses.replace(e)
-                                    new_e.timestamp = diff_seconds
-                                    target_entries_rel.append(new_e)
+                                if str(e.fid) == str(datalog_id):
+                                    # 检查时间戳是否落在该文件的绝对时间内
+                                    if log_start_sec <= e.timestamp < log_end_sec:
+                                        diff_seconds = e.timestamp - log_start_sec
+                                        new_e = dataclasses.replace(e)
+                                        new_e.timestamp = diff_seconds # 转换为相对文件的偏移秒数
+                                        target_entries_rel.append(new_e)
+                                    else:
+                                        conv_logger.warning(f"   ⚠️ FID {datalog_id} 匹配但标注时间戳 {e.timestamp} 未在此文件生命周期内")
 
                             # 转换波形
                             with LogParser(
@@ -888,72 +878,6 @@ def execute_epycon_conversion(cfg):
                                     mappings = {k:v for k,v in mappings.items() if k in cfg["data"]["channels"]}
                                 column_names = list(mappings.keys())
                                 
-                                out_path = os.path.join(output_folder, study_id, f"{datalog_id}.{output_fmt}")
-                                
-                                # 构建 HDF5 元数据（非合并模式）
-                                hdf_attributes = {
-                                    "subject_id": subject_id,
-                                    "subject_name": subject_name,
-                                    "study_id": study_id,
-                                    "datalog_id": datalog_id,
-                                    "timestamp": header.timestamp,
-                                    "datetime": datetime.fromtimestamp(header.timestamp).isoformat() if header.timestamp else "",
-                                }
-                                if credentials:
-                                    hdf_attributes.update({
-                                        "author": credentials.get("author", ""),
-                                        "device": credentials.get("device", ""),
-                                        "owner": credentials.get("owner", ""),
-                                    })
-                                
-                                if output_fmt == "csv":
-                                    PlanterClass = CSVPlanter
-                                    planter_kwargs = {"column_names": column_names, "sampling_freq": fs}
-                                else:
-                                    PlanterClass = HDFPlanter
-                                    planter_kwargs = {
-                                        "column_names": column_names, 
-                                        "sampling_freq": fs,
-                                        "factor": 1000,
-                                        "units": "mV",
-                                        "attributes": hdf_attributes,
-                                    }
-                                
-                                with PlanterClass(out_path, **planter_kwargs) as planter:
-                                    for chunk in parser:
-                                        chunk = mount_channels(chunk, mappings)
-                                        planter.write(chunk)
-                                        
-                                    if output_fmt == "h5" and cfg["data"]["pin_entries"] and target_entries_rel:
-                                        if isinstance(planter, HDFPlanter):
-                                            conv_logger.info(f"📌 开始嵌入标注: 共 {len(target_entries_rel)} 条 (常规模式)")
-                                            conv_logger.info(f"   采样率: {fs} Hz")
-                                            
-                                            # target_entries_rel 已经是相对时间（秒），转换为样本位置
-                                            valid = []
-                                            for e in target_entries_rel:
-                                                # 使用 round 而不是 int，更精确
-                                                sample_pos = round(e.timestamp * fs)
-                                                # 验证位置有效性：必须是非负数
-                                                if sample_pos >= 0:
-                                                    valid.append((sample_pos, str(e.group), str(e.message)))
-                                                else:
-                                                    conv_logger.debug(f"   ⚠️ 标注位置无效: ts={e.timestamp}s, pos={sample_pos}")
-                                            
-                                            conv_logger.info(f"✅ 标注位置计算完成: 有效条数 {len(valid)}/{len(target_entries_rel)}")
-                                            if valid:
-                                                pos_range = [v[0] for v in valid]
-                                                conv_logger.info(f"   计算得到的位置范围: {min(pos_range)} - {max(pos_range)} 采样点")
-                                                p, g, m = zip(*valid)
-                                                planter.add_marks(list(p), list(g), list(m))
-                                                conv_logger.info(f"📎 已将 {len(valid)} 条标注嵌入 H5 文件")
-                                            elif len(target_entries_rel) > 0:
-                                                conv_logger.warning(f"   ⚠️ {len(target_entries_rel)} 条标注都计算为无效位置！")
-
-                            if cfg["entries"]["convert"] and target_entries_rel:
-                                file_fmt = cfg["entries"]["output_format"]
-                                entry_out_path = os.path.join(output_folder, study_id, f"{datalog_id}.{file_fmt}")
-                                
                                 entryplanter = EntryPlanter(target_entries_rel)
                                 filter_groups = cfg["entries"]["filter_annotation_type"]
                                 criteria = {"groups": filter_groups} if filter_groups else {}
@@ -969,6 +893,7 @@ def execute_epycon_conversion(cfg):
                             conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
                             continue
                         
+            update_progress(100, "✅ 转换圆满完成")
             conv_logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
             res_logs = mem_handler.logs
             conv_logger.removeHandler(mem_handler)
@@ -1067,35 +992,175 @@ def serve_html_compatibility(filename):
 
 @app.route('/run-direct', methods=['POST'])
 def run_direct():
-    with open("flask_route_called.txt", "w", encoding="utf-8") as f:
-        f.write("✅ /run-direct route was called!\n")
-    with open("flask_debug.txt", "a", encoding="utf-8") as f:
-        f.write("\n>>> /run-direct CALLED\n")
-        f.flush()
     try:
-        config_data = request.json
-        with open("flask_debug.txt", "a", encoding="utf-8") as f:
-            f.write(f"config_data.get('paths')={config_data.get('paths', {})}\n")
-            f.flush()
-        success, logs = execute_epycon_conversion(config_data)
-        with open("flask_debug.txt", "a", encoding="utf-8") as f:
-            f.write(f"execute_epycon_conversion returned success={success}\n")
-            f.flush()
-        return jsonify({"status": "success" if success else "error", "logs": "\n".join(logs)})
+        config_data = request.json or {}
+        task_id = str(uuid.uuid4())
+        
+        # 初始化任务状态
+        TASKS[task_id] = {
+            'status': 'running',
+            'progress': 0,
+            'logs': [],
+            'result': None
+        }
+        
+        config_data["_task_id"] = task_id # 注入 taskId
+        
+        # 异步启动转换
+        def background_task():
+            try:
+                success, logs = execute_epycon_conversion(config_data)
+                TASKS[task_id]['status'] = 'completed' if success else 'failed'
+                TASKS[task_id]['result'] = {'success': success, 'logs': logs}
+            except Exception as e:
+                import traceback
+                error_msg = f"Task backend error: {str(e)}\n{traceback.format_exc()}"
+                TASKS[task_id]['status'] = 'failed'
+                TASKS[task_id]['result'] = {'success': False, 'logs': [error_msg]}
+
+        executor.submit(background_task)
+        
+        return jsonify({"status": "accepted", "task_id": task_id})
     except Exception as e:
-        import traceback
-        error_msg = f"Flask endpoint error: {str(e)}\n{traceback.format_exc()}"
-        with open("flask_debug.txt", "a", encoding="utf-8") as f:
-            f.write(f"Exception: {error_msg}\n")
-            f.flush()
-        return jsonify({"status": "error", "logs": error_msg}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/task-status/<task_id>', methods=['GET'])
+def get_task_status(task_id):
+    task = TASKS.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found"}), 404
+    
+    # 提取新日志并清空（防止重复传输）
+    new_logs = task['logs']
+    task['logs'] = []
+    
+    return jsonify({
+        "status": task['status'],
+        "progress": task['progress'],
+        "logs": new_logs,
+        "result": task['result']
+    })
+
+def _process_datalog_file(log_file, study_id, output_folder, cfg, conv_logger, planter_cls, valid_datalogs, all_entries_norm, leads):
+    """
+    处理单个 datalog 文件的核心逻辑
+    """
+    datalog_id = os.path.basename(log_file).replace(".log", "")
+    merge_logs = cfg["data"].get("merge_logs", False)
+    
+    if not merge_logs and valid_datalogs and datalog_id not in valid_datalogs:
+        return False
+
+    conv_logger.info(f"📄 Processing: {datalog_id} ...")
+    parser = LogParser(log_file)
+    
+    # 转换并写入
+    output_ext = ".h5" if planter_cls == HDFPlanter else ".csv"
+    out_name = f"{datalog_id}{output_ext}"
+    out_path = os.path.join(output_folder, study_id, out_name)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    
+    # FID 匹配
+    file_entries = [e for e in all_entries_norm if str(e.fid) == str(datalog_id)]
+    
+    with planter_cls(out_path, column_names=parser.headers) as planter:
+        if isinstance(planter, HDFPlanter):
+            planter.extra_attributes.update({"StudyID": study_id, "LogID": datalog_id, "Leads": leads})
+            for chunk in parser.stream_data(chunk_size=cfg["global_settings"]["processing"]["chunk_size"]):
+                planter.write(chunk)
+            
+            if cfg["data"]["pin_entries"] and file_entries:
+                file_start_sec = parser.start_timestamp
+                valid_marks = []
+                for e in file_entries:
+                    if file_start_sec <= e.timestamp:
+                        offset_sec = e.timestamp - file_start_sec
+                        sample_pos = int(offset_sec * parser.sampling_freq)
+                        valid_marks.append((sample_pos, e.group, e.msg))
+                
+                if valid_marks:
+                    p, g, m = zip(*valid_marks)
+                    planter.add_marks(list(p), list(g), list(m))
+        else:
+            for chunk in parser.stream_data(chunk_size=cfg["global_settings"]["processing"]["chunk_size"]):
+                planter.write(chunk)
+    
+    conv_logger.info(f"✨ Finished: {out_name}")
+    return True
+
+# --- 新增的辅助分拆函数 ---
+def _prepare_conversion_config(cfg, script_dir):
+    if not isinstance(cfg, dict): cfg = {}
+    if "paths" not in cfg or not isinstance(cfg["paths"], dict): cfg["paths"] = {}
+    cfg["paths"].setdefault("input_folder", "examples/data")
+    cfg["paths"].setdefault("output_folder", "examples/data/out")
+    cfg["paths"].setdefault("studies", [])
+    
+    if "data" not in cfg or not isinstance(cfg["data"], dict): cfg["data"] = {}
+    cfg["data"].setdefault("output_format", "h5")
+    cfg["data"].setdefault("data_files", [])
+    cfg["data"].setdefault("merge_logs", False)
+    cfg["data"].setdefault("pin_entries", True)
+    
+    if "entries" not in cfg or not isinstance(cfg["entries"], dict): cfg["entries"] = {}
+    cfg["entries"].setdefault("convert", False)
+    cfg["entries"].setdefault("output_format", "csv")
+    
+    if "global_settings" not in cfg or not isinstance(cfg["global_settings"], dict): cfg["global_settings"] = {}
+    cfg["global_settings"].setdefault("workmate_version", "4.3.2")
+    cfg["global_settings"].setdefault("processing", {"chunk_size": 1024})
+
+    # 路径绝对化
+    if not os.path.isabs(cfg["paths"]["input_folder"]):
+        cfg["paths"]["input_folder"] = os.path.normpath(os.path.join(script_dir, cfg["paths"]["input_folder"]))
+    if not os.path.isabs(cfg["paths"]["output_folder"]):
+        cfg["paths"]["output_folder"] = os.path.normpath(os.path.join(script_dir, cfg["paths"]["output_folder"]))
+    return cfg
+
+def _get_study_list(input_folder, valid_studies):
+    direct_logs = list(iglob(os.path.join(input_folder, "*.log")))
+    study_list = []
+    if direct_logs:
+        study_list.append(input_folder)
+    else:
+        for sub_path in iglob(os.path.join(input_folder, '**')):
+            if os.path.isdir(sub_path):
+                study_name = os.path.basename(sub_path)
+                if valid_studies and study_name not in valid_studies:
+                    continue
+                # 检查目录内是否存在 log 文件
+                if any(iglob(os.path.join(sub_path, LOG_PATTERN))):
+                    study_list.append(sub_path)
+    return sorted(study_list)
 
 @app.route('/api/select-folder', methods=['GET'])
 def api_select_folder():
+    """
+    选择文件夹，在 macOS 上使用 AppleScript 避开线程安全问题。
+    """
     try:
-        root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
-        path = filedialog.askdirectory(); root.destroy()
-        if path: path = os.path.normpath(path)
+        path = ""
+        if sys.platform == 'darwin':
+            # macOS AppleScript 逻辑
+            cmd = ['osascript', '-e', 'tell application "System Events" to activate',
+                   '-e', 'set theFolder to choose folder with prompt "请选择数据路径:"',
+                   '-e', 'POSIX path of theFolder']
+            import subprocess
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0:
+                path = res.stdout.strip()
+        else:
+            # Windows/Other Tkinter 逻辑
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            path = filedialog.askdirectory()
+            root.destroy()
+            
+        if path:
+            path = os.path.normpath(path)
         return jsonify({"path": path})
     except Exception as e:
         return jsonify({"error": str(e), "path": ""})
@@ -1140,8 +1205,14 @@ def api_restart():
             import time
             time.sleep(1)  # 等待 HTTP 响应发送完毕
             
+            # 获取当前环境变量并清理 Werkzeug/Reloader 相关的变量，防止 Bad file descriptor 错误
+            new_env = os.environ.copy()
+            for key in ['WERKZEUG_RUN_MAIN', 'WERKZEUG_SERVER_FD']:
+                new_env.pop(key, None)
+            
+            # 保留 EPYCON_ACTUAL_PORT 让新进程尝试回收旧端口
             # 在后台启动新的 app_gui.py 进程
-            subprocess.Popen([sys.executable, 'app_gui.py'], cwd=os.getcwd())
+            subprocess.Popen([sys.executable, 'app_gui.py'], cwd=os.getcwd(), env=new_env)
             
             # 等待新进程启动后，关闭当前进程
             time.sleep(2)
@@ -1187,37 +1258,44 @@ if __name__ == '__main__':
                     pass
         
         # 1. 端口管理
-        # 使用环境变量同步父子进程端口，防止子进程二次探测时发生漂移
+        # 识别是否是 Flask Reloader 的子工作进程
+        is_worker = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+        
+        # 尝试使用环境变量中的端口（通常是重启时传递），否则默认 5000
         env_port = os.environ.get('EPYCON_ACTUAL_PORT')
-        if env_port:
-            port = int(env_port)
-        else:
-            preferred_port = 5000
-            port = preferred_port
+        preferred_port = int(env_port) if env_port else 5000
+        port = preferred_port
+        
+        # 仅在非 Worker 进程中进行端口探测和冲突清理
+        # Worker 进程应当直接信任并使用父进程分配的端口
+        if not is_worker:
             if not check_port_available(port):
-                # 暴力清理占用者（如旧的 WorkMateDataCenter）
-                kill_port_occupier(port)
-                time.sleep(1.5) # 给系统更多时间释放端口
+                # 尝试清理占用者（例如重启时的旧实例）
+                success, occupier = kill_port_occupier(port)
                 
-                if not check_port_available(port):
-                    print(f"⚠️ 端口 {port} 仍在使用中，尝试搜索备用端口...")
+                # 如果是系统服务，或者清理失败，则搜索新端口
+                if not success or not check_port_available(port):
+                    msg = f"⚠️  端口 {port} 被占用"
+                    if occupier != "None": msg += f" ({occupier})"
+                    print(f"{msg}，正在搜索可用端口...")
+                    
                     found = False
-                    for p in range(port + 1, port + 51):
+                    for p in range(5000, 5051): # 从 5000 开始重新搜索
                         if check_port_available(p):
                             port = p
                             found = True
-                            print(f"✅ 选择备用端口: {port}")
+                            print(f"✅ 已选择可用端口: {port}")
                             break
                     if not found:
-                        print("❌ 未找到 5000-5050 范围内的可用端口供应。")
+                        print("❌ 未找到 5000-5050 范围内的可用端口。")
                         input("\n按回车键退出...")
                         sys.exit(1)
-            # 存入环境变量，供子进程使用
-            os.environ['EPYCON_ACTUAL_PORT'] = str(port)
+        
+        # 存入环境变量，供子进程和重启后的实例使用
+        os.environ['EPYCON_ACTUAL_PORT'] = str(port)
 
         # 检查是否是 Flask Reloader 的父进程
-        is_reloader_parent = (not is_frozen and 
-                              not os.environ.get('WERKZEUG_RUN_MAIN'))
+        is_reloader_parent = (not is_frozen and not is_worker)
         
         # 单实例检查必须在 Reloader 父进程中执行（防止多个实例启动）
         print("🔍 正在进行启动前检查...")
@@ -1262,14 +1340,11 @@ if __name__ == '__main__':
         
         # 仅在工作进程中打开浏览器，避免 reloader 导致打开两次
         # WERKZEUG_RUN_MAIN='true' 表示这是 Flask 的实际工作进程
-        if not is_frozen and os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-            # 延迟打开浏览器，确保服务器完全启动
-            threading.Thread(
-                target=lambda: (time.sleep(2), open_browser(port)),
-                daemon=True
-            ).start()
-        elif is_frozen:
-            # EXE 版本不使用 reloader，直接延迟打开
+        # 启动浏览器逻辑
+        # 当 reloader 禁用时，直接启动；当 reloader 启用时，仅在工作进程中启动
+        should_open = is_frozen or os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not use_reloader
+        
+        if should_open:
             threading.Thread(
                 target=lambda: (time.sleep(2), open_browser(port)),
                 daemon=True
@@ -1283,7 +1358,7 @@ if __name__ == '__main__':
             host=host_ip,
             port=port,
             debug=not is_frozen, 
-            use_reloader=False,
+            use_reloader=use_reloader,
             threaded=True
         )
     except Exception as e:

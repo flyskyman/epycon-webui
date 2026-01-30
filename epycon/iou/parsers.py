@@ -632,11 +632,11 @@ def _readentries(
         if not message or not message.strip():
             continue
 
-        mapped_group = GROUP_MAP.get(group, 0)
-        
-        # Filter HIDDEN_NOTE (Type 5) to ensure 1:1 match with original PDF report
-        if mapped_group == 'HIDDEN_NOTE':
+        # [Logic] Filter HIDDEN_NOTE (5) and UNK (8) to match original software
+        if group in (5, 8):
             continue
+
+        mapped_group = GROUP_MAP.get(group, 0)
 
         entries.append(
             Entry(
