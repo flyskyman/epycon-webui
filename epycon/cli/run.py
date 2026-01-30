@@ -229,7 +229,7 @@ def main():
             _tocsv(                
                 f_path=os.path.join(out_path, fold_id, file_id + '.csv'),
                 chunk=csv_data,
-                chnames=[ch.name for ch in header.mount],                
+                chnames=[ch.name for ch in header.channels],                
                 )
             t_csv = time.time() - start            
             size_csv = os.path.getsize(os.path.join(out_path, fold_id, file_id + '.csv'))
