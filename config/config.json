@@ -9,6 +9,7 @@
   "data": {
     "data_files": [],
     "output_format": "h5",
+    "merge_logs": true,
     "custom_channels": {},
     "leads": "raw",
     "channels": [],
