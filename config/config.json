@@ -7,19 +7,17 @@
     ]
   },
   "data": {
-    "data_files": [
-      "00000000"
-    ],
-    "output_format": "csv",
+    "data_files": [],
+    "output_format": "h5",
     "custom_channels": {},
     "leads": "raw",
     "channels": [],
-    "pin_entries": false
+    "pin_entries": true
   },
   "entries": {
     "convert": true,
-    "output_format": "csv",
-    "summary_csv": false,
+    "output_format": "sel",
+    "summary_csv": true,
     "filter_annotation_type": []
   },
   "global_settings": {
