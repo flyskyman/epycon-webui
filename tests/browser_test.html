@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Browser Logic Test Runner</title>
+</head>
+
+<body>
+    <h1>Browser Logic Test Runner</h1>
+    <div id="status">Running...</div>
+    <pre id="output"></pre>
+
+    <script>
+        // --- Mock Data (Base64 from tests/browser_data/entries.log) ---
+        const TEST_DATA_B64 = "AACr1HxpAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAEAAAAAAAAAq9R8aWV4YW1wbGUgZW50cnkgIzEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAEAAAAAAAAArNR8aWV4YW1wbGUgZW50cnkgIzIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAEAAAAAAAAArdR8aWV4YW1wbGUgZW50cnkgIzMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAEAAAAAAAAArtR8aWV4YW1wbGUgZW50cnkgIzQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGAAEAAAAAAAAAr9R8aWV4YW1wbGUgZW50cnkgIzUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+        // --- Core Parser Logic (Extracted from WorkMate_Log_Parser.html) ---
+        const GROUP_MAP = { 1: 'PROTOCOL', 2: 'EVENT', 3: 'NOTE', 4: 'IDK', 5: 'HIDDEN_NOTE', 6: 'PACE', 17: 'RATE' };
+
+        // Simple logger to mock the UI function
+        function log(msg) { console.log(msg); }
+
+        function parseLogBuffer(buffer) {
+            const view = new DataView(buffer);
+            const rows = [];
+            let detectedDate = null;
+            let fileSize = buffer.byteLength;
+
+            const V_x64 = { head: 36, line: 220, tsOff: 10, txtOff: 18, txtLen: 176 };
+            const V_x32 = { head: 32, line: 216, tsOff: 10, txtOff: 14, txtLen: 178 };
+            let spec = V_x64; // Default to WMx64 since example generator makes 4.1 WMx32? No, generator default is 4.1 WMx32.
+
+            // NOTE: The generator used 4.1 flag? Let's check headers.
+            // The generator writes header based on schema.
+            // But wait, parseLog logic tries to auto-detect based on file size modulo.
+
+            const rem64 = (fileSize - 36) % 220;
+            const rem32 = (fileSize - 32) % 216;
+
+            if (rem64 === 0) spec = V_x64;
+            else if (rem32 === 0) spec = V_x32;
+            else {
+                log(`⚠️ Size mismatch. rem64=${rem64}, rem32=${rem32}`);
+                spec = (rem64 <= rem32) ? V_x64 : V_x32;
+            }
+
+            // Generator produces 4.1 (WMx32) by default.
+            // My generated file might be 4.1. Let's rely on auto-detection logic.
+
+            const decoder = new TextDecoder('iso-8859-1');
+
+            for (let ptr = spec.head; ptr < fileSize; ptr += spec.line) {
+                if (ptr + spec.line > fileSize) break;
+
+                let row = { ts: 0, timeStr: '', group: 'UNK', msg: '' };
+                try {
+                    const gid = view.getUint16(ptr, true);
+                    if (gid === 5 || gid === 8) continue;
+                    row.group = GROUP_MAP[gid] || `UNK(${gid})`;
+
+                    // Critical: Timestamp handling difference
+                    let ts;
+                    if (spec === V_x64) {
+                        ts = Number(view.getBigUint64(ptr + spec.tsOff, true));
+                    } else {
+                        ts = view.getUint32(ptr + spec.tsOff, true) * 1000;
+                    }
+                    row.ts = ts;
+
+                    if (ts > 0 && ts < 4102444800000) {
+                        const d = new Date(ts);
+                        row.timeStr = d.toLocaleTimeString('en-GB', { hour12: false });
+                        if (!detectedDate) detectedDate = d.toLocaleDateString('zh-CN');
+                    }
+
+                    let textBytes = new Uint8Array(buffer, ptr + spec.txtOff, spec.txtLen);
+                    const nullIdx = textBytes.indexOf(0);
+                    if (nullIdx >= 0) textBytes = textBytes.subarray(0, nullIdx);
+
+                    let rawText = decoder.decode(textBytes);
+                    row.msg = rawText.replace(/[^\x20-\x7E\t]/g, '').trim();
+
+                    if (row.msg) {
+                        rows.push(row);
+                    }
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+            return { rows: rows, date: detectedDate };
+        }
+
+        // --- Test Runner ---
+        try {
+            // 1. Decode B64
+            const binary_string = window.atob(TEST_DATA_B64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            const buffer = bytes.buffer;
+
+            // 2. Parse
+            const result = parseLogBuffer(buffer);
+
+            // 3. Verify
+            const expectedCount = 4;
+            if (result.rows.length !== expectedCount) {
+                throw new Error(`Expected ${expectedCount} rows, got ${result.rows.length} (Note: GID 5/8 are filtered)`);
+            }
+
+            // Check first entry
+            // "example entry #1"
+            const first = result.rows[0];
+            if (!first.msg.includes("example entry #1")) {
+                throw new Error(`First entry msg mismatch: got "${first.msg}"`);
+            }
+
+            // Validation passed
+            document.getElementById('status').innerText = "PASS";
+            document.getElementById('status').style.color = "green";
+            document.getElementById('output').innerText = JSON.stringify(result.rows, null, 2);
+
+        } catch (e) {
+            document.getElementById('status').innerText = "FAIL: " + e.message;
+            document.getElementById('status').style.color = "red";
+            console.error(e);
+        }
+    </script>
+</body>
+
+</html>
