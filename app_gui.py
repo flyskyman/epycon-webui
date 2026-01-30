@@ -10,6 +10,8 @@ from tkinter import filedialog, messagebox
 from flask import Flask, request, jsonify, send_file, send_from_directory, make_response, render_template_string
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
+import glob
+import json
 from glob import iglob
 import dataclasses
 import struct
@@ -923,20 +925,27 @@ def save_prefs():
         curr = {}
         if os.path.exists(PREFS_FILE):
             try:
-                with open(PREFS_FILE, 'r', encoding='utf-8') as f:
-                    curr = json.load(f)
-            except: pass
+                # [FIX] 处理空文件或无效JSON导致的问题
+                if os.path.getsize(PREFS_FILE) > 0:
+                    with open(PREFS_FILE, 'r', encoding='utf-8') as f:
+                        curr = json.load(f)
+            except Exception as read_err:
+                print(f"Warning: Failed to read prefs: {read_err}")
+                pass
         
         # Merge 'paths'
-        if 'paths' in data:
-            if 'paths' not in curr: curr['paths'] = {}
-            curr['paths'].update(data['paths'])
+        # [FIX] 确保 curr 是字典
+        if not isinstance(curr, dict):
+            curr = {}
             
         with open(PREFS_FILE, 'w', encoding='utf-8') as f:
             json.dump(curr, f, indent=2, ensure_ascii=False)
             
         return jsonify({"status": "success"})
     except Exception as e:
+        print(f"❌ Error in save_prefs: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/load-prefs', methods=['GET'])
@@ -945,6 +954,10 @@ def load_prefs():
     if not os.path.exists(PREFS_FILE):
         return jsonify({})
     try:
+        # [FIX] 处理空文件
+        if os.path.getsize(PREFS_FILE) == 0:
+             return jsonify({})
+
         with open(PREFS_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
         return jsonify(data)
@@ -1309,6 +1322,76 @@ def api_restart():
         restart_thread.start()
         
         return response
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/preview-channels', methods=['POST'])
+def handle_preview_channels():
+    # [FEATURE] 动态扫描日志文件的通道列表供前端选择
+    try:
+        data = request.json
+        input_folder = data.get('input_folder', '')
+        
+        if not input_folder or not os.path.exists(input_folder):
+            return jsonify({"status": "error", "message": "文件夹路径无效"}), 400
+            
+        # 搜索第一个有效的 .log 文件 (不递归，只看当前层或第一层 study)
+        # 优先看是否是 study folder 结构
+        target_log = None
+        
+        # 1. 直接检查根目录下是否有 log
+        logs_in_root = glob.glob(os.path.join(input_folder, LOG_PATTERN))
+        
+        # [FIX] 优先选择数字命名的主日志文件 (如 00000000.log)，排除 holter.log 等辅助日志
+        if logs_in_root:
+            numeric_logs = [f for f in logs_in_root if os.path.basename(f).replace('.log','').isdigit()]
+            if numeric_logs:
+                numeric_logs.sort() # 选最小的，通常是开头
+                target_log = numeric_logs[0]
+            else:
+                target_log = logs_in_root[0]
+        else:
+            # 2. 检查子目录下是否有 log (取第一个子目录)
+            subdirs = [os.path.join(input_folder, d) for d in os.listdir(input_folder) if os.path.isdir(os.path.join(input_folder, d))]
+            for d in subdirs:
+                logs_in_subdir = glob.glob(os.path.join(d, LOG_PATTERN))
+                if logs_in_subdir:
+                    target_log = logs_in_subdir[0]
+                    break
+        
+        if not target_log:
+            return jsonify({"status": "error", "message": "在路径中未找到任何 .log 文件"}), 404
+            
+        # 读取 Header 并提取通道
+        channel_names = []
+        # 使用默认版本读取
+        version = "4.3.2" 
+        
+        try:
+            from epycon.iou import LogParser
+            with LogParser(target_log, version=version, samplesize=1024) as p:
+                header = p.get_header()
+                if header and hasattr(header, 'channels'):
+                    # 尝试从 Channels 对象或 num_channels 获取
+                    # 注意：LogParser 的 header.channels 通常是 Channels 对象或者 dict
+                    if hasattr(header.channels, 'computed_mappings'):
+                         channel_names = list(header.channels.computed_mappings.keys())
+                    elif isinstance(header.channels, dict):
+                         channel_names = list(header.channels.keys())
+                    else:
+                         # Fallback
+                         channel_names = [f"ch{i}" for i in range(header.num_channels)]
+        except Exception as parse_err:
+             return jsonify({"status": "error", "message": f"解析日志失败: {str(parse_err)}"}), 500
+             
+        # 排序并返回
+        # 尝试按自然顺序排序（如果包含数字）
+        return jsonify({
+            "status": "success", 
+            "channels": channel_names,
+            "source_file": os.path.basename(target_log)
+        })
+
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

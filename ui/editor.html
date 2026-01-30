@@ -231,13 +231,53 @@
 
                     <div class="input-group mt-4">
                         <label class="input-label">指定通道 (Channels - 可选)</label>
+
+                        <!-- 动态扫描通道 -->
+                        <div class="mb-3 p-3 bg-gray-50 rounded-md border border-gray-200">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">可选通道
+                                    (来自源文件)</span>
+                                <button @click="scanChannels(config.paths.input_folder, true)"
+                                    :disabled="isScanningChannels || !config.paths.input_folder"
+                                    class="text-xs bg-white border border-gray-300 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 flex items-center shadow-sm">
+                                    <span v-if="isScanningChannels">⏳ 扫描中...</span>
+                                    <span v-else>🔍 重新扫描</span>
+                                </button>
+                            </div>
+
+                            <div v-if="availableChannels.length > 0"
+                                class="flex flex-wrap gap-x-4 gap-y-2 max-h-40 overflow-y-auto">
+                                <label v-for="ch in availableChannels" :key="ch"
+                                    class="inline-flex items-center cursor-pointer group">
+                                    <input type="checkbox" :value="ch" v-model="config.data.channels"
+                                        class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors">
+                                    <span
+                                        class="ml-1.5 text-xs text-gray-700 group-hover:text-indigo-600 transition-colors">{{
+                                        ch }}</span>
+                                </label>
+                            </div>
+
+                            <div v-else
+                                class="text-xs text-gray-400 py-4 text-center border-2 border-dashed border-gray-200 rounded">
+                                <span v-if="isScanningChannels">正在读取文件头...</span>
+                                <span v-else-if="config.paths.input_folder">点击“重新扫描”获取通道列表</span>
+                                <span v-else>请先在上方选择输入文件夹</span>
+                            </div>
+
+                            <div class="mt-2 text-[10px] text-gray-400 flex justify-between">
+                                <span>勾选会自动加入下方的列表</span>
+                                <button v-if="availableChannels.length" @click="config.data.channels = []"
+                                    class="hover:text-red-500">清空已选</button>
+                            </div>
+                        </div>
+
                         <div v-for="(ch, index) in config.data.channels" :key="index" class="array-item">
                             <input type="text" v-model="config.data.channels[index]" class="input-field"
                                 placeholder="例如: I, II, V1">
                             <button @click="removeArrayItem('data', 'channels', index)" class="btn-danger">删除</button>
                         </div>
                         <button @click="addArrayItem('data', 'channels')"
-                            class="text-indigo-600 text-sm hover:underline">+ 添加通道过滤</button>
+                            class="text-indigo-600 text-sm hover:underline">+ 添加自定义通道</button>
                     </div>
                 </div>
 
@@ -357,10 +397,16 @@
                     paths: { input_folder: "", output_folder: "", studies: [] },
                     data: { output_format: "h5", merge_logs: true, pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {} },
                     entries: { convert: true, output_format: "sel", summary_csv: true, filter_annotation_type: [] },
-                    global_settings: { workmate_version: "4.3.2", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3.2", owner: "" } }
+                    global_settings: { workmate_version: "4.3.2", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3.2", owner: "Ningbo NO.2 Hospital" } }
                 };
 
                 const config = ref(JSON.parse(JSON.stringify(defaultConfig)));
+
+
+                const availableChannels = ref([]);
+                const isScanningChannels = ref(false);
+                const scanCaches = {}; // 简单缓存路径->通道列表
+
                 const isRunning = ref(false);
                 const taskProgress = ref(0);
                 const taskId = ref(null);
@@ -419,7 +465,11 @@
                         const res = await fetch('/api/select-folder');
                         const data = await res.json();
                         if (data.path) {
-                            if (target === 'input') config.value.paths.input_folder = data.path;
+                            if (target === 'input') {
+                                config.value.paths.input_folder = data.path;
+                                // 选择文件夹后自动尝试扫描通道
+                                scanChannels(data.path);
+                            }
                             if (target === 'output') config.value.paths.output_folder = data.path;
                             savePrefs();
                         }
@@ -499,7 +549,61 @@
                     }
                 };
 
-                return { config, jsonOutput, addArrayItem, removeArrayItem, resetToDefault, downloadJson, copyToClipboard, runOnServer, selectFolder, isRunning, taskProgress, logs, statusMessage, lastStatus };
+                const scanChannels = async (path, forceRefresh = false) => {
+                    if (!path) return;
+                    console.log(`[Scan] Scanning channels for: ${path}, force: ${forceRefresh}`);
+
+                    // 检查缓存
+                    if (!forceRefresh && scanCaches[path]) {
+                        console.log(`[Scan] Cache hit: ${scanCaches[path].length} channels`);
+                        availableChannels.value = scanCaches[path];
+                        return;
+                    }
+
+                    isScanningChannels.value = true;
+                    // 清空当前显示，以便用户感知到正在重新扫描
+                    if (forceRefresh) availableChannels.value = [];
+
+                    try {
+                        const res = await fetch('/api/preview-channels', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ input_folder: path })
+                        });
+                        const data = await res.json();
+                        console.log("[Scan] Result:", data);
+
+                        if (data.status === 'success') {
+                            availableChannels.value = data.channels;
+                            scanCaches[path] = data.channels; // 缓存结果
+                            if (data.channels.length === 0) {
+                                alert("扫描成功，但未在该日志文件中找到任何通道信息。\n文件: " + data.source_file);
+                            }
+                        } else {
+                            console.warn("Scan failed:", data.message);
+                            availableChannels.value = [];
+                            // 如果是手动点击，弹窗提示错误
+                            if (forceRefresh) alert("扫描失败: " + data.message);
+                        }
+                    } catch (e) {
+                        console.error("Scanning error", e);
+                        if (forceRefresh) alert("扫描请求发生异常");
+                    } finally {
+                        isScanningChannels.value = false;
+                    }
+                };
+
+                // 如果初始加载就有路径，尝试扫描
+                if (config.value.paths.input_folder) {
+                    scanChannels(config.value.paths.input_folder);
+                }
+
+                return {
+                    config, jsonOutput, addArrayItem, removeArrayItem, resetToDefault,
+                    downloadJson, copyToClipboard, runOnServer, selectFolder,
+                    isRunning, taskProgress, logs, statusMessage, lastStatus,
+                    availableChannels, isScanningChannels, scanChannels
+                };
             }
         }).mount('#app');
     </script>
