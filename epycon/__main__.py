@@ -289,6 +289,7 @@ def main():
                 is_first_file = True
                 total_samples = 0
                 group_start_time = group_files[0]['timestamp']
+                accumulated_marks = []  # Initialize marks accumulator for this group
                 
                 for idx, dlog_info in enumerate(group_files):
                     datalog_path = dlog_info['path']
