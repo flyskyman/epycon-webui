@@ -6,6 +6,7 @@ def parse_arguments():
     Returns:
         parser: CLI arguments
     """
+    # Create a new parser instance each time to avoid conflicts
     parser = argparse.ArgumentParser()
     
     # Input and output folder paths    
@@ -21,16 +22,11 @@ def parse_arguments():
     # Output format of the entries/annotations
     parser.add_argument("-e", "--entries", type=bool,)
     parser.add_argument("-efmt", "--entries_format", type=str, choices=['csv', 'sel'])
+    
+    # Merge mode - combine multiple log files into one output
+    parser.add_argument("--merge", action="store_true", help="Merge multiple log files into a single output file")
 
     # Overwrite settings with custom config file
     parser.add_argument("--custom_config_path", type=str, help="Path to configuration file")
-
-    # Merge multiple log files into a single HDF5 output (V68.4 Feature)
-    parser.add_argument(
-        "--merge",
-        action="store_true",
-        help="Merge all log files in each study into a single HDF5 file. "
-             "Files are concatenated by timestamp order."
-    )
 
     return parser.parse_args()
