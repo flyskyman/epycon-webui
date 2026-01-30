@@ -36,10 +36,7 @@ from epycon.core._dataclasses import (
 from epycon.config.byteschema import (
     WMx32LogSchema, WMx32EntriesSchema,
     WMx64LogSchema, WMx64MasterSchema, WMx64EntriesSchema,
-)
-
-from epycon.config.byteschema import (
-    GROUP_MAP, SOURCE_MAP
+    GROUP_MAP, SOURCE_MAP,
 )
 
 

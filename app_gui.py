@@ -96,7 +96,7 @@ def check_single_instance():
             # 如果进程不存在，删除旧锁文件
             try:
                 os.remove(lock_path)
-            except:
+            except Exception:
                 pass
         
         # 如果这是 Reloader 的子进程，不要重新创建锁文件
@@ -114,7 +114,7 @@ def check_single_instance():
             import msvcrt
             try:
                 msvcrt.locking(LOCK_FILE.fileno(), msvcrt.LK_NBLCK, 1)
-            except:
+            except Exception:
                 pass
         
         return True
@@ -162,7 +162,7 @@ def kill_port_occupier(port=5000):
                             subprocess.run(['taskkill', '/F', '/PID', str(target_pid)], timeout=5)
                             time.sleep(1.5)
                             return True, pname
-                        except: pass
+                        except Exception: pass
         else:
             # macOS / Linux 逻辑 (使用 lsof)
             try:
@@ -188,7 +188,7 @@ def kill_port_occupier(port=5000):
                         subprocess.run(['kill', '-9', str(target_pid)], timeout=5)
                         time.sleep(1.5)
                         return True, pname
-                    except: pass
+                    except Exception: pass
             except FileNotFoundError:
                 print("⚠️  系统缺少 'lsof' 指令。")
     except Exception as e:
@@ -204,7 +204,7 @@ def cleanup_on_exit():
             lock_path = os.path.join(tempfile.gettempdir(), 'epycon_gui.lock')
             if os.path.exists(lock_path):
                 os.remove(lock_path)
-        except:
+        except Exception:
             pass
 
 # 注册退出清理
@@ -298,7 +298,7 @@ def to_unix_seconds(val):
         if num > 100_000_000_000: # Milliseconds
             return num / 1000.0
         return num
-    except:
+    except Exception:
         return 0.0
 
 # ========================================================
@@ -320,7 +320,11 @@ def prepare_standard_entries_file(original_path):
                     if struct.unpack_from('<H', raw, i+220)[0] in valid_gids:
                         target_offset = i
                         break
-        if target_offset > 0 and target_offset != 36:
+        # [Phase 2.2] 性能快速路径：标准格式 (offset=36) 无需处理
+        if target_offset == 0 or target_offset == 36:
+            return original_path
+            
+        if target_offset > 0:
             temp_dir = tempfile.gettempdir()
             temp_path = os.path.join(temp_dir, f"std_{os.path.basename(original_path)}")
             with open(original_path, 'rb') as src, open(temp_path, 'wb') as dst:
@@ -329,7 +333,7 @@ def prepare_standard_entries_file(original_path):
                 shutil.copyfileobj(src, dst)
             return temp_path
         return original_path
-    except: return original_path
+    except Exception: return original_path
 
 # ========================================================
 # 🧹 [终极核心] V68.1 融合版 (Strict ASCII + Semantic SNR)
@@ -464,7 +468,7 @@ def get_raw_log_start_seconds(file_path):
         with open(file_path, 'rb') as f:
             raw = float(struct.unpack('<Q', f.read(8))[0])
             return to_unix_seconds(raw)
-    except: return 0.0
+    except Exception: return 0.0
 
 def get_safe_n_channels(header):
     try:
@@ -473,7 +477,7 @@ def get_safe_n_channels(header):
         if hasattr(header, 'channels'):
             if hasattr(header.channels, 'raw_mappings'): return len(header.channels.raw_mappings)
         return 0
-    except: return 0
+    except Exception: return 0
 
 def export_global_csv(entries, output_folder, study_id):
     try:
@@ -485,7 +489,7 @@ def export_global_csv(entries, output_folder, study_id):
             for e in entries:
                 writer.writerow([f"{e.timestamp:.3f}", e.group, e.message])
         return filename
-    except: return None
+    except Exception: return None
 
 # --- 核心转换逻辑 ---
 def execute_epycon_conversion(cfg):
@@ -565,7 +569,7 @@ def execute_epycon_conversion(cfg):
                 if not logs_in_study: continue
 
                 try: os.makedirs(os.path.join(output_folder, study_id), exist_ok=True)
-                except: pass
+                except Exception: pass
                 
                 # --- [Step 0] 读取 MASTER 文件并处理匿名化 ---
                 try:
@@ -602,7 +606,7 @@ def execute_epycon_conversion(cfg):
                             
                             if clean_path != epath and os.path.exists(clean_path):
                                 try: os.remove(clean_path)
-                                except: pass
+                                except Exception: pass
                                 
                             conv_logger.info(f"✅ 归一化标注: {len(all_entries_norm)} 条 (ASCII+SNR双重净化)")
                             export_global_csv(all_entries_norm, output_folder, study_id)
@@ -992,8 +996,46 @@ def serve_html_compatibility(filename):
 
 @app.route('/run-direct', methods=['POST'])
 def run_direct():
+    # [Phase 2.1] JSON Schema 验证 - 防止无效输入
+    from jsonschema import validate, ValidationError
+    
+    CONFIG_API_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "paths": {
+                "type": "object",
+                "properties": {
+                    "input_folder": {"type": "string"},
+                    "output_folder": {"type": "string"},
+                    "studies": {"type": "array", "items": {"type": "string"}}
+                }
+            },
+            "data": {
+                "type": "object",
+                "properties": {
+                    "output_format": {"type": "string", "enum": ["h5", "csv"]},
+                    "merge_logs": {"type": "boolean"},
+                    "pin_entries": {"type": "boolean"}
+                }
+            },
+            "entries": {"type": "object"},
+            "global_settings": {"type": "object"}
+        }
+    }
+    
     try:
         config_data = request.json or {}
+        
+        # 验证输入 Schema
+        try:
+            validate(config_data, CONFIG_API_SCHEMA)
+        except ValidationError as ve:
+            return jsonify({
+                "status": "error", 
+                "message": f"配置格式错误: {ve.message}",
+                "path": list(ve.path)
+            }), 400
+        
         task_id = str(uuid.uuid4())
         
         # 初始化任务状态
@@ -1177,6 +1219,10 @@ def api_shutdown():
         def shutdown_worker():
             time.sleep(0.5)  # 等待 HTTP 响应发送完毕
             cleanup_on_exit()
+            # 使用 os._exit(0) 而非 sys.exit() 是因为：
+            # 1. 此时在后台线程中，sys.exit() 只会终止当前线程
+            # 2. 需要强制终止整个进程（包括 Flask 主线程）
+            # 3. cleanup_on_exit() 已在上方手动调用，atexit 处理器无需再执行
             import os as os_module
             os_module._exit(0)
         
