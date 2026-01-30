@@ -54,10 +54,17 @@ def _twos_complement(darray, bytesize):
 
 
 class LogParser(abc.Iterator):
-    """_summary_
+    """Iterator-based parser for WorkMate binary log files.
+    
+    Supports streaming read of large log files with configurable chunk sizes.
+    Implements context manager protocol for safe resource management.
 
     Args:
-        abc (_type_): _description_
+        f_path: Path to the .log file.
+        version: WorkMate version string (e.g., '4.3.2').
+        samplesize: Number of samples per iteration chunk.
+        start: Starting sample index.
+        end: Ending sample index (None for entire file).
     """
     def __init__(
         self,
@@ -153,13 +160,13 @@ class LogParser(abc.Iterator):
         return self
 
     def __next__(self) -> np.ndarray:
-        """_summary_
+        """Returns the next chunk of samples from the log file.
 
         Raises:
-            StopIteration: _description_            
+            StopIteration: When end of file or specified range is reached.
 
         Returns:
-            np.ndarray: _description_
+            np.ndarray: 2D array of shape (samples, channels) containing signal data.
         """
         # Type assertions to help type checker
         assert self._f_obj is not None
@@ -192,10 +199,10 @@ class LogParser(abc.Iterator):
     def read(
         self,
     ) -> np.ndarray:
-        """ Reads block of data.
+        """ Reads entire remaining block of data from current position.
 
         Returns:
-            np.ndarray: _description_
+            np.ndarray: 2D array containing all remaining samples.
         """
         # Type assertions
         assert self._f_obj is not None
@@ -589,11 +596,18 @@ def _readentries(
         # Text is null-terminated, decode as latin-1 (single-byte encoding)
         start_byte, end_byte = diary.text
         text_bytes = barray[pointer + start_byte:pointer + end_byte]
-        # Find null terminator and decode
-        null_pos = text_bytes.find(b'\x00')
-        if null_pos >= 0:
-            text_bytes = text_bytes[:null_pos]
-        message = text_bytes.decode('latin-1', errors='replace')
+        
+        # Robust decoding with fallback
+        try:
+            # Find null terminator and decode
+            null_pos = text_bytes.find(b'\x00')
+            if null_pos >= 0:
+                text_bytes = text_bytes[:null_pos]
+            message = text_bytes.decode('latin-1', errors='replace')
+        except Exception:
+            # Last resort fallback if decoding completely fails
+            message = "".join(chr(b) if 32 <= b <= 126 else '?' for b in text_bytes)
+
         # Filter out non-printable characters (keep ASCII printable range)
         message = "".join(c for c in message if c.isprintable() or c in ' \t')
         

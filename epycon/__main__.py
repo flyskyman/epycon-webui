@@ -40,12 +40,17 @@ if __name__ == "__main__":
     except FileNotFoundError:
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
-    # Override config with custom CLI arguments if provided        
+    # Override config with custom CLI arguments if provided
+    # Normalize CLI output format alias
+    cli_format = args.output_format
+    if cli_format in ["hdf", "hdf5"]:
+        cli_format = "h5"
+        
     overrides = {
         "paths.input_folder": args.input_folder,
         "paths.output_folder": args.output_folder,
         "paths.studies": args.studies,
-        "data.output_format": args.output_format,
+        "data.output_format": cli_format,
         "data.merge_logs": True if (hasattr(args, 'merge') and args.merge) else None,
         "entries.convert": args.entries,
         "entries.output_format": args.entries_format,

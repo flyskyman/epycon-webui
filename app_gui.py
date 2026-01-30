@@ -8,6 +8,7 @@ import io
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from flask import Flask, request, jsonify, send_file, send_from_directory, make_response, render_template_string
+from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from glob import iglob
 import dataclasses
@@ -1005,8 +1006,14 @@ def serve_ui(filename):
     from flask import make_response, send_from_directory
     
     ui_base = resource_path('ui')
+    # 安全性检查：首先清理文件名，防止路径穿越
+    filename = secure_filename(filename)
     file_full_path = os.path.join(ui_base, filename)
     
+    # 进一步确保路径仍在 ui_base 目录下
+    if not os.path.abspath(file_full_path).startswith(os.path.abspath(ui_base)):
+        return "非法的文件请求", 403
+
     if not os.path.exists(file_full_path):
         return f"资产未找到: {filename}", 404
         
