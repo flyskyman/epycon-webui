@@ -148,8 +148,9 @@ if __name__ == '__main__':
         except FileExistsError:            
             pass
 
-        entryparser = EpParser(folder)
-        marks = entryparser.read_entries()
+        # entryparser = EpParser(folder)
+        # marks = entryparser.read_entries()
+        marks = {}
         t_marks = time.time() - start
 
         
@@ -171,8 +172,11 @@ if __name__ == '__main__':
             #
             # 
             if file_id in marks:        
-                temp = [(item.group, _samplefromtimestamp([item.timestamp, header.timestamp], 2000), item.message) for item in marks[file_id].content]
-                group, start_sample, info = list(zip(*temp))        
+                # temp = [(item.group, _samplefromtimestamp([item.timestamp, header.timestamp], 2000), item.message) for item in marks[file_id].content]
+                # group, start_sample, info = list(zip(*temp))
+                group = ()
+                start_sample = ()
+                info = ()        
             else:
                 group = ()
                 start_sample = ()
@@ -254,11 +258,11 @@ if __name__ == '__main__':
             #          
             csv_data = np.transpose(data).astype(np.int32)
             start = time.time()
-            _tocsv(                
-                f_path=os.path.join(out_path, fold_id, file_id + '.csv'),
-                chunk=csv_data,
-                chnames=[ch.name for ch in header.mount],                
-                )
+            # _tocsv(                
+            #     f_path=os.path.join(out_path, fold_id, file_id + '.csv'),
+            #     chunk=csv_data,
+            #     chnames=[ch.name for ch in header.mount],                
+            #     )
             t_csv = time.time() - start            
             size_csv = os.path.getsize(os.path.join(out_path, fold_id, file_id + '.csv'))
 
@@ -292,7 +296,8 @@ if __name__ == '__main__':
             # Analyze accelerometry
             # Analyze accelerometry
             if file_id in marks:
-                cuk = [(entry.message, _samplefromtimestamp([entry.timestamp, header.timestamp], 2000)) for entry in marks[file_id].content if entry.message.startswith('IRE Cuk')]
+                # cuk = [(entry.message, _samplefromtimestamp([entry.timestamp, header.timestamp], 2000)) for entry in marks[file_id].content if entry.message.startswith('IRE Cuk')]
+                cuk = []
             else:
                 continue
 
