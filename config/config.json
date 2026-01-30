@@ -1,34 +1,31 @@
 {
   "paths": {
-    "input_folder": "examples/data",
-    "output_folder": "examples/data/out",
-    "studies": []
+    "input_folder": "./examples/data",
+    "output_folder": "./examples/data/out",
+    "studies": [
+      "study01"
+    ]
   },
   "data": {
-    "output_format": "h5",
-    "pin_entries": true,
-    "leads": "original",
-    "data_files": [],
-    "channels": [],
+    "data_files": [
+      "00000000"
+    ],
+    "output_format": "csv",
     "custom_channels": {},
-    "merge_logs": true
+    "leads": "raw",
+    "channels": [],
+    "pin_entries": false
   },
   "entries": {
     "convert": true,
-    "output_format": "sel",
-    "summary_csv": true,
+    "output_format": "csv",
+    "summary_csv": false,
     "filter_annotation_type": []
   },
   "global_settings": {
     "workmate_version": "4.3.2",
-    "pseudonymize": false,
     "processing": {
-      "chunk_size": 1024000
-    },
-    "credentials": {
-      "author": "mymail@mailbox.com",
-      "device": "Abbott WorkMate 4.3.2",
-      "owner": "Your Institution"
+      "chunk_size": 1024
     }
   }
 }

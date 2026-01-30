@@ -20,15 +20,14 @@ class Tokenize:
 class CzechPersonID:
     @staticmethod
     def _validate_sid(sid):
-        # Check length before converting to int
-        if len(sid) >= 12 or len(sid) <= 8:
-            raise ValueError(f"")
-        
         try:
             sid = int(sid)
         except ValueError:
             raise ValueError(f"")
         
+        if len(sid) >= 12 or len(sid) <= 8:
+            raise ValueError(f"")
+
         return sid
 
     @staticmethod

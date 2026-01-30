@@ -1,9 +1,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from epycon.core.helpers import to_unix_seconds
-from typing import Union, Sequence, List, Dict
+from typing import Union, Sequence
 
 from epycon.core._validators import _validate_mount
+
+from epycon.core._typing import (
+    Union, List, Dict
+)
 
 @dataclass(frozen=True)
 class Diary:
@@ -18,7 +21,7 @@ class Entry:
     message: str
 
     def to_datetime(self, format: str = "%H:%M:%S") -> str:
-        return datetime.fromtimestamp(to_unix_seconds(self.timestamp)).strftime(format)
+        return datetime.fromtimestamp(self.timestamp).strftime(format)
 
 
 # @dataclass
@@ -54,7 +57,7 @@ class Channels:
         if not mount:
             return
         
-        for _, item in mount.items():
+        for _, item in mount:
             _validate_mount(item, max=len(self.content)-1)
 
         if override:
@@ -94,7 +97,7 @@ class AmplifierSettings:
 class Header:
     timestamp: int
     num_channels: int
-    channels: Union[List, 'Channels']    
+    channels: List    
     amp: AmplifierSettings
     datablock_address: int
 

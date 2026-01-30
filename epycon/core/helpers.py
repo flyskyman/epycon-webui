@@ -5,7 +5,6 @@ from datetime import datetime
 
 from epycon.core._typing import (
     List,
-    Union,
 )
 
 from re import (
@@ -70,27 +69,9 @@ def deep_override(cfg_dict: dict, keys: list, value):
     return cfg_dict
 
 
-def difftimestamp(timestamps: List[Union[int, float]]) -> float:
+def difftimestamp(timestamps: List[float]):
     assert len(timestamps) == 2
-    # Accept timestamps in seconds or milliseconds. Normalize to seconds first.
-    def _to_s(t):
-        t = float(t)
-        # if value looks like milliseconds (e.g., > 1e11), convert
-        return t / 1000.0 if t > 1e11 else t
-
-    t0 = _to_s(timestamps[0])
-    t1 = _to_s(timestamps[1])
-    return abs((datetime.fromtimestamp(t0) - datetime.fromtimestamp(t1)).total_seconds())
-
-
-def to_unix_seconds(ts: Union[int, float]) -> float:
-    """Normalize a timestamp to UNIX seconds.
-
-    If `ts` appears to be in milliseconds (large integer), it will be divided
-    by 1000. Otherwise the value is returned as float seconds.
-    """
-    t = float(ts)
-    return t / 1000.0 if t > 1e11 else t
+    return abs((datetime.fromtimestamp(timestamps[0]) - datetime.fromtimestamp(timestamps[1])).total_seconds())
 
 
 def safe_string(name:str, safe_char: str = '-'):

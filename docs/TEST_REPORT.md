@@ -153,7 +153,7 @@
 1. **示例数据文件**
    - `00000000.log` 文件存在但通道数为 0（无实际数据）
    - `entries.log` 包含 2 条测试数据
-   - 建议使用 `scripts/generate_fake_wmx.py` 生成更完整的测试数据
+   - 建议使用 `scripts/generate_fake_wmx32.py` 生成更完整的测试数据
 
 2. **GROUP_MAP 默认值**
    - 未知 group ID 返回 0（int）而非字符串

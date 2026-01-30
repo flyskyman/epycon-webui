@@ -177,7 +177,7 @@ class WMx64LogSchema:
     nb_pages = 7        # Total number of pages
     timestamp_fmt = '<Q', 1000
 
-    supported_versions = ("4.2", "4.3", "4.3.2")
+    supported_versions = ("4.2", "4.3")
 
     header = DatalogHeaderWMx64
     channels = DatalogChannelsWMx64

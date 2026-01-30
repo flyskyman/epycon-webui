@@ -2,7 +2,6 @@ import os
 import json
 from numpy import savetxt
 from datetime import datetime
-from epycon.core.helpers import to_unix_seconds
 from collections import OrderedDict
 
 from dataclasses import dataclass
@@ -114,11 +113,11 @@ def _tocsv(
         header = f'Group{sep}FileId{sep}Time(Y-m-d_H:M:S){sep}Annotation'
     else:
         header = f'Group{sep}FileId{sep}Time(H:M:S){sep}Annotation'
-        ref_dtime = datetime.fromtimestamp(to_unix_seconds(ref_timestamp))    
+        ref_dtime = datetime.fromtimestamp(ref_timestamp)    
 
     out = []
     for item in entries:
-        dtime = datetime.fromtimestamp(to_unix_seconds(item.timestamp))
+        dtime = datetime.fromtimestamp(item.timestamp)
 
         if ref_timestamp is None:
             # extract absolute date
@@ -170,8 +169,8 @@ def _tosel(
     output_txt = ''
 
     for item in entries:
-        # compute delta in seconds using normalized timestamps
-        start_sample = int((to_unix_seconds(item.timestamp) - to_unix_seconds(ref_timestamp)) * sampling_freq)
+        start_sample = (datetime.fromtimestamp(item.timestamp) - datetime.fromtimestamp(ref_timestamp)).seconds
+        start_sample = int(start_sample * sampling_freq)
 
         output_txt += f'{idx}\t{start_sample}\t{start_sample}\t{item.group}\t{validity}\t{ch_idx}\t{ch_name}\t{item.message}\n'
         idx += 1    
