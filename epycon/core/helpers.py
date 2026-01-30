@@ -28,7 +28,8 @@ def default_log_path():
         log_path = os.path.join(os.environ["APPDATA"], "Local", "epycon")
     
     elif this_system == "Linux" or this_system == "Darwin":
-        log_path = os.path.join("/var/log/", "epycon")
+        # 修正：使用用户主目录下的 logs 文件夹，避免 /var/log 的权限问题
+        log_path = os.path.join(os.path.expanduser("~"), ".epycon", "logs")
     
     else:
         # Fallback to a generic location for other systems

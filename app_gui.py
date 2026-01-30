@@ -1276,9 +1276,11 @@ if __name__ == '__main__':
             ).start()
             
         # 启动服务器
-        # 使用 host='0.0.0.0' 通常能解决 Windows 上的 "连接被拒绝" 问题
+        # 修正：默认绑定到 127.0.0.1 以防止局域网外部访问
+        # 如果确实需要远程访问，请通过环境变量配置 EPYCON_HOST=0.0.0.0
+        host_ip = os.environ.get('EPYCON_HOST', '127.0.0.1')
         app.run(
-            host='0.0.0.0',
+            host=host_ip,
             port=port,
             debug=not is_frozen, 
             use_reloader=False,
