@@ -113,4 +113,45 @@ def pretty_json(custom_dict):
         return s
 
 
+def get_channel_mappings(header, cfg):
+    """获取通道映射，正确处理不同的 channels 类型
+    
+    Args:
+        header: LogParser header object
+        cfg: Configuration dictionary with 'data' key containing 'leads' and 'custom_channels'
+        
+    Returns:
+        dict: Mapping of channel names to indices/references
+    """
+    if hasattr(header.channels, 'add_custom_mount'):
+        # ChannelCollection 对象
+        custom_channels = cfg.get("data", {}).get("custom_channels", {})
+        if custom_channels:
+            header.channels.add_custom_mount(custom_channels, override=False)
+        if cfg.get("data", {}).get("leads") == "computed":
+            return header.channels.computed_mappings
+        else:
+            return header.channels.raw_mappings
+    elif isinstance(header.channels, list) and header.channels:
+        # 简单 list，每个元素是 Channel 对象（有 name 和 reference 属性）
+        # reference 是实际数据列的索引
+        mappings = {}
+        for ch in header.channels:
+            if hasattr(ch, 'name') and hasattr(ch, 'reference'):
+                # Channel 对象：使用 reference 作为数据列索引
+                # 只包含 reference 在有效范围内的通道
+                if ch.reference is not None and ch.reference < header.num_channels:
+                    mappings[ch.name] = [ch.reference]
+            elif hasattr(ch, 'name'):
+                # 只有 name 没有 reference，跳过或使用默认
+                pass
+            elif isinstance(ch, str):
+                # 字符串通道名，使用索引（legacy 支持）
+                idx = list(header.channels).index(ch)
+                if idx < header.num_channels:
+                    mappings[ch] = [idx]
+        return mappings if mappings else {f"ch{i}": [i] for i in range(header.num_channels)}
+    else:
+        # fallback: 使用默认名称
+        return {f"ch{i}": [i] for i in range(header.num_channels)} if header.num_channels > 0 else {"ch0": [0]}
 

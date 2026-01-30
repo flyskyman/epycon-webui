@@ -446,6 +446,9 @@ def clean_entries_content(entries):
 # ========================================================
 # 📐 辅助工具
 # ========================================================
+# [REFACTOR] 使用核心库的统一通道映射函数
+from epycon.core.helpers import get_channel_mappings
+
 def get_raw_log_start_seconds(file_path):
     try:
         with open(file_path, 'rb') as f:
@@ -653,16 +656,8 @@ def execute_epycon_conversion(cfg):
                                 continue
                             
                             # 获取该文件的通道映射
-                            if cfg["data"]["leads"] == "computed":
-                                if isinstance(header.channels, Channels):
-                                    file_mappings = header.channels.computed_mappings
-                                else:
-                                    file_mappings = {f"ch{i}": [i] for i in range(header.num_channels)}
-                            else:
-                                if isinstance(header.channels, Channels):
-                                    file_mappings = header.channels.raw_mappings
-                                else:
-                                    file_mappings = {f"ch{i}": [i] for i in range(header.num_channels)}
+                            # [REFACTOR] 使用核心库的统一函数
+                            file_mappings = get_channel_mappings(header, cfg)
                             
                             if cfg["data"]["channels"]:
                                 file_mappings = {k:v for k,v in file_mappings.items() if k in cfg["data"]["channels"]}
@@ -751,6 +746,8 @@ def execute_epycon_conversion(cfg):
                             factor=1000,
                             units="mV",
                             attributes=hdf_attributes,
+                            compression=cfg["data"].get("compression"),
+                            compression_opts=cfg["data"].get("compression_opts")
                         ) as planter:
                             for idx, dlog_info in enumerate(group_files):
                                 datalog_path = dlog_info['path']
@@ -801,8 +798,8 @@ def execute_epycon_conversion(cfg):
                                             offset_sec = e.timestamp - first_timestamp
                                             global_p = int(offset_sec * fs)
                                             
-                                            # 校验：标注必须落在此文件实际跨越的采样区间内
-                                            if global_base <= global_p < file_end_global:
+                                            # 校验：标注必须落在此文件实际跨越的采样区间内 (relaxed: 允许超出结尾)
+                                            if global_base <= global_p:
                                                 all_group_marks.append((global_p, str(e.group), str(e.message)))
                                     
                                     total_samples += file_sample_count
@@ -845,8 +842,9 @@ def execute_epycon_conversion(cfg):
                             target_entries_rel = [] 
                             for e in all_entries_norm:
                                 if str(e.fid) == str(datalog_id):
-                                    # 检查时间戳是否落在该文件的绝对时间内
-                                    if log_start_sec <= e.timestamp < log_end_sec:
+                                    # 检查时间戳是否落在该文件的绝对时间内 (relaxed: 允许超出结尾)
+                                    # [FIX] 只要大于起始时间即可，允许记录后的标注
+                                    if log_start_sec <= e.timestamp:
                                         diff_seconds = e.timestamp - log_start_sec
                                         new_e = dataclasses.replace(e)
                                         new_e.timestamp = diff_seconds # 转换为相对文件的偏移秒数
@@ -863,17 +861,8 @@ def execute_epycon_conversion(cfg):
                                 # 导入 Channels 类以进行类型检查
                                 from epycon.core._dataclasses import Channels
                                 
-                                if cfg["data"]["leads"] == "computed":
-                                    # header.channels 现在是 Channels 对象
-                                    if isinstance(header.channels, Channels):
-                                        mappings = header.channels.computed_mappings
-                                    else:
-                                        mappings = {f"ch{i}": [i] for i in range(header.num_channels)}
-                                else:
-                                    if isinstance(header.channels, Channels):
-                                        mappings = header.channels.raw_mappings
-                                    else:
-                                        mappings = {f"ch{i}": [i] for i in range(header.num_channels)}
+                                # [REFACTOR] 使用核心库的统一函数
+                                mappings = get_channel_mappings(header, cfg)
                                 if cfg["data"]["channels"]:
                                     mappings = {k:v for k,v in mappings.items() if k in cfg["data"]["channels"]}
                                 column_names = list(mappings.keys())
@@ -1068,7 +1057,9 @@ def run_direct():
                 "properties": {
                     "output_format": {"type": "string", "enum": ["h5", "csv"]},
                     "merge_logs": {"type": "boolean"},
-                    "pin_entries": {"type": "boolean"}
+                    "pin_entries": {"type": "boolean"},
+                    "compression": {"type": ["string", "null"]},
+                    "compression_opts": {"type": ["integer", "null"]}
                 }
             },
             "entries": {"type": "object"},
@@ -1196,6 +1187,8 @@ def _prepare_conversion_config(cfg, script_dir):
     cfg["data"].setdefault("data_files", [])
     cfg["data"].setdefault("merge_logs", False)
     cfg["data"].setdefault("pin_entries", True)
+    cfg["data"].setdefault("compression", None)  # [NEW] 可选: 'lzf', 'gzip'
+    cfg["data"].setdefault("compression_opts", None)
     
     if "entries" not in cfg or not isinstance(cfg["entries"], dict): cfg["entries"] = {}
     cfg["entries"].setdefault("convert", False)
@@ -1332,7 +1325,14 @@ def handle_preview_channels():
         data = request.json
         input_folder = data.get('input_folder', '')
         
-        if not input_folder or not os.path.exists(input_folder):
+        if not input_folder:
+             return jsonify({"status": "error", "message": "未指定输入文件夹"}), 400
+             
+        # [FIX] 容错处理：如果用户选择了具体文件而非目录，自动使用其父目录
+        if os.path.isfile(input_folder):
+             input_folder = os.path.dirname(input_folder)
+        
+        if not os.path.exists(input_folder):
             return jsonify({"status": "error", "message": "文件夹路径无效"}), 400
             
         # 搜索第一个有效的 .log 文件 (不递归，只看当前层或第一层 study)
@@ -1374,16 +1374,16 @@ def handle_preview_channels():
                 if header and hasattr(header, 'channels'):
                     # 尝试从 Channels 对象或 num_channels 获取
                     # 注意：LogParser 的 header.channels 通常是 Channels 对象或者 dict
-                    if hasattr(header.channels, 'computed_mappings'):
-                         channel_names = list(header.channels.computed_mappings.keys())
-                    elif isinstance(header.channels, dict):
-                         channel_names = list(header.channels.keys())
-                    else:
-                         # Fallback
-                         channel_names = [f"ch{i}" for i in range(header.num_channels)]
+                    # [REFACTOR] 使用核心库的统一函数
+                    # 创建一个临时 cfg 结构
+                    temp_cfg = {"data": {"leads": "computed", "custom_channels": {}}}
+                    channel_names = list(get_channel_mappings(header, temp_cfg).keys())
         except Exception as parse_err:
              return jsonify({"status": "error", "message": f"解析日志失败: {str(parse_err)}"}), 500
              
+        if not channel_names:
+            conv_logger.warning(f"Scan found no channels in {target_log}")
+            
         # 排序并返回
         # 尝试按自然顺序排序（如果包含数字）
         return jsonify({

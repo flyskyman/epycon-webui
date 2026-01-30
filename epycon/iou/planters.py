@@ -322,6 +322,10 @@ class HDFPlanter(DatalogPlanter):
         self.entries = kwargs.pop("entries", None)
         self.factor = kwargs.pop("factor", 1000)
         self.extra_attributes = kwargs.pop("attributes", {})
+        
+        # [NEW] 压缩选项
+        self.compression = kwargs.pop("compression", None)  # e.g., 'lzf', 'gzip'
+        self.compression_opts = kwargs.pop("compression_opts", None)
 
         self._header_isstored = False
 
@@ -337,6 +341,10 @@ class HDFPlanter(DatalogPlanter):
             darray: NumpyArray,
             **kwargs: Any,
         ) -> None:
+        
+        # [NEW] 忽略空数据块，防止计算逻辑长度时出错
+        if darray.shape[1] == 0:
+            return
                 
         # write header
         if not self._header_isstored:
@@ -506,7 +514,9 @@ class HDFPlanter(DatalogPlanter):
                 shape=(darray.shape[0], darray.shape[1]), 
                 maxshape=(darray.shape[0], None), 
                 chunks=True, 
-                dtype=self.cfg.DATASET_DTYPE
+                dtype=self.cfg.DATASET_DTYPE,
+                compression=self.compression,
+                compression_opts=self.compression_opts
             )
             # 设置当前实际样本数（作为属性存储，方便追踪逻辑长度）
             self._f_obj[self._DATASET_DNAME].attrs['_logical_length'] = darray.shape[1]
