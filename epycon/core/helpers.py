@@ -4,12 +4,12 @@ from datetime import datetime
 # from yaml.constructor import SafeConstructor
 
 from epycon.core._typing import (
-    List,
+    Union,
+    Sequence,
 )
 
 from re import (
     sub,
-    match,
 )
 from json import (
     dumps,
@@ -28,7 +28,8 @@ def default_log_path():
         log_path = os.path.join(os.environ["APPDATA"], "Local", "epycon")
     
     elif this_system == "Linux" or this_system == "Darwin":
-        log_path = os.path.join("/var/log/", "epycon")
+        # 修正：使用用户主目录下的 logs 文件夹，避免 /var/log 的权限问题
+        log_path = os.path.join(os.path.expanduser("~"), ".epycon", "logs")
     
     else:
         # Fallback to a generic location for other systems
@@ -69,7 +70,7 @@ def deep_override(cfg_dict: dict, keys: list, value):
     return cfg_dict
 
 
-def difftimestamp(timestamps: List[float]):
+def difftimestamp(timestamps: Sequence[Union[int, float]]) -> float:
     assert len(timestamps) == 2
     return abs((datetime.fromtimestamp(timestamps[0]) - datetime.fromtimestamp(timestamps[1])).total_seconds())
 

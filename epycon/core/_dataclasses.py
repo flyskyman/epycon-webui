@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Union, Sequence
+from typing import Sequence
 
 from epycon.core._validators import _validate_mount
 
@@ -57,7 +57,7 @@ class Channels:
         if not mount:
             return
         
-        for _, item in mount:
+        for _, item in mount.items():
             _validate_mount(item, max=len(self.content)-1)
 
         if override:

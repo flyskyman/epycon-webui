@@ -8,6 +8,7 @@ import io
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from flask import Flask, request, jsonify, send_file, send_from_directory, make_response, render_template_string
+from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from glob import iglob
 import dataclasses
@@ -62,7 +63,10 @@ try:
     from epycon.iou import LogParser, EntryPlanter, CSVPlanter, HDFPlanter, readentries, mount_channels
 except ImportError as e:
     print(f"无法加载 Epycon。\n{e}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        sys.exit(1)
+    else:
+        raise  # 在测试环境中抛出异常供 pytest 捕获
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
@@ -498,8 +502,14 @@ def serve_ui(filename):
     from flask import make_response, send_from_directory
     
     ui_base = resource_path('ui')
+    # 安全性检查：首先清理文件名，防止路径穿越
+    filename = secure_filename(filename)
     file_full_path = os.path.join(ui_base, filename)
     
+    # 进一步确保路径仍在 ui_base 目录下
+    if not os.path.abspath(file_full_path).startswith(os.path.abspath(ui_base)):
+        return "非法的文件请求", 403
+
     if not os.path.exists(file_full_path):
         return f"资产未找到: {filename}", 404
         
@@ -599,11 +609,51 @@ if __name__ == '__main__':
         except Exception:
             pass
 
-        print("🚀 Epycon GUI (V68.1 终极融合版) 已启动...")
-        print("请手动打开浏览器访问: http://127.0.0.1:5000/")
-        print("Running app.run...")
-        threading.Thread(target=lambda: (time.sleep(1), open_browser()), daemon=True).start()
-        app.run(port=5000, debug=False)
+        print("\n🚀 Epycon GUI (V68.3) 启动中...")
+        print("📌 PID:", os.getpid())
+        print(f"🌐 访问地址: http://127.0.0.1:{port}/")
+        print("💡 提示: 可在页面中点击'退出程序'按钮关闭，或按 Ctrl+C 退出\n")
+        
+        # 注册信号处理（优雅退出）
+        def signal_handler(sig, frame):
+            print("\n\n🛑 收到退出信号，正在清理...")
+            cleanup_on_exit()
+            print("✅ 清理完成，程序已退出")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        if hasattr(signal, 'SIGTERM'):
+            signal.signal(signal.SIGTERM, signal_handler)
+        
+        # 对于 EXE 版本，禁用 reloader（避免进程管理问题）
+        use_reloader = not is_frozen
+        
+        # 仅在工作进程中打开浏览器，避免 reloader 导致打开两次
+        # WERKZEUG_RUN_MAIN='true' 表示这是 Flask 的实际工作进程
+        if not is_frozen and os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            # 延迟打开浏览器，确保服务器完全启动
+            threading.Thread(
+                target=lambda: (time.sleep(2), open_browser(port)),
+                daemon=True
+            ).start()
+        elif is_frozen:
+            # EXE 版本不使用 reloader，直接延迟打开
+            threading.Thread(
+                target=lambda: (time.sleep(2), open_browser(port)),
+                daemon=True
+            ).start()
+            
+        # 启动服务器
+        # 修正：默认绑定到 127.0.0.1 以防止局域网外部访问
+        # 如果确实需要远程访问，请通过环境变量配置 EPYCON_HOST=0.0.0.0
+        host_ip = os.environ.get('EPYCON_HOST', '127.0.0.1')
+        app.run(
+            host=host_ip,
+            port=port,
+            debug=not is_frozen, 
+            use_reloader=False,
+            threaded=True
+        )
     except Exception as e:
         print(f"启动错误: {e}")
         import traceback

@@ -1,0 +1,19 @@
+[flake8]
+max-line-length = 120
+exclude = 
+    .git,
+    __pycache__,
+    build,
+    dist,
+    *.egg-info,
+    .venv,
+    venv
+
+ignore = W503, E203, E402
+
+# Per-file ignores for specific patterns
+per-file-ignores =
+    # Allow unused imports in __init__.py
+    __init__.py: F401
+    # Allow star imports in typing module
+    epycon/core/_typing.py: F401,F403

@@ -1,23 +1,19 @@
 import os
-from warnings import warn
 import h5py as h
 import numpy as np
-from dataclasses import fields
 
 
-from epycon.iou.constants import HDFConfig
-from epycon.utils.decorators import checktypes
 
 from epycon.core._dataclasses import Entry
 from epycon.core._formatting import _tocsv, _tosel, SignalPlantDefaults
 
 from epycon.core._typing import (
     Union, PathLike, NumpyArray, Tuple, List, Any,
-    Callable, Iterator, Optional, Dict, cast
+    Iterator, Optional, Dict, cast
 )
 
 from epycon.core._validators import (
-    _validate_str, _validate_int, _validate_tuple,
+    _validate_str,
 )
 
 
@@ -180,6 +176,16 @@ class DatalogPlanter:
         raise NotImplementedError
     
     def __exit__(self, exc_type, exc_value, exc_traceback):
+        # 如果是 HDF5 且存在预分配空间，进行裁剪
+        if self._f_obj and self._extension == ".h5" and self._DATASET_DNAME in self._f_obj:
+            try:
+                _dataset = self._f_obj[self._DATASET_DNAME]
+                logical_len = _dataset.attrs.get('_logical_length')
+                if logical_len is not None and logical_len < _dataset.shape[1]:
+                    _dataset.resize(logical_len, axis=1)
+            except Exception:
+                pass
+
         # Close file object
         if self._f_obj:
             self._f_obj.close()
@@ -191,7 +197,7 @@ class DatalogPlanter:
         if exc_type:
             print(f"Exception occurred: {exc_type}, {exc_value}")
 
-    def write(self):
+    def write(self, darray: NumpyArray, **kwargs: Any) -> None:
         raise NotImplementedError
 
 
@@ -251,13 +257,19 @@ class CSVPlanter(DatalogPlanter):
             self._f_obj.writelines(self.delimiter.join(self.column_names) + '\n')
             self._header_isstored = True
 
-        # create csv formatting
-        if self._fmt is None:
-            string_fmt = kwargs.pop("delimiter", "%d")
-            self._fmt = self.delimiter.join([string_fmt]*darray.shape[1])
-
         # write data
-        self._f_obj.write(('\n'.join([self._fmt]*darray.shape[0]) + '\n') % tuple(darray.ravel()))
+        if self._fmt is None:
+            # Use %d for integers, else fallback to default
+            self._fmt = '%d' if np.issubdtype(darray.dtype, np.integer) else '%.4f'
+            
+        # Use numpy.savetxt for efficient vectorized writing
+        np.savetxt(
+            self._f_obj,
+            darray,
+            fmt=self._fmt,
+            delimiter=self.delimiter,
+            newline='\n'
+        )
 
 
 
@@ -290,6 +302,9 @@ class HDFPlanter(DatalogPlanter):
     entries: Optional[List[Entry]]
     factor: Union[int, float]
     extra_attributes: Dict[str, Any]
+    append_mode: bool
+    _chunk_step: int = 100000  # 预分配步长
+    _current_sample_count: int = 0 # Track actual number of samples written
     
     def __init__(
         self,
@@ -319,7 +334,8 @@ class HDFPlanter(DatalogPlanter):
     
     def write(
             self,
-            darray: NumpyArray,            
+            darray: NumpyArray,
+            **kwargs: Any,
         ) -> None:
                 
         # write header
@@ -443,10 +459,10 @@ class HDFPlanter(DatalogPlanter):
                 raise TypeError
 
             # Generate content
-            content = list(zip(_col_names, datacache_names, self.units))
+            content_list = list(zip(_col_names, datacache_names, self.units))
 
-            content = np.array(
-                content,
+            content_array = np.array(
+                content_list,
                 dtype=self.cfg.INFO_DTYPES,
                 )    
 
@@ -454,11 +470,11 @@ class HDFPlanter(DatalogPlanter):
             if self._INFO_DNAME in self._f_obj:
                 _info_ds = cast(h.Dataset, self._f_obj[self._INFO_DNAME])
                 current_content = _info_ds[:]
-                content = np.append(current_content, content)
+                content_array = np.append(current_content, content_array)
 
                 del self._f_obj[self._INFO_DNAME]
             
-            self._f_obj.create_dataset(self._INFO_DNAME, data=content)
+            self._f_obj.create_dataset(self._INFO_DNAME, data=content_array)
 
     def add_samples(
             self,
@@ -481,8 +497,21 @@ class HDFPlanter(DatalogPlanter):
             darray = darray.astype(np.float32) / self.factor
 
         # Create new dataset if not exists
-        if not self._DATASET_DNAME in self._f_obj:
-            self._f_obj.create_dataset(self._DATASET_DNAME, data=darray, shape=darray.shape, dtype=self.cfg.DATASET_DTYPE, chunks=True, maxshape=(darray.shape[0], None))            
+        if self._DATASET_DNAME not in self._f_obj:
+            # 初始预分配更大的空间，提高后续追加效率
+            initial_capacity = max(darray.shape[1], self._chunk_step)
+            self._f_obj.create_dataset(
+                self._DATASET_DNAME, 
+                data=None, 
+                shape=(darray.shape[0], darray.shape[1]), 
+                maxshape=(darray.shape[0], None), 
+                chunks=True, 
+                dtype=self.cfg.DATASET_DTYPE
+            )
+            # 设置当前实际样本数（作为属性存储，方便追踪逻辑长度）
+            self._f_obj[self._DATASET_DNAME].attrs['_logical_length'] = darray.shape[1]
+            # 写入数据
+            self._f_obj[self._DATASET_DNAME][:, :darray.shape[1]] = darray
             return
     
         # Check for data shape consistency, raise error if does not match
@@ -494,14 +523,18 @@ class HDFPlanter(DatalogPlanter):
                 got {darray.shape[0]} instead."""
                 )            
 
-        # reshape hdf dataset
-        _dataset.resize(
-            _dataset.shape[1] + darray.shape[1],
-            axis=1,
-            )
+        # 获取逻辑长度（实际写入的样本数）
+        logical_len = _dataset.attrs.get('_logical_length', _dataset.shape[1])
+        new_logical_len = logical_len + darray.shape[1]
+        
+        # 如果当前物理容量不足，触发预分配 resize
+        if new_logical_len > _dataset.shape[1]:
+            new_physical_len = ((new_logical_len // self._chunk_step) + 1) * self._chunk_step
+            _dataset.resize(new_physical_len, axis=1)
                 
-        # append samples
-        _dataset[:, -darray.shape[1]:] = darray 
+        # 写入数据并更新逻辑长度
+        _dataset[:, logical_len:new_logical_len] = darray 
+        _dataset.attrs['_logical_length'] = new_logical_len
         
     def add_marks(
         self,

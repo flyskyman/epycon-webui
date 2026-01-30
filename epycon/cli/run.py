@@ -3,13 +3,26 @@ import json
 import argparse
 import logging
 import jsonschema
+from typing import cast, Any
 
 from ..iou.parsers import (
-    # EpParser,
-    # _readheader,
-    # _read,
-    # _samplefromtimestamp,
-    # _tocsv,
+    LogParser,
+    _readheader,
+    _readdata,
+    _readentries,
+)
+
+
+from ..iou.planters import (
+    HDFPlanter,
+)
+
+from ..core.helpers import (
+    default_log_path,
+    difftimestamp
+)
+
+from ..core._validators import (
     _validate_path,
 )
 
@@ -86,18 +99,32 @@ if __name__ == '__main__':
     from glob import glob
     from epycon.iou.planters import HDFPlantercinc
     
+    # 可选的 scipy 导入（仅用于加速度数据处理）
+    try:
+        from scipy.signal import filtfilt, butter
+        # 设计一个低通滤波器用于加速度数据处理
+        fs_filter = 2000  # 采样频率
+        fc = 50    # 截止频率
+        order = 4  # 滤波器阶数
+        b, a = butter(order, fc / (fs_filter / 2), btype='low')
+        HAS_SCIPY = True
+    except ImportError:
+        HAS_SCIPY = False
+        filtfilt = None  # type: ignore
+        b, a = None, None  # type: ignore
+    
     # path = r'C:\Users\jakub\Research\Data\WorkMate'
     # out_path = r'C:\Users\jakub\Research\Data\WorkMate_export'
     
     path = '/backup/data/VuVeL/WorkMate'
     out_path = '/backup/data/VuVeL/WorkMate_export'
 
-    res = {
+    res: dict[int, dict[int, list[float]]] = {
         40: {480: [], 240: [], 120: [], 60: [], 30: []},
         20: {480: [], 240: [], 120: [], 60: [], 30: []},
         10: {480: [], 240: [], 120: [], 60: [], 30: []},
     }
-    stat = {
+    stat: dict[str, list[Any]] = {
         'fold_id': [],
         'size_orig': [],
         'size_h5': [],
@@ -127,16 +154,16 @@ if __name__ == '__main__':
         t_marks = time.time() - start
 
         
-        for f in logfiles:
-            print(f)
+        for logfile in logfiles:
+            print(logfile)
             foldid_list.append(fold_id)
             
-            size_orig = os.path.getsize(f)
+            size_orig = os.path.getsize(logfile)
             
             start = time.time()
-            file_id = os.path.basename(f).split('.')[0]
-            header = _readheader(f, version='4.2')            
-            data = _read(f, version='4.2', mount=False)
+            file_id = os.path.basename(logfile).split('.')[0]
+            header = _readheader(logfile)            
+            data = cast(np.ndarray, _readdata(logfile, version='4.2', mount=False))
                         
             # planter = HDFPlanter(f_path=r'C:\Users\jakub\Research\Codes\Python\epycon\data\Pigs_export\27-15\00000000.h5')
             #
@@ -148,7 +175,9 @@ if __name__ == '__main__':
                 temp = [(item.group, _samplefromtimestamp([item.timestamp, header.timestamp], 2000), item.message) for item in marks[file_id].content]
                 group, start_sample, info = list(zip(*temp))        
             else:
-                group, start_sample, info = list(), list(), list()
+                group = ()
+                start_sample = ()
+                info = ()
             
             t_header = time.time() - start
             
@@ -291,7 +320,7 @@ if __name__ == '__main__':
                 
                 try:
                     pulse_width, pulse_spacing, _ = [int(val) for val in trial.lstrip('IRE Cuk: ').split(',')]
-                except:
+                except (ValueError, AttributeError):
                     print(f'Wrong trial {trial} in {file_id}')
                     continue
 

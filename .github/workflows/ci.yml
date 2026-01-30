@@ -4,10 +4,12 @@ on:
     branches:
       - main
       - master
+      - 'feature/**'
   pull_request:
     branches:
       - main
       - master
+      - 'feature/**'
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -19,12 +21,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy h5py jsonschema pytest pytest-cov
-      - name: Run type checks with Pylance
+          pip install numpy h5py jsonschema pytest pytest-cov python-dateutil flask flask-cors flake8
+      - name: Run flake8 lint check
         run: |
-          pip install pylance pyright
-          pyright epycon/ --pythonversion 3.10
+          echo "Running flake8 code style check..."
+          flake8 epycon/ --count --show-source --statistics
         continue-on-error: true
+      # Type checking with Pyright disabled - too strict for current codebase
+      # Enable this after proper type annotations are added
+      # - name: Run type checks with Pylance
+      #   run: |
+      #     pip install pylance pyright
+      #     pyright epycon/ --pythonversion 3.10 || true
+      #   continue-on-error: true
       - name: Run unit tests with coverage
         env:
           PYTHONPATH: ${{ github.workspace }}

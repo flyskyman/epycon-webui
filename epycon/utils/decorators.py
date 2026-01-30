@@ -1,5 +1,4 @@
 from typing import (
-    Union,    
     get_origin as _get_origin,
     get_args as _get_args,
     _SpecialForm,
