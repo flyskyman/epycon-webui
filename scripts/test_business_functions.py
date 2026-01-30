@@ -274,7 +274,7 @@ def test_config_validation():
         'data': {
             'output_format': 'h5',
             'pin_entries': True,
-            'leads': 'raw',
+            'leads': 'original',
             'data_files': [],
             'channels': [],
             'custom_channels': {},

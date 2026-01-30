@@ -11,7 +11,7 @@
     "output_format": "h5",
     "merge_logs": true,
     "custom_channels": {},
-    "leads": "raw",
+    "leads": "original",
     "channels": [],
     "pin_entries": true
   },

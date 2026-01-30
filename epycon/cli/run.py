@@ -28,6 +28,14 @@ from ..core._validators import (
 
 
 import numpy as np
+import csv
+
+def _tocsv(f_path, chunk, chnames):
+    """Auxiliary function to write CSV for benchmarking."""
+    with open(f_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(chnames)
+        writer.writerows(chunk)
 
 logger = logging.getLogger(__name__)
 

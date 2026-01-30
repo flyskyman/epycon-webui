@@ -7,7 +7,7 @@
   "data": {
     "output_format": "h5",
     "pin_entries": true,
-    "leads": "raw",
+    "leads": "original",
     "data_files": [],
     "channels": [],
     "custom_channels": {}
