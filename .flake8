@@ -9,12 +9,7 @@ exclude =
     .venv,
     venv
 
-# Ignore common false positives
-ignore = 
-    # E501: line too long (handled by max-line-length)
-    W503,  # line break before binary operator (conflicts with PEP 8)
-    E203,  # whitespace before ':' (conflicts with black)
-    E402,  # module level import not at top of file (acceptable for conditional imports)
+ignore = W503, E203, E402
 
 # Per-file ignores for specific patterns
 per-file-ignores =

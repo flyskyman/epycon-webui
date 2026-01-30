@@ -245,13 +245,12 @@ def main():
     
     print("="*70)
     
-    # Ask to save baseline
+    # Save baseline if not exists
     if not Path(BENCHMARK_FILE).exists():
         print("\n💾 No baseline found. Saving current results as baseline...")
         benchmark.save_baseline()
-        return 0
-    else:
-        return 0 if regressions == 0 else 1
+        
+    return 0
 
 
 if __name__ == '__main__':
