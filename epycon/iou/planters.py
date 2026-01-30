@@ -283,7 +283,6 @@ class HDFPlanter(DatalogPlanter):
         entries: 可选的 Entry 列表
         factor: 数值缩放因子
         extra_attributes: 自定义 HDF5 属性字典
-        append_mode: 是否以追加模式打开文件 (用于多 log 合并)
     """
 
     # class-specific constants
@@ -323,20 +322,12 @@ class HDFPlanter(DatalogPlanter):
         self.entries = kwargs.pop("entries", None)
         self.factor = kwargs.pop("factor", 1000)
         self.extra_attributes = kwargs.pop("attributes", {})
-        self.append_mode = kwargs.pop("append", False)
 
         self._header_isstored = False
 
     def __enter__(self):
-        try:
-            # Use 'a' mode for append (read/write, create if not exists)
-            # Use 'w' mode for overwrite (create/truncate)
-            mode = "a" if self.append_mode else "w"
-            self._f_obj = h.File(self.f_path, mode)
-            
-            # If appending and Data dataset exists, mark header as stored
-            if self.append_mode and self._DATASET_DNAME in self._f_obj:
-                self._header_isstored = True
+        try:            
+            self._f_obj = h.File(self.f_path, "w")
         except IOError as e:
             raise IOError(e)
         return self
@@ -570,22 +561,8 @@ class HDFPlanter(DatalogPlanter):
             # filter out negative samples
             position = max(1, position)
 
-            # Handle group conversion (can be int, str, or bytes)
-            if isinstance(group, bytes):
-                group_bytes = group
-            elif isinstance(group, int):
-                group_bytes = str(group).encode('UTF-8')
-            else:
-                group_bytes = str(group).encode('UTF-8')
-            
-            # Handle message conversion
-            if isinstance(message, bytes):
-                message_bytes = message
-            elif message is None:
-                message_bytes = b''
-            else:
-                message_bytes = str(message).encode('UTF-8')
-            
+            group_bytes = group if isinstance(group, bytes) else group.encode('UTF-8')
+            message_bytes = message if isinstance(message, bytes) else message.encode('UTF-8')
             _col_names = self.column_names or []
             channel_id = _col_names[0] if _col_names else b''
 

@@ -220,13 +220,6 @@
                         <label for="pin_entries" class="ml-2 block text-sm text-gray-900">将标注(Entries)嵌入数据文件</label>
                     </div>
 
-                    <div v-if="config.data.output_format === 'h5'"
-                        class="input-group flex items-center mt-2 bg-green-50 p-2 rounded">
-                        <input type="checkbox" v-model="config.data.merge_logs" id="merge_logs"
-                            class="h-4 w-4 text-green-600 border-gray-300 rounded">
-                        <label for="merge_logs" class="ml-2 block text-sm text-gray-900">📦 合并为单文件 (按时间戳排序)</label>
-                    </div>
-
                     <div class="input-group mt-4">
                         <label class="input-label">指定通道 (Channels - 可选)</label>
                         <div v-for="(ch, index) in config.data.channels" :key="index" class="array-item">
@@ -283,12 +276,6 @@
                             <input type="number" v-model.number="config.global_settings.processing.chunk_size"
                                 class="input-field">
                         </div>
-                    </div>
-
-                    <div class="input-group flex items-center mt-3 bg-amber-50 p-2 rounded border border-amber-200">
-                        <input type="checkbox" v-model="config.global_settings.pseudonymize" id="pseudonymize"
-                            class="h-4 w-4 text-amber-600 border-gray-300 rounded">
-                        <label for="pseudonymize" class="ml-2 block text-sm text-gray-900">🔒 匿名化患者标识 (生成伪随机 ID)</label>
                     </div>
 
                     <div class="border-t pt-4 mt-4">
@@ -350,7 +337,7 @@
                 // 初始化配置 (V2.0 更新默认值)
                 const defaultConfig = {
                     paths: { input_folder: "", output_folder: "", studies: [] },
-                    data: { output_format: "h5", pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {}, merge_logs: true },
+                    data: { output_format: "h5", pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {} },
                     entries: { convert: true, output_format: "sel", summary_csv: true, filter_annotation_type: [] },
                     global_settings: { workmate_version: "4.3.2", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3.2", owner: "" } }
                 };

@@ -26,6 +26,9 @@ class CzechPersonID:
         except ValueError:
             raise ValueError("")
         
+        if len(sid) >= 12 or len(sid) <= 8:
+            raise ValueError(f"")
+
         return sid
 
     @staticmethod

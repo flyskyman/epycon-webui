@@ -6,53 +6,32 @@
     },
     "yaml.validate": true,
     "python.analysis.typeCheckingMode": "basic",
-    "python.analysis.extraPaths": [
-        "${workspaceFolder}/epycon",
-        "${workspaceFolder}"
-    ],
-    "python.analysis.diagnosticsMode": "workspace",
-    "python.analysis.exclude": [
-        "test_h5_marks.py",
-        "debug_entries.py",
-        "test_wmx64_merge.py",
-        "verify_wmx64_integrity.py",
-        "check_marks.py",
-        "generate_matched_data.py",
-        "generate_wmx64_entries.py",
-        "inspect_h5.py",
-        "regenerate_test_data.py",
-        "test_direct.py",
-        "test_http.py",
-        "test_readentries.py",
-        "validate_entries_logic.py"
-    ],
     "editor.formatOnSave": true,
     "python.formatting.provider": "black",
-    "github-actions.workflows.pinned.workflows": [],
-    "github-actions.workflows.pinned.recentlyUsed": [],
-    "/^& C:\\\\Projects\\\\epycon\\\\venv\\\\Scripts\\\\python\\.exe -c \"import os; import sys; print\\(\\[d for d in os\\.listdir\\(sys\\.path\\[1\\]\\) if 'pyinstaller' in d\\.lower\\(\\)\\]\\)\"$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^& C:\\\\Projects\\\\epycon\\\\venv\\\\Scripts\\\\python\\.exe -m pip install --force-reinstall pyinstaller$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^gh run view 2139155354 --repo flyskyman/epycon-webui --log$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^git -C c:\\\\Projects\\\\epycon add \\.github\\\\workflows\\\\windows-build-release\\.yml ; git -C c:\\\\Projects\\\\epycon commit -m \"ci: fix release upload in Windows build workflow \\(create-release \\+ upload-release-asset\\)\" ; git -C c:\\\\Projects\\\\epycon push origin master$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^gh run rerun 21391546621 --repo flyskyman/epycon-webui$/": {
-        "approve": true,
-        "matchCommandLine": true
-    },
-    "/^gh run list --repo flyskyman/epycon-webui --workflow windows-build-release\\.yml --limit 5 --json workflowName,headBranch,event,status,createdAt,number,url$/": {
-        "approve": true,
-        "matchCommandLine": true
+    "chat.tools.terminal.autoApprove": {
+        "/^& C:\\\\Projects\\\\epycon\\\\venv\\\\Scripts\\\\python\\.exe -c \"import os; import sys; print\\(\\[d for d in os\\.listdir\\(sys\\.path\\[1\\]\\) if 'pyinstaller' in d\\.lower\\(\\)\\]\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& C:\\\\Projects\\\\epycon\\\\venv\\\\Scripts\\\\python\\.exe -m pip install --force-reinstall pyinstaller$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^gh run view 2139155354 --repo flyskyman/epycon-webui --log$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git -C c:\\\\Projects\\\\epycon add \\.github\\\\workflows\\\\windows-build-release\\.yml ; git -C c:\\\\Projects\\\\epycon commit -m \"ci: fix release upload in Windows build workflow \\(create-release \\+ upload-release-asset\\)\" ; git -C c:\\\\Projects\\\\epycon push origin master$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^gh run rerun 21391546621 --repo flyskyman/epycon-webui$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^gh run list --repo flyskyman/epycon-webui --workflow windows-build-release\\.yml --limit 5 --json workflowName,headBranch,event,status,createdAt,number,url$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
-}
 }

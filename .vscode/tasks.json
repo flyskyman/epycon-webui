@@ -1,39 +1,25 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "运行 Epycon GUI",
-			"type": "shell",
-			"command": "python",
-			"args": [
-				"app_gui.py"
-			],
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			},
-			"presentation": {
-				"echo": true,
-				"reveal": "always",
-				"focus": false,
-				"panel": "shared"
-			},
-			"isBackground": true,
-			"problemMatcher": []
-		},
-		{
-			"label": "Run Coverage Tests",
-			"type": "shell",
-			"command": "python",
-			"args": [
-				"-m",
-				"pytest",
-				"--cov=epycon",
-				"--cov-report=html"
-			],
-			"isBackground": false,
-			"problemMatcher": [],
-			"group": "test"
-		}
-	]
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "运行 Epycon GUI",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "app_gui.py"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "isBackground": true,
+            "problemMatcher": []
+        }
+    ]
 }

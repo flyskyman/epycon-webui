@@ -6,7 +6,7 @@ from epycon.core._typing import (
 
 def _validate_int(
     name: str,
-    value: Union[int, float, None],
+    value: Union[int, float],
     min_value: int = 0,
     mxn_value: Union[int, None] = None,
     ) -> Union[int, None]:
@@ -52,7 +52,7 @@ def _validate_int(
 
 def _validate_str(
     name: str,
-    value: Union[str, None],
+    value: str,
     valid_set: set,
     ) -> Union[str, None]:
     """Checks whether the parameter belongs to a set of valid parameters.
@@ -86,26 +86,14 @@ def _validate_str(
 def _validate_version(
     version: Union[str, None],
 ) -> str:
-    # 完整版本列表 (包含所有子版本)
-    valid_x32 = {'4.1'}
-    valid_x64 = {'4.2', '4.3', '4.3.2'}
+    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3', '4.3.2'} 
 
     if version is None:
         return 'x64'
     
-    # 检查是否是完整版本号 (如 4.3.2)
     if version in valid_x32:
-        return 'x32'
-    elif version in valid_x64:
-        return 'x64'
-    
-    # 尝试规范化为 major.minor (例如 4.3.2 -> 4.3)
-    parts = version.split('.')
-    normalized = '.'.join(parts[:2]) if len(parts) >= 2 else version
-    
-    if normalized in valid_x32:
         return 'x32'    
-    elif normalized in valid_x64:
+    elif version in valid_x64:
         return 'x64'
     else:
         raise ValueError(f'Invalid parameter `version`: {version}. Expected one of {valid_x32 | valid_x64}')

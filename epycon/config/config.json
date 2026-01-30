@@ -10,8 +10,7 @@
     "leads": "original",
     "data_files": [],
     "channels": [],
-    "custom_channels": {},
-    "merge_logs": false
+    "custom_channels": {}
   },
   "entries": {
     "convert": true,
