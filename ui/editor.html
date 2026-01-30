@@ -205,6 +205,15 @@
                         </div>
 
                         <div class="input-group">
+                            <label class="input-label">合并日志 (Merge)</label>
+                            <div class="flex items-center h-[38px] mt-1">
+                                <input type="checkbox" v-model="config.data.merge_logs" id="merge_logs"
+                                    class="h-5 w-5 text-indigo-600 border-gray-300 rounded">
+                                <label for="merge_logs" class="ml-2 text-sm text-gray-700">合并分段文件 (00000xxx.log)</label>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
                             <label class="input-label">导联处理 (Leads)</label>
                             <select v-model="config.data.leads" class="input-field">
                                 <option value="original">原始单极 (Original)</option>
@@ -337,7 +346,7 @@
                 // 初始化配置 (V2.0 更新默认值)
                 const defaultConfig = {
                     paths: { input_folder: "", output_folder: "", studies: [] },
-                    data: { output_format: "h5", pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {} },
+                    data: { output_format: "h5", merge_logs: true, pin_entries: true, leads: "computed", data_files: [], channels: [], custom_channels: {} },
                     entries: { convert: true, output_format: "sel", summary_csv: true, filter_annotation_type: [] },
                     global_settings: { workmate_version: "4.3.2", pseudonymize: false, processing: { chunk_size: 1024000 }, credentials: { author: "", device: "Abbott WorkMate 4.3.2", owner: "" } }
                 };
@@ -349,6 +358,29 @@
                 const logs = ref("");
                 const statusMessage = ref("");
                 const lastStatus = ref("");
+
+                // --- 路径记忆功能 (Persistence) ---
+                const savePrefs = async () => {
+                    try {
+                        await fetch('/api/save-prefs', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paths: config.value.paths })
+                        });
+                    } catch (e) { console.error("Saving prefs failed", e); }
+                };
+
+                const loadPrefs = async () => {
+                    try {
+                        const res = await fetch('/api/load-prefs');
+                        const data = await res.json();
+                        if (data.paths) {
+                            if (data.paths.input_folder) config.value.paths.input_folder = data.paths.input_folder;
+                            if (data.paths.output_folder) config.value.paths.output_folder = data.paths.output_folder;
+                        }
+                    } catch (e) { console.error("Loading prefs failed", e); }
+                };
+                loadPrefs();
 
                 // 计算 JSON 字符串 (替换了之前的 YAML)
                 const jsonOutput = computed(() => {
@@ -380,6 +412,7 @@
                         if (data.path) {
                             if (target === 'input') config.value.paths.input_folder = data.path;
                             if (target === 'output') config.value.paths.output_folder = data.path;
+                            savePrefs();
                         }
                     } catch (e) {
                         alert("无法调用选择框，请确认后端程序 (app_gui.py) 正在运行。");
@@ -430,6 +463,7 @@
                         alert("请先设置输入和输出文件夹！"); return;
                     }
                     isRunning.value = true;
+                    savePrefs();
                     taskProgress.value = 0;
                     logs.value = "> 正在提交加速任务...\n";
                     statusMessage.value = "任务已提交...";

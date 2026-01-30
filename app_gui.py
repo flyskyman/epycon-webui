@@ -122,7 +122,7 @@ def check_single_instance():
         print(f"单实例检查失败: {e}")
         return True  # 出错时允许继续运行
 
-def check_port_available(port=5000):
+def check_port_available(port=5050):
     """检查端口是否可用"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -132,7 +132,7 @@ def check_port_available(port=5000):
     except OSError:
         return False
 
-def kill_port_occupier(port=5000):
+def kill_port_occupier(port=5050):
     """
     尝试终止占用端口的进程。
     返回: (bool, str) -> (是否成功/跳过, 占用者名称)
@@ -401,19 +401,15 @@ def is_semantic_garbage(text):
 def clean_entries_content(entries):
     cleaned_list = []
     
-    # 系统底层数据组黑名单
-    GROUP_BLACKLIST = {
-        'SYS', 'SYSTEM', 'DEBUG', 'DBG', 
-        'UNK', 'UNKNOWN', 'IDK', '0',
-        'ERROR', 'ERR', 'WARN', 
-        'DATA', 'BLOB', 'ALARM'
-    }
+    # [RELAXED] 仅过滤核心不可见组 (与前端一致: 5=HIDDEN, 8=UNK)
+    # 之前过滤了 SYS/WARN/ERROR 等，导致数据缺失
+    GID_BLACKLIST = {'5', '8'} 
     
     for e in entries:
         raw_msg = str(e.message)
         raw_grp = str(e.group)
 
-        # 1. [物理层] Null 截断 (模拟 C 字符串)
+        # 1. Null 截断
         if '\x00' in raw_msg: raw_msg = raw_msg.split('\x00')[0]
         if '\x00' in raw_grp: raw_grp = raw_grp.split('\x00')[0]
 
@@ -422,32 +418,15 @@ def clean_entries_content(entries):
 
         # 2. 基础非空校验
         if not raw_msg: continue
-        if raw_grp.upper() in GROUP_BLACKLIST: continue
-
-        # 3. [物理层] Strict ASCII 检测 (V68.0 核心)
-        # 英文软件不应包含任何 > 127 的字节
-        try:
-            raw_msg.encode('ascii')
-            raw_grp.encode('ascii')
-        except UnicodeEncodeError:
-            # 包含乱码字节 -> 丢弃
-            continue
-
-        # 4. [物理层] 控制符检测
-        # 过滤 0-31 的控制符 (保留 Tab, LF, CR)
-        is_clean_ascii = True
-        for char in raw_msg:
-            code = ord(char)
-            if code < 32 and code not in (9, 10, 13):
-                is_clean_ascii = False
-                break
-        if not is_clean_ascii: continue
-
-        # 5. [逻辑层] 语义信噪比检测 (V67.7 核心回归)
-        # 过滤掉 "((m(*", "\;8\;B1", "#6#6" 这种由合法 ASCII 组成的乱码
-        if is_semantic_garbage(raw_msg):
-            continue
-
+        
+        if raw_grp in ('UNK', 'HIDDEN'): continue
+        
+        # 3. [STRICT] 字符编码清洗 (严格匹配前端逻辑)
+        # 前端 JS: rawText.replace(/[^\x20-\x7E\t]/g, '').trim()
+        # 这意味着只保留 ASCII 可打印字符 (32-126) 和 Tab (9)
+        # 所有 Latin-1 字符 (如 °, µ) 都会被丢弃，以确保与网页查看器一致
+        raw_msg = ''.join(c for c in raw_msg if 32 <= ord(c) <= 126 or ord(c) == 9)
+        
         # 6. 组装
         new_e = MutableEntry(
             timestamp=to_unix_seconds(e.timestamp),
@@ -457,6 +436,8 @@ def clean_entries_content(entries):
         )
         cleaned_list.append(new_e)
 
+    # [ORDER] 恢复按时间戳排序，以匹配网页查看器的默认行为 (Time Sort)
+    # 文件本身可能有物理乱序 (如 NOTE 在末尾但时间较早)，必须排序才能与网页一致
     cleaned_list.sort(key=lambda x: x.timestamp)
     return cleaned_list
 
@@ -479,10 +460,10 @@ def get_safe_n_channels(header):
         return 0
     except Exception: return 0
 
-def export_global_csv(entries, output_folder, study_id):
+def export_global_csv(entries, target_dir, study_id_for_name):
     try:
-        filename = f"{study_id}_All_Entries_Normalized.csv"
-        path = os.path.join(output_folder, study_id, filename)
+        filename = f"{study_id_for_name}_All_Entries_Normalized.csv"
+        path = os.path.join(target_dir, filename)
         with open(path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['UnixSeconds', 'Group', 'Message'])
@@ -568,7 +549,13 @@ def execute_epycon_conversion(cfg):
                 logs_in_study = sorted(list(iglob(os.path.join(study_path, LOG_PATTERN))))
                 if not logs_in_study: continue
 
-                try: os.makedirs(os.path.join(output_folder, study_id), exist_ok=True)
+                # [UX] 智能判断：如果输出目录名已经等于 study_id，则不再创建子目录
+                if os.path.basename(os.path.normpath(output_folder)) == study_id:
+                    study_out_dir = output_folder
+                else:
+                    study_out_dir = os.path.join(output_folder, study_id)
+
+                try: os.makedirs(study_out_dir, exist_ok=True)
                 except Exception: pass
                 
                 # --- [Step 0] 读取 MASTER 文件并处理匿名化 ---
@@ -609,7 +596,10 @@ def execute_epycon_conversion(cfg):
                                 except Exception: pass
                                 
                             conv_logger.info(f"✅ 归一化标注: {len(all_entries_norm)} 条 (ASCII+SNR双重净化)")
-                            export_global_csv(all_entries_norm, output_folder, study_id)
+                            
+                            # [FIX] 仅当用户启用 export 时才保留这份中间文件
+                            if cfg["entries"]["convert"]:
+                                export_global_csv(all_entries_norm, study_out_dir, study_id)
                         except Exception as e:
                             import traceback
                             conv_logger.warning(f"⚠️ 读取失败: {e}\n{traceback.format_exc()}")
@@ -617,9 +607,10 @@ def execute_epycon_conversion(cfg):
                         conv_logger.info(f"ℹ️ 标注文件不存在: {epath}")
                 
                 # --- [Step 1.5] 导出汇总 entries CSV (summary_csv) ---
-                if cfg["entries"].get("summary_csv", False) and all_entries_norm:
+                # [FIX] 仅当 convert=True 时才导出 summary (与 UI 逻辑一致)
+                if cfg["entries"]["convert"] and cfg["entries"].get("summary_csv", False) and all_entries_norm:
                     try:
-                        summary_path = os.path.join(output_folder, study_id, "entries_summary.csv")
+                        summary_path = os.path.join(study_out_dir, "entries_summary.csv")
                         entryplanter = EntryPlanter(all_entries_norm)
                         filter_groups = cfg["entries"].get("filter_annotation_type", [])
                         criteria = {
@@ -727,9 +718,9 @@ def execute_epycon_conversion(cfg):
                         
                         # 合并输出文件名
                         if len(channel_groups) > 1:
-                            merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged_{group_channel_count}ch.h5")
+                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged_{group_channel_count}ch.h5")
                         else:
-                            merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged.h5")
+                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged.h5")
                         
                         is_first_file = True
                         total_samples = 0
@@ -886,12 +877,19 @@ def execute_epycon_conversion(cfg):
                                 filter_groups = cfg["entries"]["filter_annotation_type"]
                                 criteria = {"groups": filter_groups} if filter_groups else {}
                                 
-                                if file_fmt == "csv":
-                                    entryplanter.savecsv(entry_out_path, criteria=criteria, ref_timestamp=0)
-                                elif file_fmt == "sel":
-                                    entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
-                                
-                                conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
+                                # [FIX] 仅当用户启用 export 时才生成文件
+                                if cfg["entries"]["convert"]:
+                                    # Fix: Get file_fmt from config
+                                    file_fmt = cfg["entries"]["output_format"]
+                                    entry_out_name = f"{datalog_id}.{file_fmt}"
+                                    entry_out_path = os.path.join(study_out_dir, entry_out_name)
+                                    
+                                    if file_fmt == "csv":
+                                        entryplanter.savecsv(entry_out_path, criteria=criteria, ref_timestamp=0)
+                                    elif file_fmt == "sel":
+                                        entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
+                                    
+                                    conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
 
                         except Exception as e:
                             conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
@@ -910,6 +908,45 @@ def execute_epycon_conversion(cfg):
         res_logs = mem_handler.logs
         conv_logger.removeHandler(mem_handler)
         return False, res_logs
+
+# --- Preferences API (Persistence) ---
+PREFS_FILE = os.path.join(os.path.expanduser("~"), ".epycon_prefs.json")
+
+@app.route('/api/save-prefs', methods=['POST'])
+def save_prefs():
+    """保存用户偏好设置 (主要是路径)"""
+    try:
+        data = request.json
+        curr = {}
+        if os.path.exists(PREFS_FILE):
+            try:
+                with open(PREFS_FILE, 'r', encoding='utf-8') as f:
+                    curr = json.load(f)
+            except: pass
+        
+        # Merge 'paths'
+        if 'paths' in data:
+            if 'paths' not in curr: curr['paths'] = {}
+            curr['paths'].update(data['paths'])
+            
+        with open(PREFS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(curr, f, indent=2, ensure_ascii=False)
+            
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/load-prefs', methods=['GET'])
+def load_prefs():
+    """加载用户偏好设置"""
+    if not os.path.exists(PREFS_FILE):
+        return jsonify({})
+    try:
+        with open(PREFS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/')
 def home():
@@ -1272,7 +1309,7 @@ def api_restart():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def open_browser(port=5000):
+def open_browser(port=5050):
     try:
         url = f"http://127.0.0.1:{port}/"
         logging.getLogger(__name__).info(f"Opening browser to {url}")
@@ -1307,9 +1344,9 @@ if __name__ == '__main__':
         # 识别是否是 Flask Reloader 的子工作进程
         is_worker = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
         
-        # 尝试使用环境变量中的端口（通常是重启时传递），否则默认 5000
+        # 尝试使用环境变量中的端口（通常是重启时传递），否则默认 5050
         env_port = os.environ.get('EPYCON_ACTUAL_PORT')
-        preferred_port = int(env_port) if env_port else 5000
+        preferred_port = int(env_port) if env_port else 5050
         port = preferred_port
         
         # 仅在非 Worker 进程中进行端口探测和冲突清理
@@ -1326,14 +1363,14 @@ if __name__ == '__main__':
                     print(f"{msg}，正在搜索可用端口...")
                     
                     found = False
-                    for p in range(5000, 5051): # 从 5000 开始重新搜索
+                    for p in range(5050, 5100): # 从 5050 开始重新搜索
                         if check_port_available(p):
                             port = p
                             found = True
                             print(f"✅ 已选择可用端口: {port}")
                             break
                     if not found:
-                        print("❌ 未找到 5000-5050 范围内的可用端口。")
+                        print("❌ 未找到 5050-5100 范围内的可用端口。")
                         input("\n按回车键退出...")
                         sys.exit(1)
         
