@@ -89,7 +89,7 @@ def main():
     from datetime import datetime
 
     def _get_channel_mappings(header, cfg):
-        \"\"\"Wrapper for shared helper to maintain backward compatibility.\"\"\"
+        """Wrapper for shared helper to maintain backward compatibility."""
         from epycon.core.helpers import get_channel_mappings
         return get_channel_mappings(header, cfg)
 
