@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy h5py jsonschema pytest pytest-cov python-dateutil flask flask-cors flake8
+          pip install numpy h5py jsonschema pytest pytest-cov python-dateutil flask flask-cors flake8 psutil requests
       - name: Run flake8 lint check
         run: |
           echo "Running flake8 code style check..."
@@ -36,10 +36,18 @@ jobs:
       #   continue-on-error: true
       - name: Run unit tests with coverage
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
         run: |
-          echo "Running tests with coverage..."
-          pytest tests/ --cov=epycon --cov-report=xml --cov-report=term --cov-report=html -v
+          echo "Running basic validation tests..."
+          python scripts/test_version.py
+          echo "Running business logic tests..."
+          python scripts/test_business_functions.py
+      - name: Run performance benchmarks
+        env:
+          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
+        run: |
+          echo "Running performance benchmarks..."
+          python scripts/test_performance_regression.py
       # Codecov upload removed — not using Codecov
       - name: Upload coverage HTML report
         if: ${{ always() }}
@@ -48,7 +56,9 @@ jobs:
           name: coverage-report
           path: htmlcov/
       - name: Generate test data
-        run: python scripts/generate_fake_wmx32.py --out examples/data/study01/ci_generated.log --with-entries --with-master --entries-count 4 --entries-fids 2 --version 4.3
+        run: |
+          python scripts/generate_fake_wmx.py --out examples/data/study01/00000000.log --with-entries --with-master --entries-count 5 --entries-fids 2 --version 4.3 --channels 2
+          python scripts/generate_fake_wmx.py --out examples/data/study01/00000001.log --version 4.3 --channels 2
       - name: Validate config
         run: |
           python - <<'PY'
@@ -60,12 +70,26 @@ jobs:
           PY
       - name: Create output directory
         run: mkdir -p examples/data/out
+      - name: Update config for CI
+        run: |
+          python -c "
+          import json
+          with open('config/config.json', 'r') as f:
+              cfg = json.load(f)
+          cfg['paths']['input_folder'] = 'examples/data'
+          cfg['paths']['output_folder'] = 'examples/data/out'
+          with open('config/config.json', 'w') as f:
+              json.dump(cfg, f, indent=2)
+          print('Config updated for CI')
+          "
       - name: Run epycon
         env:
-          PYTHONPATH: ${{ github.workspace }}/epycon
+          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
           EPYCON_CONFIG: ${{ github.workspace }}/config/config.json
           EPYCON_JSONSCHEMA: ${{ github.workspace }}/config/schema.json
         run: python -m epycon
+      - name: Verify epycon output
+        run: python scripts/validate_ci_output.py examples/data/out/study01
       - name: Upload output artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

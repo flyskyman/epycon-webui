@@ -3,4 +3,4 @@ flask-cors
 numpy
 h5py
 jsonschema
-psutil
+psutilrequests

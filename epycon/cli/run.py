@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 
 # Schema will be loaded inside main block
 
-if __name__ == '__main__':
+
+
+def main():
     config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
     jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
     
@@ -57,7 +59,7 @@ if __name__ == '__main__':
     parser.add_argument("-o", "--output_folder", type=str,)
     parser.add_argument("-s", "--studies", type=list,)
 
-    parser.add_argument("-fmt", "--output_format", type=str, choices=['csv', 'hdf'])
+    parser.add_argument("-fmt", "--output_format", type=str)
     
     parser.add_argument("-e", "--entries", type=bool,)
     parser.add_argument("-efmt", "--entries_format", type=str, choices=['csv', 'sel'])
@@ -67,10 +69,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Validate custom config path if provided
-    if args.config_file:
+    if hasattr(args, 'config_file') and args.config_file:
         _validate_path(args.config_file)
 
-    config_path = args.config_path if args.config_path else config_path
+    config_path = args.config_path if hasattr(args, 'config_path') and args.config_path else config_path
 
     # Load JSON configuration if provided
     try:
@@ -79,10 +81,10 @@ if __name__ == '__main__':
     except FileNotFoundError:
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    config = {**cfg, **vars(parser.parse_args())}
+    config = {**cfg, **vars(args)}
 
     # Override arguments from command line interface if provided
-    overrides = {"arg1": args.arg1, "arg2": args.arg2}
+    overrides = {"arg1": getattr(args, 'arg1', None), "arg2": getattr(args, 'arg2', None)}
     for arg, value in overrides.items():
         if value is not None:
             config[arg] = value
@@ -96,7 +98,6 @@ if __name__ == '__main__':
 
     import time
     from glob import glob
-    from epycon.iou.planters import HDFPlantercinc
     
     # 可选的 scipy 导入（仅用于加速度数据处理）
     try:
@@ -111,9 +112,6 @@ if __name__ == '__main__':
         HAS_SCIPY = False
         filtfilt = None  # type: ignore
         b, a = None, None  # type: ignore
-    
-    # path = r'C:\Users\jakub\Research\Data\WorkMate'
-    # out_path = r'C:\Users\jakub\Research\Data\WorkMate_export'
     
     path = '/backup/data/VuVeL/WorkMate'
     out_path = '/backup/data/VuVeL/WorkMate_export'
@@ -148,8 +146,7 @@ if __name__ == '__main__':
         except FileExistsError:            
             pass
 
-        entryparser = EpParser(folder)
-        marks = entryparser.read_entries()
+        marks = _readentries(folder)
         t_marks = time.time() - start
 
         
@@ -164,44 +161,27 @@ if __name__ == '__main__':
             header = _readheader(logfile)            
             data = cast(np.ndarray, _readdata(logfile, version='4.2', mount=False))
                         
-            # planter = HDFPlanter(f_path=r'C:\Users\jakub\Research\Codes\Python\epycon\data\Pigs_export\27-15\00000000.h5')
-            #
-            #
             # ---------------- read header ---------------
-            #
-            # 
-            if file_id in marks:        
-                temp = [(item.group, _samplefromtimestamp([item.timestamp, header.timestamp], 2000), item.message) for item in marks[file_id].content]
+            if file_id in [entry.fid for entry in marks]:        
+                entries_for_file = [entry for entry in marks if entry.fid == file_id]
+                temp = [(item.group, int(cast(float, difftimestamp([int(item.timestamp), int(header.timestamp)])) * 2000), item.message) for item in entries_for_file]
                 group, start_sample, info = list(zip(*temp))        
             else:
-                group = ()
-                start_sample = ()
-                info = ()
+                group, start_sample, info = list(), list(), list()
             
             t_header = time.time() - start
             
 
-            #
-            #
             # ---------------- create hdf with no compression ---------------
-            #
-            # 
             start = time.time()
             planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '.h5'))
             with planter:
-                planter.create(
-                    data,
-                    # chnames=[ch.name for ch in header.mount],
-                    chnames=None,
-                    sampling_freq=header.amp.sampling_freq,
-                    compression=None,
-                )
+                planter.write(data)
 
-                planter.addmark(
-                    startsample=start_sample,
-                    endsample=start_sample,
-                    info=info,
-                    group=group,
+                planter.add_marks(
+                    positions=[start_sample],
+                    groups=[group],
+                    messages=[info],
                 )
 
             t_h5 = time.time() - start            
@@ -214,28 +194,16 @@ if __name__ == '__main__':
 
 
 
-            #
-            #
             # ---------------- create hdf with gzip compression ---------------
-            #
-            # 
-
             start = time.time()
             planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '_gzip.h5'))
             with planter:
-                planter.create(
-                    data,
-                    # chnames=[ch.name for ch in header.mount],
-                    chnames=None,
-                    sampling_freq=header.amp.sampling_freq,
-                    compression=None,
-                )
+                planter.write(data)
 
-                planter.addmark(
-                    startsample=start_sample,
-                    endsample=start_sample,
-                    info=info,
-                    group=group,
+                planter.add_marks(
+                    positions=[start_sample],
+                    groups=[group],
+                    messages=[info],
                 )
 
 
@@ -247,11 +215,7 @@ if __name__ == '__main__':
             except OSError:
                 pass
 
-            #
-            #
             # ---------------- create csv  ---------------
-            #
-            #          
             csv_data = np.transpose(data).astype(np.int32)
             start = time.time()
             _tocsv(                
@@ -267,8 +231,6 @@ if __name__ == '__main__':
             except OSError:
                 pass
                 
-            # Aggregate stats
-            # Aggregate stats
             # Aggregate stats
             stat['size_orig'].append(size_orig)
             stat['size_h5'].append(size_h5)
@@ -288,11 +250,9 @@ if __name__ == '__main__':
 
 
             # Analyze accelerometry
-            # Analyze accelerometry
-            # Analyze accelerometry
-            # Analyze accelerometry
-            if file_id in marks:
-                cuk = [(entry.message, _samplefromtimestamp([entry.timestamp, header.timestamp], 2000)) for entry in marks[file_id].content if entry.message.startswith('IRE Cuk')]
+            if file_id in [entry.fid for entry in marks]:
+                entries_for_file = [entry for entry in marks if entry.fid == file_id]
+                cuk = [(entry.message, int(difftimestamp([entry.timestamp, header.timestamp]) * 2000)) for entry in entries_for_file if entry.message.startswith('IRE Cuk')]
             else:
                 continue
 
@@ -333,3 +293,7 @@ if __name__ == '__main__':
     # with open(os.path.join(r'C:\Users\jakub\Research\Data', 'ire_res.json'), "w") as outfile:
     #     json.dump(res, outfile)
     print()
+
+
+if __name__ == '__main__':
+    main()

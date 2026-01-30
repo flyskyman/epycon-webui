@@ -19,14 +19,26 @@
     <div class="max-w-6xl mx-auto px-6 py-12">
         <!-- Header -->
         <header class="text-center mb-16">
-            <div
-                class="inline-flex items-center space-x-2 bg-blue-50 px-4 py-1.5 rounded-full mb-6 border border-blue-100">
-                <span class="relative flex h-2 w-2">
-                    <span
-                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-                <span class="text-xs font-semibold text-blue-700 tracking-wide uppercase">服务运行中</span>
+            <div class="flex items-center justify-center space-x-4 mb-6">
+                <div
+                    class="inline-flex items-center space-x-2 bg-blue-50 px-4 py-1.5 rounded-full border border-blue-100">
+                    <span class="relative flex h-2 w-2">
+                        <span
+                            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    <span class="text-xs font-semibold text-blue-700 tracking-wide uppercase">服务运行中</span>
+                </div>
+                <button onclick="restartService()"
+                    class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-semibold border border-amber-200 rounded-full transition-colors"
+                    title="重启服务 (如遇错误可尝试)">
+                    🔄 重启
+                </button>
+                <button onclick="exitProgram()"
+                    class="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold border border-red-200 rounded-full transition-colors"
+                    title="优雅关闭程序">
+                    🚪 退出
+                </button>
             </div>
             <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 tracking-tight mb-4">
                 WorkMate <span
@@ -67,7 +79,7 @@
                 <p class="text-slate-600 mb-8 leading-relaxed">
                     深度解析 WorkMate 运行日志。提供强大的模式搜索、时间戳对齐以及导出清洗后的标注信息。
                 </p>
-                <a href="WorkMate Log Parser.html"
+                <a href="WorkMate_Log_Parser.html"
                     class="flex items-center justify-center w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-blue-100">
                     打开解析器
                 </a>
@@ -98,6 +110,67 @@
             </p>
         </footer>
     </div>
-</body>
 
-</html>
+    <script>
+        async function restartService() {
+            if (!confirm('确定要重启服务吗？重启过程中工作会中断。')) {
+                return;
+            }
+
+            const btn = event.target.closest('button');
+            btn.disabled = true;
+            btn.textContent = '⏳ 重启中...';
+
+            try {
+                const response = await fetch('/api/restart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    // 等待服务重启
+                    await new Promise(r => setTimeout(r, 2000));
+                    alert('✅ 服务已重启。页面将自动刷新...');
+                    location.reload();
+                } else {
+                    alert('❌ 重启失败: ' + response.statusText);
+                    btn.disabled = false;
+                    btn.textContent = '🔄 重启';
+                }
+            } catch (error) {
+                alert('❌ 无法连接到服务: ' + error.message);
+                btn.disabled = false;
+                btn.textContent = '🔄 重启';
+            }
+        }
+
+        async function exitProgram() {
+            if (!confirm('确定要退出程序吗？\n\n所有未保存的工作将会丢失。')) {
+                return;
+            }
+
+            const btn = event.target.closest('button');
+            btn.disabled = true;
+            btn.textContent = '⏳ 关闭中...';
+
+            try {
+                const response = await fetch('/api/shutdown', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    alert('✅ 程序已关闭。您可以关闭浏览器了。');
+                    // 不刷新，让用户自己决定是否关闭浏览器
+                } else {
+                    alert('❌ 关闭失败: ' + response.statusText);
+                    btn.disabled = false;
+                    btn.textContent = '🚪 退出';
+                }
+            } catch (error) {
+                alert('❌ 无法连接到服务: ' + error.message);
+                btn.disabled = false;
+                btn.textContent = '🚪 退出';
+            }
+        }
+    </script>

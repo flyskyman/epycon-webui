@@ -550,7 +550,7 @@
             <!-- Scan / Import Zone -->
             <div class="drop-zone" id="dashDropZone">
                 <input type="file" id="fileInput" accept=".log" multiple style="display:none">
-                <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+                <input type="file" id="folderInput" webkitdirectory style="display:none">
 
                 <div style="display:flex; gap:10px; align-items:center;">
                     <button id="btnSingle" class="btn-action" style="height:36px; padding:0 15px; font-size:14px;">📄
@@ -646,8 +646,8 @@
         </div>
 
         <script>
-            const GROUP_MAP = { 1: 'PROTOCOL', 2: 'EVENT', 3: 'NOTE', 4: 'DEBUG', 5: 'HIDDEN_NOTE', 6: 'PACE', 17: 'RATE' };
-            const DEFAULT_HIDDEN = new Set(['SYS', 'DEBUG', 'UNK', 'IDK', 'ERROR', 'UNKNOWN', 'HIDDEN_NOTE']);
+            const GROUP_MAP = { 1: 'PROTOCOL', 2: 'EVENT', 3: 'NOTE', 4: 'IDK', 5: 'HIDDEN_NOTE', 6: 'PACE', 17: 'RATE' };
+            const DEFAULT_HIDDEN = new Set(['SYS', 'IDK', 'UNK', 'ERROR', 'UNKNOWN', 'HIDDEN_NOTE', 'DEBUG']);
             const PAGE_SIZE = 100;
 
             // --- State Management ---
@@ -770,9 +770,37 @@
                 const container = document.getElementById('toast-container');
                 const toast = document.createElement('div');
                 toast.className = 'toast';
-                toast.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+
+                const iconSpan = document.createElement('span');
+                iconSpan.textContent = icon;
+                const msgSpan = document.createElement('span');
+                msgSpan.textContent = msg;
+
+                toast.appendChild(iconSpan);
+                toast.appendChild(msgSpan);
                 container.appendChild(toast);
                 setTimeout(() => toast.remove(), 3100);
+            }
+
+            // --- HTML Escape Helper ---
+            function h(str) {
+                if (!str) return "";
+                return str.replace(/[&<>"']/g, function (m) {
+                    return {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#39;'
+                    }[m];
+                });
+            }
+
+            // --- Cross-Platform Path Normalizer ---
+            function normalizePath(p) {
+                if (!p) return "";
+                // Convert backslashes to forward slashes (Windows compatibility)
+                return p.replace(/\\/g, '/');
             }
 
             // --- Core: Scanning Logic (Legacy V3 recursive flattening — kept for compatibility) ---
@@ -790,7 +818,7 @@
                             try {
                                 let f = await new Promise((r, j) => entry.file(r, j));
                                 allFiles.push({ file: f, path: pathSoFar + f.name });
-                            } catch (e) { log(`Read Key Error: ${e.message}`); }
+                            } catch (e) { log(`Read Error: ${e.message}`); }
                         } else if (entry.isDirectory) {
                             let reader = entry.createReader();
                             let entries = [];
@@ -810,20 +838,17 @@
                     // 1. Unpack Inputs
                     for (let i = 0; i < items.length; i++) {
                         let item = items[i];
-                        // A. Webkit Entry
+                        // Process DataTransferItem (Drag & Drop)
                         if (item.webkitGetAsEntry) {
                             let entry = item.webkitGetAsEntry();
                             if (entry) await traverseEntry(entry, "");
                         }
-                        // B. Raw File (Input Select)
-                        else if (item instanceof File) {
-                            let p = item.webkitRelativePath || item.name;
-                            allFiles.push({ file: item, path: p });
-                        }
-                        // C. Fallback
-                        else if (item.kind === 'file') {
-                            let f = item.getAsFile();
-                            if (f) allFiles.push({ file: f, path: f.name });
+                        // Process File (Button Select)
+                        else {
+                            let f = (item instanceof File) ? item : (item.getAsFile ? item.getAsFile() : null);
+                            if (f) {
+                                allFiles.push({ file: f, path: f.webkitRelativePath || f.name });
+                            }
                         }
                     }
 
@@ -840,7 +865,7 @@
                     let fullPath = obj.path;
 
                     // Case 1: Single Log
-                    if (name.endsWith('.log') && fullPath === name) {
+                    if (name.endsWith('.log') && normalizePath(fullPath).toLowerCase() === name) {
                         let key = "Single_" + name + "_" + Math.random();
                         fileMap.set(key, { entries: obj.file, path: "SingleFile" });
                         continue;
@@ -848,12 +873,11 @@
 
                     // Case 2: Folder Structure
                     if (name === 'entries.log' || name === 'master') {
-                        // "A/B/entries.log" -> "A/B"
-                        let folderPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
-                        if (!folderPath) folderPath = "Root"; // Should not happen often if from folder
+                        let normPath = normalizePath(fullPath);
+                        let lastSlash = normPath.lastIndexOf('/');
+                        let folderPath = (lastSlash === -1) ? "Root" : normPath.substring(0, lastSlash);
 
                         if (!fileMap.has(folderPath)) fileMap.set(folderPath, {});
-
                         let group = fileMap.get(folderPath);
                         group.path = folderPath;
                         if (name === 'master') group.master = obj.file;
@@ -886,6 +910,12 @@
                 // Show detailed Toast summary
                 if (appData.studies.length > 0) {
                     showToast(`完成！解析到 ${appData.studies.length} 个患者日志，共处理 ${filesUsedCount} 个有效文件。`, "✅");
+
+                    // Tip for missing MASTER
+                    let missingMaster = Array.from(fileMap.values()).some(g => g.entries && !g.master);
+                    if (missingMaster) {
+                        log(`💡 提示：部分日志未识别到 MASTER 文件。若需显示患者姓名，请尝试【扫描文件夹】或同时选中 entries.log 与 MASTER 文件导入。`);
+                    }
                 }
 
                 // Feature: Show Search ONLY after import
@@ -895,13 +925,24 @@
                 }
 
                 if (appData.studies.length === 0) {
-                    alert("没有找到符合条件的日志文件。\nSee Debug Log at bottom.");
+                    log("❌ No valid logs found. Ignored files list:");
+                    allFiles.forEach(f => log(`  - [Ignored] Name: "${f.file.name}", Path: "${f.path}", Size: ${f.file.size}B`));
+
+                    let logCount = 0, entCount = 0;
+                    for (let obj of allFiles) {
+                        let n = obj.file.name.toLowerCase();
+                        if (n.endsWith('.log')) logCount++;
+                        if (n === 'entries.log') entCount++;
+                    }
+                    log(`Stats: matches=.log(${logCount}), entries.log=${entCount}`);
+                    alert("没有找到符合条件的日志文件。\n提示：请确保选择的文件夹中包含 'entries.log'。\n查看底部“诊断日志”以获取具体文件列表。");
                 }
             }
 
             async function handleFiles(fileList) {
                 if (!fileList) return;
-                // Direct pass for Files, scanItems handles both Entries and Files
+                // Important: fileList (from <input webkitdirectory>) already contains flattened recursive files.
+                // We pass them directly to scanItems.
                 scanItems(Array.from(fileList));
             }
 
@@ -967,8 +1008,16 @@
                 const V_x32 = { head: 32, line: 216, tsOff: 10, txtOff: 14, txtLen: 178 };
                 let spec = V_x64;
 
-                if ((fileSize - 36) % 220 === 0) spec = V_x64;
-                else if ((fileSize - 32) % 216 === 0) spec = V_x32;
+                // 容错检测：如果不能整除，尝试匹配余数最小的版本
+                const rem64 = (fileSize - 36) % 220;
+                const rem32 = (fileSize - 32) % 216;
+
+                if (rem64 === 0) spec = V_x64;
+                else if (rem32 === 0) spec = V_x32;
+                else {
+                    log(`⚠️ 文件大小 (${fileSize}) 不标准。尝试根据最接近版本解析。rem64=${rem64}, rem32=${rem32}`);
+                    spec = (rem64 <= rem32) ? V_x64 : V_x32;
+                }
 
                 const decoder = new TextDecoder('iso-8859-1');
 
@@ -976,31 +1025,33 @@
                     if (ptr + spec.line > fileSize) break;
 
                     let row = { ts: 0, timeStr: '', group: 'UNK', msg: '' };
+                    try {
+                        const gid = view.getUint16(ptr, true);
+                        if (gid === 5 || gid === 8) continue; // 过滤 HIDDEN_NOTE (5) 和 UNK (8)
+                        row.group = GROUP_MAP[gid] || `UNK(${gid})`;
+                        let ts = (spec === V_x64) ? Number(view.getBigUint64(ptr + spec.tsOff, true)) : view.getUint32(ptr + spec.tsOff, true) * 1000;
+                        row.ts = ts;
 
-                    // SAFE: Pre-checked boundary (line 976) guarantees read safety. Removed try-catch for V8 optimization.
-                    const gid = view.getUint16(ptr, true);
-                    row.group = GROUP_MAP[gid] || `UNK(${gid})`;
+                        if (ts > 0 && ts < 4102444800000) {
+                            const d = new Date(ts);
+                            row.timeStr = d.toLocaleTimeString('en-GB', { hour12: false });
+                            if (!detectedDate) detectedDate = d.toLocaleDateString('zh-CN');
+                        }
 
-                    let ts = (spec === V_x64) ? Number(view.getBigUint64(ptr + spec.tsOff, true)) : view.getUint32(ptr + spec.tsOff, true) * 1000;
-                    row.ts = ts;
+                        let textBytes = new Uint8Array(buffer, ptr + spec.txtOff, spec.txtLen);
+                        // Truncate at null terminator (mimic Python logic)
+                        const nullIdx = textBytes.indexOf(0);
+                        if (nullIdx >= 0) textBytes = textBytes.subarray(0, nullIdx);
 
-                    if (ts > 0 && ts < 4102444800000) {
-                        const d = new Date(ts);
-                        // Convert to HH:mm:ss (24h)
-                        row.timeStr = d.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' });
-                        if (!detectedDate) detectedDate = d.toLocaleDateString('zh-CN');
-                    }
+                        let rawText = decoder.decode(textBytes);
+                        row.msg = rawText.replace(/[^\x20-\x7E\t]/g, '').trim();
 
-                    const textBytes = new Uint8Array(buffer, ptr + spec.txtOff, spec.txtLen);
-                    // Decode and clean text
-                    let rawText = decoder.decode(textBytes);
-
-                    // Mimic Python: filter non-printable (keep only ASCII printable + tab)
-                    row.msg = rawText.replace(/[^\x20-\x7E\t]/g, '').trim();
-
-                    // OPTIMIZATION: Filter empty messages (matches Python logic)
-                    if (row.msg) {
-                        rows.push(row);
+                        if (row.msg) {
+                            rows.push(row);
+                        }
+                    } catch (err) {
+                        // Skip corrupted line
+                        if (rows.length < 10) log(`⚠️ Line skip at ${ptr}: ${err.message}`);
                     }
                 }
                 return { rows: rows, date: detectedDate };
@@ -1054,39 +1105,48 @@
                     }
                 }
 
-                els.dashBody.innerHTML = list.map((s, i) => {
-                    let matchInfo = "";
-                    let displayCount = s.rows.length;
+                els.dashBody.innerHTML = "";
+                if (list.length === 0) {
+                    els.dashBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px;">无匹配记录</td></tr>`;
+                    return;
+                }
 
-                    // Enhancement: Show match count if filtering by content
+                list.forEach((s, i) => {
+                    let matchInfo = "";
                     if (appData.contentFilter) {
                         let q = appData.contentFilter;
-                        // IMPORTANT: Count ALL matches (including UNK/SYS) to avoid missing data
                         let matchCount = s.rows.filter(r => r.msg.toLowerCase().includes(q)).length;
                         matchInfo = `<div style="font-size:11px; color:#ef4444; font-weight:bold;">包含 ${matchCount} 条匹配</div>`;
                     }
 
-                    return `
-            <tr style="cursor:pointer;" onclick="loadStudyDetail('${s.id}')">
-                <td>${i + 1}</td>
-                <td style="font-weight:600; color:#0f172a;">${s.name}</td>
-                <td style="font-family:monospace;">${s.pid}</td>
-                <td>${s.date}</td>
-                <td>
-                    <span class="badge-count">${displayCount}</span>
-                    ${matchInfo}
-                </td>
-                <td style="color:#64748b; font-size:12px;">${s.path}</td>
-                <td>
-                    <button class="btn-action btn-primary"
-                            style="padding:2px 8px; font-size:12px;"
-                            onclick="event.stopPropagation(); loadStudyDetail('${s.id}');">
-                        查看
-                    </button>
-                </td>
-            </tr>
-        `;
-                }).join('') || `<tr><td colspan="7" style="text-align:center; padding:30px;">无匹配记录</td></tr>`;
+                    const tr = document.createElement("tr");
+                    tr.style.cursor = "pointer";
+                    tr.onclick = () => loadStudyDetail(s.id);
+
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td style="font-weight:600; color:#0f172a;">${h(s.name)}</td>
+                        <td style="font-family:monospace;">${h(s.pid)}</td>
+                        <td>${h(s.date)}</td>
+                        <td>
+                            <span class="badge-count">${s.rows.length}</span>
+                            ${matchInfo}
+                        </td>
+                        <td style="color:#64748b; font-size:12px;">${h(s.path)}</td>
+                        <td>
+                            <button class="btn-action btn-primary" style="padding:2px 8px; font-size:12px;">查看</button>
+                        </td>
+                    `;
+                    // Attach click specifically to button to prevent double trigger if we had bubble issues, 
+                    // but since TR has it, it's fine. We still use h() for text.
+                    const btn = tr.querySelector("button");
+                    btn.onclick = (e) => {
+                        e.stopPropagation();
+                        loadStudyDetail(s.id);
+                    };
+
+                    els.dashBody.appendChild(tr);
+                });
             }
 
             function setDashLoading(isLoading, msg = "") {
@@ -1249,14 +1309,22 @@
                 if (els.pageInfo) els.pageInfo.innerText = `Page ${appData.detailPage} / ${totalPages} (Total: ${appData.detailFilterRows.length})`;
                 if (els.countBadge) els.countBadge.innerText = appData.detailFilterRows.length;
 
-                els.logBody.innerHTML = pageData.map((r, i) => `
-            <tr>
-                <td class="col-idx">${start + i + 1}</td>
-                <td class="col-time">${r.timeStr}</td>
-                <td class="col-group"><span class="tag tag-${r.group}">${r.group}</span></td>
-                <td class="col-msg">${r.msg}</td>
-            </tr>
-        `).join('') || `<tr><td colspan="4" style="text-align:center; padding:30px;">无日志显示</td></tr>`;
+                els.logBody.innerHTML = "";
+                if (pageData.length === 0) {
+                    els.logBody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px;">无日志显示</td></tr>`;
+                    return;
+                }
+
+                pageData.forEach((r, i) => {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td class="col-idx">${start + i + 1}</td>
+                        <td class="col-time">${h(r.timeStr)}</td>
+                        <td class="col-group"><span class="tag tag-${h(r.group)}">${h(r.group)}</span></td>
+                        <td class="col-msg">${h(r.msg)}</td>
+                    `;
+                    els.logBody.appendChild(tr);
+                });
 
                 if (els.btnPagePrev) els.btnPagePrev.disabled = appData.detailPage <= 1;
                 if (els.btnPageNext) els.btnPageNext.disabled = appData.detailPage >= totalPages;

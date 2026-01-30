@@ -41,7 +41,6 @@
     "min": 0.1493064999813214,
     "max": 0.16543499997351319,
     "iterations": 3,
-    "avg_mem_mb": 0,
-    "avg_cpu_percent": 99.9
+    "avg_mem_mb": 0
   }
 }

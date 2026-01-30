@@ -36,10 +36,7 @@ from epycon.core._dataclasses import (
 from epycon.config.byteschema import (
     WMx32LogSchema, WMx32EntriesSchema,
     WMx64LogSchema, WMx64MasterSchema, WMx64EntriesSchema,
-)
-
-from epycon.config.byteschema import (
-    GROUP_MAP, SOURCE_MAP
+    GROUP_MAP, SOURCE_MAP,
 )
 
 
@@ -609,11 +606,11 @@ def _readentries(
         # if re.match('[\x00-\x1f\x7f]+', text):
         #     continue
 
-        mapped_group = GROUP_MAP.get(group, 0)
-        
-        # Filter HIDDEN_NOTE (Type 5) to ensure 1:1 match with original PDF report
-        if mapped_group == 'HIDDEN_NOTE':
+        # [Logic] Filter HIDDEN_NOTE (5) and UNK (8) to match original software
+        if group in (5, 8):
             continue
+
+        mapped_group = GROUP_MAP.get(group, 0)
 
         entries.append(
             Entry(

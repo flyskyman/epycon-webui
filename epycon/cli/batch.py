@@ -17,7 +17,7 @@ def parse_arguments():
     parser.add_argument("-s", "--studies", type=list,)
 
     # Output format of the waveforms
-    parser.add_argument("-fmt", "--output_format", type=str, choices=['csv', 'hdf'])
+    parser.add_argument("-fmt", "--output_format", type=str)
 
     # Output format of the entries/annotations
     parser.add_argument("-e", "--entries", type=bool,)
