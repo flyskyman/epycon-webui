@@ -11,6 +11,8 @@
 
 - **数据转换**：将 WorkMate 日志文件转换为 CSV 或 HDF5 格式
 - **日志解析**：深度搜索和过滤 WorkMate 日志条目
+- **WorkMate Version**: 4.3.2 (Recommended for x64 support) / 4.1 (Legacy x32)
+- **Supported Formats**: WMx32, WMx64
 - **HDF5 预览**：浏览和可视化 HDF5 文件内容
 - **Web 界面**：本地 Flask 服务，支持配置管理和批量处理
 - **跨平台**：优化 Windows 兼容性，处理编码和时间戳问题
