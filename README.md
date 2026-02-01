@@ -31,28 +31,28 @@
 
 ```mermaid
 graph TD
-    A[💾 硬盘原始数据] --> B{后端去噪 (Python)}
+    A["💾 硬盘原始数据"] --> B{"后端去噪 (Python)"}
     
-    subgraph Backend [后端处理]
-        B -->|1. ActiveNotch™| C(谐波陷波 50/100/150Hz)
-        C -->|2. LowPass| D(因果低通 40Hz 1阶)
-        D -->|3. HighPass| E(高通去漂移 0.5Hz)
+    subgraph Backend ["后端处理"]
+        B -->|"1. ActiveNotch"| C("谐波陷波 50/100/150Hz")
+        C -->|"2. LowPass"| D("因果低通 40Hz 1阶")
+        D -->|"3. HighPass"| E("高通去漂移 0.5Hz")
     end
 
-    E --> F{前端预处理 (JS)}
+    E --> F{"前端预处理 (JS)"}
 
-    subgraph Frontend_Pre [前端优化]
-        F -->|4. Micro-Smooth| G(微平滑 [0.1, 0.8])
-        G -->|5. LTTB| H(高密度降采样 4000点)
+    subgraph Frontend_Pre ["前端优化"]
+        F -->|"4. Micro-Smooth"| G("微平滑 [0.1, 0.8]")
+        G -->|"5. LTTB"| H("高密度降采样 4000点")
     end
 
-    H --> I{渲染引擎 (SVG)}
+    H --> I{"渲染引擎 (SVG)"}
 
-    subgraph Frontend_Render [矢量绘制]
-        I -->|6. Spline| J(紧致样条 0.3)
+    subgraph Frontend_Render ["矢量绘制"]
+        I -->|"6. Spline"| J("紧致样条 0.3")
     end
     
-    J --> K[👀 最终画面]
+    J --> K["👀 最终画面"]
 ```
 
 ### 关键技术参数
