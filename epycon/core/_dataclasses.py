@@ -46,6 +46,15 @@ class Channel:
 class Channels:
     content: List
     mount: Dict
+    
+    def __len__(self):
+        return len(self.content)
+    
+    def __getitem__(self, index):
+        return self.content[index]
+        
+    def __iter__(self):
+        return iter(self.content)
         
     def add_custom_mount(self, mount: Dict, override: bool = False):
         """ Create custom mapping for computing bipolar leads.
