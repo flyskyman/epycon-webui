@@ -1604,7 +1604,7 @@ if __name__ == '__main__':
         except Exception:
             pass
 
-        print("\n🚀 Epycon GUI (V68.3) 启动中...")
+        print("\n🚀 Epycon GUI (v0.0.5-alpha) 启动中...")
         print("📌 PID:", os.getpid())
         print(f"🌐 访问地址: http://127.0.0.1:{port}/")
         print("💡 提示: 可在页面中点击'退出程序'按钮关闭，或按 Ctrl+C 退出\n")
