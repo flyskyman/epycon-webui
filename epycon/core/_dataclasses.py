@@ -95,9 +95,9 @@ class AmplifierSettings:
 
 @dataclass()
 class Header:
-    timestamp: int
+    timestamp: Union[int, float]  # 支持浮点时间戳以保留毫秒精度
     num_channels: int
-    channels: List    
+    channels: Union[List, 'Channels']  # 支持 Channels 对象以保留双极导联映射
     amp: AmplifierSettings
     datablock_address: int
 
@@ -107,9 +107,11 @@ class Header:
         self.amp = AmplifierSettings(**self.amp)  # type: ignore
 
     def get_chnames(self):
-        """_summary_
+        """获取通道名称列表
 
         Returns:
-            _type_: _description_
+            List[str]: 通道名称列表
         """
+        if isinstance(self.channels, Channels):
+            return [item.name for item in self.channels.content]
         return [item.name for item in self.channels]

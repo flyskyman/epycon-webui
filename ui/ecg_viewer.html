@@ -1,0 +1,3601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECG 查看器 - 心电图波形可视化</title>
+    <meta name="description" content="现代化心电图数据查看器，支持 HDF5 文件加载、多导联显示、交互式分析">
+
+    <!--
+        ⚠️ 浏览器兼容性说明 / Browser Compatibility Notice
+        
+        本项目仅针对 Google Chrome 浏览器进行优化和测试。
+        不对其他浏览器（Safari、Firefox、Edge 等）提供兼容性保证。
+        
+        建议使用 Chrome 最新版本以获得最佳体验。
+        
+        This project is optimized and tested for Google Chrome only.
+        No compatibility guarantee for other browsers (Safari, Firefox, Edge, etc.).
+    -->
+
+    <!-- Plotly.js for visualization (本地版本，避免 CDN 加载问题) -->
+    <script src="/vendor/plotly.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        // Largest Triangle Three Buckets (LTTB) Downsampling Algorithm
+        // Adapted for inline usage to avoid 404 errors
+        // Min-Max Downsampling Algorithm (Oscilloscope Style)
+        // Preserves all peaks and valleys (Extrema)
+        const MinMax = {
+            process: function (data, threshold, hasX = false) {
+                const dataLength = data.length;
+                if (threshold >= dataLength || threshold === 0) {
+                    return data;
+                }
+
+                // We need 2 points per bucket (min and max)
+                // So effective buckets = threshold / 2
+                const buckets = Math.floor(threshold / 2);
+                const every = dataLength / buckets;
+
+                const sampled = [];
+                let sampledIndex = 0;
+
+                let a = 0;
+                for (let i = 0; i < buckets; i++) {
+                    const rangeFrom = Math.floor(i * every);
+                    const rangeTo = Math.floor((i + 1) * every);
+
+                    let minVal = Infinity, maxVal = -Infinity;
+                    let minIdx = 0, maxIdx = 0;
+                    let minX = 0, maxX = 0;
+
+                    for (let j = rangeFrom; j < rangeTo && j < dataLength; j++) {
+                        const val = hasX ? data[j][1] : data[j];
+                        if (val < minVal) { minVal = val; minIdx = j; if (hasX) minX = data[j][0]; }
+                        if (val > maxVal) { maxVal = val; maxIdx = j; if (hasX) maxX = data[j][0]; }
+                    }
+
+                    // Push both min and max, in order of appearance if possible
+                    // For simple drawing, order might not matter as much if pixels are close, 
+                    // but preserving temporal order is better.
+                    if (minIdx < maxIdx) {
+                        if (hasX) {
+                            sampled[sampledIndex++] = [minX, minVal];
+                            sampled[sampledIndex++] = [maxX, maxVal];
+                        } else {
+                            sampled[sampledIndex++] = [minIdx, minVal];
+                            sampled[sampledIndex++] = [maxIdx, maxVal];
+                        }
+                    } else {
+                        if (hasX) {
+                            sampled[sampledIndex++] = [maxX, maxVal];
+                            sampled[sampledIndex++] = [minX, minVal];
+                        } else {
+                            sampled[sampledIndex++] = [maxIdx, maxVal];
+                            sampled[sampledIndex++] = [minIdx, minVal];
+                        }
+                    }
+                }
+                return sampled;
+            }
+        };
+
+
+    </script>
+
+    <!-- h5wasm for fast client-side HDF5 reading -->
+    <script type="module">
+        import h5wasm from "https://cdn.jsdelivr.net/npm/h5wasm@latest/dist/esm/hdf5_hl.js";
+        window.h5wasmModule = h5wasm;
+        (async () => {
+            try {
+                window.h5wasmReady = await h5wasm.ready;
+                window.h5wasm = h5wasm;
+                console.log("✅ h5wasm initialized");
+            } catch (e) {
+                console.warn("h5wasm init failed, using backend fallback:", e);
+            }
+        })();
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            /* 深色主题配色 */
+            --bg-primary: #0f0f13;
+            --bg-secondary: #16161d;
+            --bg-tertiary: #1e1e28;
+            --bg-card: #1a1a24;
+            --bg-hover: #252533;
+
+            --text-primary: #f0f0f5;
+            --text-secondary: #a0a0b0;
+            --text-muted: #6b6b7b;
+
+            --accent-primary: #6366f1;
+            --accent-secondary: #818cf8;
+            --accent-glow: rgba(99, 102, 241, 0.3);
+
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+
+            --border-color: #2a2a3a;
+            --border-radius: 12px;
+
+            /* ECG 波形颜色 - 渐变色系 */
+            --ch1: #22d3ee;
+            --ch2: #34d399;
+            --ch3: #a78bfa;
+            --ch4: #f472b6;
+            --ch5: #fb923c;
+            --ch6: #facc15;
+            --ch7: #4ade80;
+            --ch8: #60a5fa;
+            --ch9: #e879f9;
+            --ch10: #f87171;
+            --ch11: #2dd4bf;
+            --ch12: #c084fc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        /* 主布局 */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* 顶部工具栏 */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            gap: 16px;
+            flex-shrink: 0;
+        }
+
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .logo-text {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text span {
+            color: var(--accent-secondary);
+        }
+
+        .divider {
+            width: 1px;
+            height: 24px;
+            background: var(--border-color);
+        }
+
+        .toolbar-center {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* 按钮样式 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: white;
+            border: none;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-icon {
+            padding: 8px;
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+        }
+
+        .btn-icon:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        /* 主内容区 */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* 左侧面板 */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+            transition: width 0.3s ease, opacity 0.3s ease;
+        }
+
+        /* 自动隐藏状态 */
+        .sidebar.auto-hidden {
+            width: 40px;
+            overflow: visible;
+        }
+
+        .sidebar.auto-hidden .sidebar-section {
+            display: none;
+        }
+
+        .sidebar.auto-hidden:hover {
+            width: 280px;
+        }
+
+        .sidebar.auto-hidden:hover .sidebar-section {
+            display: flex;
+        }
+
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        /* 可折叠部分 */
+        .sidebar-section.collapsible .sidebar-header {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .sidebar-section.collapsible .sidebar-header:hover {
+            background: var(--bg-hover);
+        }
+
+        .collapse-icon {
+            font-size: 10px;
+            transition: transform 0.2s ease;
+        }
+
+        .sidebar-section.collapsible .sidebar-content.collapsed {
+            display: none;
+        }
+
+        .sidebar-section.collapsible .sidebar-content.collapsed+.collapse-icon,
+        .sidebar-section.collapsible:has(.sidebar-content.collapsed) .collapse-icon {
+            transform: rotate(-90deg);
+        }
+
+        /* 标注部分占据剩余空间 */
+        .sidebar-section.annotation-section {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            border-bottom: none;
+        }
+
+        .sidebar-section.annotation-section .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+            padding: 0;
+        }
+
+        .channel-list {
+            padding: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+        }
+
+        .sidebar-content {
+            padding: 6px 10px 10px;
+        }
+
+        /* 文件信息卡片 */
+        .file-info {
+            background: var(--bg-tertiary);
+            border-radius: var(--border-radius);
+            padding: 14px;
+        }
+
+        .file-info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+
+        .file-info-label {
+            color: var(--text-secondary);
+        }
+
+        .file-info-value {
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+
+        /* 通道列表 */
+        .channel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .channel-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .channel-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .channel-item.active {
+            background: var(--bg-tertiary);
+        }
+
+        .channel-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        .channel-name {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .channel-tag {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin-left: 4px;
+            font-weight: 500;
+        }
+
+        .channel-tag.raw {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+
+        .channel-tag.computed {
+            background: rgba(168, 85, 247, 0.2);
+            color: #c084fc;
+        }
+
+        .channel-toggle {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            transition: all 0.15s ease;
+        }
+
+        .channel-item.active .channel-toggle {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        /* 标注列表 */
+        .annotation-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 12px;
+            /* 移除固定 max-height，让父容器 sidebar-content 控制滚动 */
+        }
+
+        .annotation-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            font-size: 13px;
+        }
+
+        .annotation-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .annotation-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--accent-secondary);
+            min-width: 60px;
+        }
+
+        .annotation-label {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 波形显示区域 */
+        .waveform-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-primary);
+            overflow: hidden;
+            position: relative;
+            /* 关键：让上传区域相对于此容器定位 */
+        }
+
+        #ecg-plot {
+            flex: 1;
+            width: 100%;
+        }
+
+        /* 时间轴控制 */
+        .timeline-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 12px 20px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .time-display {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+
+        .time-display strong {
+            color: var(--text-primary);
+        }
+
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .zoom-level {
+            font-size: 12px;
+            color: var(--text-muted);
+            min-width: 50px;
+            text-align: center;
+        }
+
+        /* 上传拖拽区域 */
+        .upload-zone {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            z-index: 10;
+            /* 降低 z-index，只覆盖波形区域 */
+        }
+
+        .upload-zone.hidden {
+            display: none;
+        }
+
+        .upload-box {
+            text-align: center;
+            padding: 60px 80px;
+            border: 2px dashed var(--border-color);
+            border-radius: 20px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-box:hover,
+        .upload-box.dragover {
+            border-color: var(--accent-primary);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .upload-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.8;
+        }
+
+        .upload-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .upload-subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .upload-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* 加载状态 */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 15, 19, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.hidden {
+            display: none;
+        }
+
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--bg-tertiary);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* 测量工具覆盖层（未来扩展） */
+        .measure-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        /* 提示 Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--bg-tertiary);
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 2000;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-color: var(--success);
+        }
+
+        .toast.error {
+            border-color: var(--error);
+        }
+
+        .toast.warning {
+            border-color: var(--warning);
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+
+            .toolbar {
+                flex-wrap: wrap;
+                padding: 10px;
+            }
+        }
+
+        /* 隐藏文件输入 */
+        #file-input {
+            display: none;
+        }
+
+        /* 空状态 */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-hover);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-color);
+        }
+
+        /* 通道右键菜单 */
+        /* 通道右键菜单 - 横向长条形布局 */
+        .channel-context-menu {
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            z-index: 10000;
+            display: none;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            white-space: nowrap;
+        }
+
+        .channel-context-menu.visible {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .channel-context-menu .menu-header {
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--accent-color);
+            padding-right: 12px;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .channel-context-menu .menu-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .channel-context-menu label {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .channel-context-menu select {
+            padding: 3px 6px;
+            font-size: 11px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            min-width: 70px;
+        }
+
+        .channel-context-menu .menu-actions {
+            display: flex;
+            gap: 6px;
+            padding-left: 12px;
+            border-left: 1px solid var(--border-color);
+        }
+
+        .channel-context-menu button {
+            padding: 4px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .channel-context-menu .btn-apply {
+            background: var(--accent-color);
+            color: white;
+        }
+
+        .channel-context-menu .btn-cancel {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .channel-filter-badge {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: var(--accent-color);
+            color: white;
+            margin-left: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- 顶部工具栏 -->
+        <header class="toolbar">
+            <div class="toolbar-left">
+                <!-- 侧边栏切换按钮 -->
+                <button class="btn btn-icon" onclick="toggleSidebar()" title="切换侧边栏" style="margin-right: 4px;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7" id="sidebar-icon-path" />
+                    </svg>
+                </button>
+                <!-- 自动隐藏切换按钮 -->
+                <button class="btn btn-icon" id="btn-auto-hide" onclick="toggleAutoHide()" title="启用自动隐藏"
+                    style="margin-right: 4px; font-size: 12px; padding: 4px;">
+                    📌
+                </button>
+
+                <a href="/" class="logo" style="gap: 4px;">
+                    <div class="logo-icon" style="font-size: 16px;">💓</div>
+                    <span class="logo-text" style="font-size: 14px;">ECG</span>
+                </a>
+                <div class="divider" style="margin: 0 8px;"></div>
+                <button class="btn btn-primary" id="btn-open" onclick="triggerFileUpload()"
+                    style="font-size: 11px; padding: 4px 8px;">
+                    📂 打开
+                </button>
+                <div class="file-operations" style="display: flex; gap: 4px;">
+                    <button class="btn btn-secondary" id="btn-export-png" onclick="exportImage()"
+                        style="font-size: 11px; padding: 4px 8px;">
+                        📷 导出
+                    </button>
+                    <button class="btn btn-secondary" id="btn-export-csv" onclick="exportCSV()"
+                        style="font-size: 11px; padding: 4px 8px;">
+                        📊 CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="toolbar-center">
+                <span id="patient-info" style="font-size: 10px; color: #ffffff;"></span>
+            </div>
+
+            <div class="toolbar-right">
+                <!-- 分页控件 -->
+                <div id="pagination-controls"
+                    style="display: none; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <span style="font-size: 10px; color: var(--text-secondary);">通道:</span>
+                    <input type="number" id="channels-per-page" value="12" min="1" max="500"
+                        style="width: 40px; padding: 2px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); text-align: center; font-size: 11px;"
+                        onchange="updateChannelsPerPage(this.value)">
+
+                    <div style="display: flex; align-items: center; gap: 2px;">
+                        <button class="btn btn-icon" onclick="changePage(-1)" title="上一页"
+                            style="padding: 2px 4px; font-size: 10px;">◀</button>
+                        <span id="page-info"
+                            style="font-size: 10px; font-variant-numeric: tabular-nums; min-width: 30px; text-align: center;">1/1</span>
+                        <button class="btn btn-icon" onclick="changePage(1)" title="下一页"
+                            style="padding: 2px 4px; font-size: 10px;">▶</button>
+                    </div>
+                </div>
+
+                <!-- 速度选择器 -->
+                <div
+                    style="display: flex; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <span style="font-size: 10px; color: var(--text-secondary);">速度:</span>
+                    <select id="speed-select" onchange="updateSpeed(this.value)"
+                        style="padding: 2px 4px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="75">75</option>
+                        <option value="100">100</option>
+                        <option value="150">150</option>
+                        <option value="200">200</option>
+                        <option value="300">300</option>
+                        <option value="400">400</option>
+                        <option value="500">500</option>
+                        <option value="600">600</option>
+                    </select>
+                    <span style="font-size: 9px; color: var(--text-muted);">mm/s</span>
+                </div>
+
+                <!-- Notch Filter 选择器 -->
+                <div
+                    style="display: flex; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <span style="font-size: 10px; color: var(--text-secondary);">滤波:</span>
+                    <select id="notch-select" onchange="updateNotchFilter(this.value)"
+                        style="padding: 2px 4px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
+                        <option value="">关</option>
+                        <option value="50" selected>50Hz</option>
+                        <option value="60">60Hz</option>
+                    </select>
+                </div>
+
+                <!-- Filter Mode 选择器 (全局) -->
+                <div
+                    style="display: flex; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <span style="font-size: 10px; color: var(--text-secondary);">模式:</span>
+                    <select id="filter-method-select" onchange="updateFilterMethod(this.value)"
+                        style="padding: 2px 4px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
+                        <option value="zero_phase">Zero-phase</option>
+                        <option value="causal">Causal</option>
+                    </select>
+                </div>
+
+                <!-- LP/HP 选择器已移至右键菜单，此处隐藏 -->
+                <div style="display: none;">
+                    <select id="lp-select">
+                        <option value="">LP: Off</option>
+                    </select>
+                    <select id="hp-select">
+                        <option value="">HP: DC</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-icon" onclick="toggleGrid()" title="显示/隐藏网格">
+                        ⊞
+                    </button>
+                    <button class="btn btn-icon" onclick="resetView()" title="重置视图">
+                        ⟲
+                    </button>
+                    <button class="btn btn-icon" onclick="toggleDisplayMode()" title="切换显示模式">
+                        ☰
+                    </button>
+                </div>
+            </div>
+
+            <div class="toolbar-right" style="display: flex; gap: 4px;">
+                <a href="/" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">← 首页</a>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- 左侧面板 -->
+            <aside class="sidebar" id="sidebar">
+                <!-- 文件信息 - 默认折叠 -->
+                <div class="sidebar-section collapsible" id="section-file-info">
+                    <div class="sidebar-header" onclick="toggleSection('section-file-info')">
+                        <span>📋 文件信息</span>
+                        <span class="collapse-icon" style="transform: rotate(-90deg);">▼</span>
+                    </div>
+                    <div class="sidebar-content collapsed">
+                        <div class="file-info" id="file-info">
+                            <div class="file-info-item" id="info-study-row" style="display: none;">
+                                <span class="file-info-label">研究</span>
+                                <span class="file-info-value" id="info-study-id">-</span>
+                            </div>
+                            <div class="file-info-item" id="info-log-row" style="display: none;">
+                                <span class="file-info-label">记录</span>
+                                <span class="file-info-value" id="info-log-id">-</span>
+                            </div>
+                            <div class="file-info-item" id="info-patient-row" style="display: none;">
+                                <span class="file-info-label">患者</span>
+                                <span class="file-info-value" id="info-patient">-</span>
+                            </div>
+                            <div class="file-info-item">
+                                <span class="file-info-label">采样率</span>
+                                <span class="file-info-value" id="info-fs">-</span>
+                            </div>
+                            <div class="file-info-item">
+                                <span class="file-info-label">通道</span>
+                                <span class="file-info-value" id="info-channels">-</span>
+                            </div>
+                            <div class="file-info-item">
+                                <span class="file-info-label">时长</span>
+                                <span class="file-info-value" id="info-duration">-</span>
+                            </div>
+                            <div class="file-info-item">
+                                <span class="file-info-label">采样</span>
+                                <span class="file-info-value" id="info-samples">-</span>
+                            </div>
+                            <div class="file-info-item" id="info-source-row" style="display: none;">
+                                <span class="file-info-label">工具</span>
+                                <span class="file-info-value" id="info-source">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 通道选择 - 默认折叠 -->
+                <div class="sidebar-section collapsible" id="section-channels">
+                    <div class="sidebar-header" onclick="toggleSection('section-channels')">
+                        <span>📊 通道</span>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <button class="btn btn-icon" onclick="event.stopPropagation(); toggleAllChannels()"
+                                style="padding: 2px 6px; font-size: 10px;">全选</button>
+                            <span class="collapse-icon">▼</span>
+                        </div>
+                    </div>
+                    <div class="sidebar-content collapsed">
+                        <div class="channel-list" id="channel-list">
+                            <div class="empty-state" style="padding: 12px;">
+                                <span style="font-size: 11px;">加载文件后显示通道</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 标注列表 - 占据主要空间 -->
+                <div class="sidebar-section annotation-section" id="section-annotations">
+                    <div class="sidebar-header">
+                        <span>📍 标注 <span id="annotation-count"
+                                style="font-size: 10px; color: var(--text-muted);"></span></span>
+                    </div>
+                    <div style="padding: 4px 8px; border-bottom: 1px solid var(--border-color);">
+                        <input type="text" id="annotation-search" placeholder="搜索标注..." oninput="filterAnnotations()"
+                            style="width: 100%; padding: 4px 8px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
+                    </div>
+                    <div class="sidebar-content">
+                        <div class="annotation-list" id="annotation-list">
+                            <div class="empty-state" style="padding: 12px;">
+                                <span style="font-size: 11px;">无标注数据</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 波形显示区域 -->
+            <main class="waveform-container">
+                <div id="ecg-plot"></div>
+
+                <!-- 上传区域 -->
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-box" id="upload-box" onclick="triggerFileUpload()">
+                        <div class="upload-icon">📈</div>
+                        <div class="upload-title">拖拽数据文件到这里</div>
+                        <div class="upload-subtitle">或点击选择文件</div>
+                        <button class="btn btn-primary" style="pointer-events: none;">选择数据文件</button>
+                        <div class="upload-hint" style="margin-top: 16px;">支持格式: .h5, .hdf5, .npy, .npz</div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- 底部时间控制 -->
+        <footer class="timeline-controls" id="timeline-controls" style="display: none;">
+            <div class="zoom-controls">
+                <button class="btn btn-icon" onclick="zoomOut()" title="缩小">➖</button>
+                <span class="zoom-level" id="zoom-level">100%</span>
+                <button class="btn btn-icon" onclick="zoomIn()" title="放大">➕</button>
+            </div>
+
+            <div class="time-display" style="display: flex; align-items: center; gap: 4px;">
+                <span style="font-size: 11px;">起始:</span>
+                <input type="text" id="view-start-input" value="0"
+                    style="width: 85px; padding: 2px 4px; font-size: 11px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); text-align: center;"
+                    onchange="jumpToStartTime()">
+                <input type="hidden" id="view-end-input" value="10">
+            </div>
+
+            <div class="zoom-controls">
+                <button class="btn btn-icon" onclick="panLeftFast()" title="快退 1秒">◀◀</button>
+                <button class="btn btn-icon" onclick="panLeft()" title="向左 0.01秒">◀</button>
+                <button class="btn btn-icon" onclick="panRight()" title="向右 0.01秒">▶</button>
+                <button class="btn btn-icon" onclick="panRightFast()" title="快进 1秒">▶▶</button>
+            </div>
+
+            <button class="btn btn-secondary" onclick="fitToWindow()">适应窗口</button>
+        </footer>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loading-text">正在加载...</div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div class="toast" id="toast"></div>
+
+    <!-- 隐藏的文件输入 -->
+    <input type="file" id="file-input" accept=".h5,.hdf5,.he5,.hdf,.npy,.npz" onchange="handleFileSelect(event)">
+
+    <script src="lib/h5wasm/hdf5_util.js"></script>
+    <script src="lib/downsample-lttb.js"></script>
+    <script>
+        // ========== 全局状态 ==========
+        const state = {
+            fileId: null,
+            metadata: null,
+            annotations: [],
+            activeChannels: [],
+            currentData: null,
+            viewStart: 0,
+            viewEnd: 10,
+            zoomLevel: 1,
+            displayMode: 'stacked', // 'stacked' or 'overlay'
+            showGrid: true,
+            // 分页状态
+            channelsPerPage: 12,
+            currentPage: 0,
+            sidebarVisible: true,
+            // 显示速度 mm/sec
+            speed: 50,
+            // 陷波滤波频率 (null/'50'/'60')
+            notchFreq: '50',
+            // 低通滤波频率 - Workmate 标准: 40Hz for Surface ECG
+            lpFreq: '40',
+            // 高通滤波频率 - 保持 0.5Hz (0.05Hz 太低会基线漂移)
+            hpFreq: '0.5',
+            // 滤波模式 ('zero_phase' / 'causal')
+            filterMethod: 'causal',
+            // 物理定标参数 (Workmate 风格)
+            screenHeightMm: 320   // 用户设置的屏幕高度 (mm)
+            // 注：amplitude (mV/cm) 是每个通道独立设置的，在 channelFilters 中
+        };
+
+        // ========== 布局交互函数 ==========
+        function toggleSidebar() {
+            state.sidebarVisible = !state.sidebarVisible;
+            const sidebar = document.getElementById('sidebar');
+            const iconPath = document.getElementById('sidebar-icon-path');
+
+            if (state.sidebarVisible) {
+                sidebar.style.display = 'flex';
+                iconPath.setAttribute('d', 'M19 12H5M12 19l-7-7 7-7'); // <
+            } else {
+                sidebar.style.display = 'none';
+                iconPath.setAttribute('d', 'M5 12h14M12 5l7 7-7 7'); // >
+            }
+
+            // 调整 Plotly 宽度
+            setTimeout(() => {
+                Plotly.relayout('ecg-plot', { autosize: true });
+            }, 50);
+        }
+
+        // 自动隐藏模式切换
+        function toggleAutoHide() {
+            const sidebar = document.getElementById('sidebar');
+            const btn = document.getElementById('btn-auto-hide');
+
+            if (sidebar.classList.contains('auto-hidden')) {
+                sidebar.classList.remove('auto-hidden');
+                if (btn) btn.innerHTML = '📌';
+                if (btn) btn.title = '启用自动隐藏';
+            } else {
+                sidebar.classList.add('auto-hidden');
+                if (btn) btn.innerHTML = '📍';
+                if (btn) btn.title = '禁用自动隐藏';
+            }
+
+            // 调整 Plotly 宽度
+            setTimeout(() => {
+                Plotly.relayout('ecg-plot', { autosize: true });
+            }, 300);
+        }
+
+        function updateChannelsPerPage(val) {
+            const num = parseInt(val);
+            if (num > 0) {
+                state.channelsPerPage = num;
+                state.currentPage = 0; // 重置到第一页
+                updatePaginationUI();
+                renderWaveforms(state.currentData);
+            }
+        }
+
+        // 更新显示速度（mm/sec）
+        function updateSpeed(val) {
+            const speed = parseInt(val);
+            if (speed > 0) {
+                state.speed = speed;
+                // 速度影响每秒显示多少毫米，从而影响时间窗口
+                // EP-WorkMate 使用 21 英寸显示器，宽度约 400mm
+                // 计算公式：时间窗 = 屏幕宽度(mm) / 速度(mm/s)
+                const screenWidthMm = 400; // Workmate 21寸显示器宽度
+                const newRange = screenWidthMm / speed;
+
+                // 保持起始时间不变，只调整结束时间
+                const duration = state.metadata?.duration_seconds || 60;
+                state.viewEnd = Math.min(duration, state.viewStart + newRange);
+
+                // 如果超出范围，调整起始时间
+                if (state.viewEnd - state.viewStart < newRange && state.viewEnd >= duration) {
+                    state.viewStart = Math.max(0, duration - newRange);
+                }
+
+                updateViewRange();
+                loadAndRenderData();
+            }
+        }
+
+        // 更新陷波滤波频率
+        function updateNotchFilter(val) {
+            state.notchFreq = val || null;
+            loadAndRenderData();
+        }
+
+        // 更新低通滤波频率
+        function updateLowpassFilter(val) {
+            state.lpFreq = val || null;
+            loadAndRenderData();
+        }
+
+        // 更新高通滤波频率
+        function updateHighpassFilter(val) {
+            state.hpFreq = val || null;
+            loadAndRenderData();
+        }
+
+        // 更新滤波模式
+        function updateFilterMethod(val) {
+            state.filterMethod = val;
+            loadAndRenderData();
+        }
+
+        function changePage(delta) {
+            if (!state.currentData || !state.activeChannels.length) return;
+
+            const totalPages = Math.ceil(state.activeChannels.length / state.channelsPerPage);
+            const newPage = state.currentPage + delta;
+
+            if (newPage >= 0 && newPage < totalPages) {
+                state.currentPage = newPage;
+                updatePaginationUI();
+                renderWaveforms(state.currentData); // 重绘（不仅是数据，布局也变了）
+            }
+        }
+
+        function updatePaginationUI() {
+            const activeCount = state.activeChannels.length;
+            if (!activeCount) return;
+
+            // 更新每页通道数输入框的最大值和当前值
+            const channelsInput = document.getElementById('channels-per-page');
+            if (channelsInput) {
+                channelsInput.max = activeCount;
+                // 如果当前每页通道数大于选中数，自动调整
+                if (state.channelsPerPage > activeCount) {
+                    state.channelsPerPage = activeCount;
+                    channelsInput.value = activeCount;
+                }
+            }
+
+            const totalPages = Math.ceil(activeCount / state.channelsPerPage);
+            const pageInfo = document.getElementById('page-info');
+            if (pageInfo) {
+                pageInfo.textContent = `${state.currentPage + 1}/${totalPages}`;
+            }
+
+            // 确保当前页有效
+            if (state.currentPage >= totalPages) {
+                state.currentPage = Math.max(0, totalPages - 1);
+                if (pageInfo) {
+                    pageInfo.textContent = `${state.currentPage + 1}/${totalPages}`;
+                }
+            }
+
+            const controls = document.getElementById('pagination-controls');
+            if (controls) {
+                controls.style.display = activeCount > 0 ? 'flex' : 'none';
+            }
+        }
+
+        // 通道颜色 - 白色波形，适合黑色背景
+        const CHANNEL_COLORS = [
+            '#ffffff', // 纯白
+            '#f0f0f0', // 浅灰白
+            '#e8e8e8', // 稍灰
+            '#ffffff',
+            '#f5f5f5',
+            '#eeeeee',
+            '#ffffff',
+            '#f8f8f8',
+            '#ffffff',
+            '#f0f0f0',
+            '#ffffff',
+            '#f5f5f5'
+        ];
+
+        // ========== 工具函数 ==========
+        function showLoading(text = '正在加载...') {
+            document.getElementById('loading-text').textContent = text;
+            document.getElementById('loading-overlay').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.add('hidden');
+        }
+
+        // 切换侧边栏折叠状态
+        function toggleSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            if (!section) return;
+            const content = section.querySelector('.sidebar-content');
+            const icon = section.querySelector('.collapse-icon');
+            if (content) {
+                content.classList.toggle('collapsed');
+            }
+            if (icon) {
+                icon.style.transform = content.classList.contains('collapsed') ? 'rotate(-90deg)' : 'rotate(0deg)';
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function formatDuration(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = (seconds % 60).toFixed(1);
+            return mins > 0 ? `${mins}分 ${secs}秒` : `${secs}秒`;
+        }
+
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+
+        // ========== 文件操作 ==========
+        async function triggerFileUpload() {
+            // 策略 1: 尝试调用后端原生文件对话框
+            try {
+                const response = await fetch('/api/ecg/browse');
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.path) {
+                        // 用户选择了文件，直接使用后端打开本地路径
+                        await openLocalFile(result.path);
+                        return;
+                    } else if (result.error) {
+                        console.warn('后端 Browse API 错误:', result.error);
+                        // 后端不支持或出错，回退到前端文件选择
+                    } else {
+                        // 用户取消了对话框
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('后端 Browse API 不可用，回退到前端文件选择:', e);
+            }
+
+            // 策略 2: 回退到浏览器文件选择 (<input type="file">)
+            // [FIX] 全屏模式下文件对话框可能被遮挡，需要先退出全屏
+            const wasFullscreen = !!document.fullscreenElement;
+            if (wasFullscreen) {
+                await document.exitFullscreen();
+                // 等待全屏退出动画完成
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            document.getElementById('file-input').click();
+        }
+
+        async function openLocalFile(path) {
+            showLoading('正在打开本地文件...');
+            try {
+                const response = await fetch('/api/ecg/open_local', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || '打开文件失败');
+                }
+
+                const result = await response.json();
+
+                // 使用通用初始化
+                await initializeFileSession(result, false);
+
+                hideLoading();
+                showToast('本地文件加载成功 (Backend Direct)', 'success');
+
+            } catch (error) {
+                hideLoading();
+                showToast(error.message, 'error');
+                console.error('Open local file error:', error);
+            }
+        }
+
+        async function initializeFileSession(result, isLocal) {
+            // 1. 更新核心状态
+            state.fileId = result.file_id;
+            state.metadata = result.metadata;
+            state.isLocalFile = isLocal;
+
+            // 如果切换到后端模式，清理 h5wasm 句柄
+            if (!isLocal) {
+                state.h5file = null;
+                state.h5fs = null;
+            }
+
+            // 2. 更新 UI 信息面板
+            updateFileInfo(result);
+
+            // 3. 尝试加载标注 (后端模式需要单独 API，h5wasm 模式在内部提取)
+            if (!isLocal) {
+                await loadAnnotations();
+            }
+
+            // 4. 重置视图参数
+            state.viewStart = 0;
+            // 根据当前速度计算初始时间窗 (默认 Workmate 400mm 宽度)
+            const screenWidthMm = 400;
+            const initialRange = screenWidthMm / (state.speed || 25);
+            state.viewEnd = Math.min(initialRange, state.metadata.duration_seconds || 10);
+
+            // 默认选择标准 12 导联 ECG（根据通道名称匹配）
+            const standard12Lead = ['I', 'II', 'III', 'aVL', 'aVF', 'aVR', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+            const channelNames = state.metadata.display_channel_names || state.metadata.channel_names || [];
+
+            // 查找匹配的通道索引
+            const matchedIndices = [];
+            for (let i = 0; i < channelNames.length; i++) {
+                const name = channelNames[i].toUpperCase().replace(/\s+/g, '');
+                for (const lead of standard12Lead) {
+                    if (name === lead.toUpperCase() || name.endsWith(lead.toUpperCase())) {
+                        matchedIndices.push(i);
+                        break;
+                    }
+                }
+            }
+
+            // 如果找到标准导联，使用它们；否则回退到前 12 个通道
+            const totalChannels = state.metadata.display_num_channels || state.metadata.num_channels;
+            if (matchedIndices.length > 0) {
+                state.activeChannels = matchedIndices.sort((a, b) => a - b);
+            } else {
+                const defaultChannels = Math.min(12, totalChannels);
+                state.activeChannels = Array.from({ length: defaultChannels }, (_, i) => i);
+            }
+
+            // 为标准12导联设置默认参数 (Workmate 标准: HP 0.05Hz, LP 40Hz)
+            state.channelFilters = {};
+            for (const idx of matchedIndices) {
+                state.channelFilters[idx] = { hp: '0.5', lp: '40', amplitude: '1', clipping: '' };
+            }
+            console.log('12导联默认设置:', state.channelFilters);
+
+            // 分页重置
+            state.currentPage = 0;
+            updateChannelsPerPage(document.getElementById('channels-per-page').value); // 这会触发 updatePaginationUI
+
+            // 5. 渲染侧边栏列表
+            renderChannelList();
+
+            // 6. 显示主界面控件
+            document.getElementById('upload-zone').classList.add('hidden');
+            document.getElementById('timeline-controls').style.display = 'flex';
+            document.getElementById('btn-export-png').disabled = false;
+            document.getElementById('btn-export-csv').disabled = false;
+
+            // 更新工具栏患者信息
+            const patientName = state.metadata.patient_name || '';
+            const studyDate = state.metadata.study_date || state.metadata.date || '';
+            const patientInfoEl = document.getElementById('patient-info');
+            if (patientInfoEl) {
+                const parts = [];
+                if (patientName) parts.push(patientName);
+                if (studyDate) parts.push(studyDate);
+                // 如果没有患者信息，显示文件名
+                if (parts.length === 0 && result.filename) {
+                    parts.push(result.filename);
+                }
+                patientInfoEl.textContent = parts.join(' | ');
+                console.log('患者信息:', parts.join(' | '), '元数据:', state.metadata);
+            }
+
+            // 7. 加载波形数据
+            await loadAndRenderData();
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                uploadFile(file);
+            }
+        }
+
+        // 拖拽处理
+        const uploadBox = document.getElementById('upload-box');
+        const uploadZone = document.getElementById('upload-zone');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadBox.addEventListener(eventName, e => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+
+        uploadBox.addEventListener('dragenter', () => uploadBox.classList.add('dragover'));
+        uploadBox.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
+        uploadBox.addEventListener('drop', e => {
+            uploadBox.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                uploadFile(files[0]);
+            }
+        });
+
+        async function uploadFile(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const isH5 = ['h5', 'hdf5', 'he5', 'hdf'].includes(ext);
+            const sizeMB = file.size / 1024 / 1024;
+            const MAX_LOCAL_SIZE_MB = 2048; // 超过 2GB 走后端，避免浏览器内存溢出
+
+            // 优先使用 h5wasm 前端直读(仅 H5 文件且小于阈值)
+            if (isH5 && window.h5wasm && window.h5wasmReady && sizeMB <= MAX_LOCAL_SIZE_MB) {
+                await loadFileWithH5wasm(file);
+            } else if (isH5 && sizeMB > MAX_LOCAL_SIZE_MB) {
+                console.log(`File size ${sizeMB.toFixed(1)}MB exceeds ${MAX_LOCAL_SIZE_MB}MB, using backend`);
+                showToast(`文件较大 (${sizeMB.toFixed(0)}MB)，使用后端处理...`, 'info');
+                await uploadFileToBackend(file);
+            } else {
+                // 回退到后端 API
+                await uploadFileToBackend(file);
+            }
+        }
+
+        // ========== h5wasm 前端直读 ==========
+        async function loadFileWithH5wasm(file) {
+            showLoading('正在本地读取文件...');
+            const startTime = performance.now();
+            const fileName = file.name;
+            const fileSize = file.size;
+
+            // 超时回退机制
+            const timeoutId = setTimeout(() => {
+                if (state.isLocalFile) return;
+                console.warn("h5wasm loading timed out, falling back to backend...");
+                showToast('本地读取超时，自动切换到后端模式...', 'warning');
+                uploadFileToBackend(file);
+            }, 60000); // 60秒超时
+
+            try {
+                const h5 = window.h5wasm;
+                const FS = window.h5wasmReady.FS;
+
+                // 显示文件大小信息
+                const sizeMB = (fileSize / 1024 / 1024).toFixed(1);
+                showLoading(`正在读取文件 (${sizeMB} MB)...`);
+
+                // 读取文件为 ArrayBuffer
+                const arrayBuffer = await file.arrayBuffer();
+
+                showLoading('正在写入虚拟文件系统...');
+                await new Promise(r => setTimeout(r, 10)); // 让 UI 更新
+
+                // 写入 MEMFS（h5wasm 必须从文件系统读取）
+                const fname = "ecg_data.h5";
+                try { FS.unlink(fname); } catch (e) { }
+                FS.writeFile(fname, new Uint8Array(arrayBuffer));
+
+                showLoading('正在解析 HDF5 结构...');
+                await new Promise(r => setTimeout(r, 10));
+
+                // 打开 HDF5 文件
+                const h5file = new h5.File(fname, "r");
+
+                showLoading('正在提取元数据...');
+                await new Promise(r => setTimeout(r, 10));
+
+                // 提取元数据
+                let metadata = extractH5Metadata(h5file);
+
+                // 自动识别 u+/u- 电极配对，生成计算导联
+                metadata = buildComputedLeads(metadata);
+
+                // 保存到 state
+                state.fileId = 'local_' + Date.now();
+                state.metadata = metadata;
+                state.h5file = h5file;
+                state.isLocalFile = true;
+
+                // 更新 UI
+                updateFileInfo({ metadata });
+
+                // 初始化视图范围
+                state.viewStart = 0;
+                // 根据当前速度计算初始时间窗 (默认 Workmate 400mm 宽度)
+                const screenWidthMm = 400;
+                const initialRange = screenWidthMm / (state.speed || 25);
+                state.viewEnd = Math.min(initialRange, metadata.duration_seconds);
+                // 使用 display_num_channels（计算导联模式下是合并后的通道数）
+                state.activeChannels = Array.from({ length: metadata.display_num_channels }, (_, i) => i);
+
+                renderChannelList();
+
+                showLoading('正在渲染波形...');
+                await new Promise(r => setTimeout(r, 10));
+                await loadAndRenderData();
+
+                // 显示控件
+                uploadZone.classList.add('hidden');
+                document.getElementById('timeline-controls').style.display = 'flex';
+                document.getElementById('btn-export-png').disabled = false;
+                document.getElementById('btn-export-csv').disabled = false;
+
+                // 更新工具栏患者信息
+                const patientInfoEl = document.getElementById('patient-info');
+                if (patientInfoEl && state.metadata) {
+                    const parts = [];
+                    if (state.metadata.patient_name) parts.push(state.metadata.patient_name);
+                    if (state.metadata.study_date || state.metadata.date) parts.push(state.metadata.study_date || state.metadata.date);
+                    patientInfoEl.textContent = parts.join(' | ');
+                }
+
+                clearTimeout(timeoutId);
+                const elapsed = (performance.now() - startTime).toFixed(0);
+                hideLoading();
+                showToast(`本地加载成功 (${elapsed}ms)`, 'success');
+                console.log(`✅ h5wasm loaded ${sizeMB}MB in ${elapsed}ms`);
+
+            } catch (error) {
+                clearTimeout(timeoutId);
+                console.error('h5wasm error:', error);
+                hideLoading();
+                showToast('本地加载失败，尝试后端处理...', 'warning');
+                await uploadFileToBackend(file);
+            }
+        }
+
+        function extractH5Metadata(h5file) {
+            const attrs = h5file.attrs;
+            const metadata = {
+                sampling_freq: 2000,
+                num_channels: 0,
+                num_samples: 0,
+                duration_seconds: 0,
+                channel_names: [],
+                channel_sources: [],
+                study_id: '',
+                log_id: '',
+                patient_name: '',
+                generated_by: ''
+            };
+
+            // 读取属性
+            if (attrs['Fs']) metadata.sampling_freq = attrs['Fs'].value[0];
+            if (attrs['StudyID']) metadata.study_id = decodeAttr(attrs['StudyID'].value);
+            if (attrs['LogID']) metadata.log_id = decodeAttr(attrs['LogID'].value);
+            if (attrs['GeneratedBy']) metadata.generated_by = decodeAttr(attrs['GeneratedBy'].value);
+            if (attrs['SubjectName']) metadata.patient_name = decodeAttr(attrs['SubjectName'].value);
+
+            // 读取数据形状
+            const dataNode = h5file.get('Data');
+            if (dataNode) {
+                const shape = dataNode.shape;
+                metadata.num_samples = shape[0];
+                metadata.num_channels = shape[1];
+                metadata.duration_seconds = metadata.num_samples / metadata.sampling_freq;
+            }
+
+            // 读取通道信息
+            const infoNode = h5file.get('Info');
+            if (infoNode) {
+                try {
+                    const infoData = infoNode.value;
+                    console.log('Info dataset raw:', infoData);
+                    console.log('Info dataset type:', typeof infoData, Array.isArray(infoData));
+                    if (infoData.length > 0) {
+                        console.log('First row:', infoData[0], 'Type:', typeof infoData[0]);
+                    }
+
+                    for (let i = 0; i < infoData.length && i < metadata.num_channels; i++) {
+                        const row = infoData[i];
+                        // 兼容多种可能的数据结构：
+                        // 1. row 是 [name, source] 数组
+                        // 2. row 是 {name: ..., source: ...} 对象
+                        // 3. row 直接是字符串（只有名称，没来源）
+                        let name, source;
+                        if (Array.isArray(row)) {
+                            name = decodeAttr(row[0]) || `Ch${i + 1}`;
+                            source = decodeAttr(row[1]) || 'RAW';
+                        } else if (typeof row === 'string' || row instanceof Uint8Array) {
+                            name = decodeAttr(row) || `Ch${i + 1}`;
+                            source = 'RAW';
+                        } else if (typeof row === 'object' && row !== null) {
+                            name = decodeAttr(row.name || row[0]) || `Ch${i + 1}`;
+                            source = decodeAttr(row.source || row[1]) || 'RAW';
+                        } else {
+                            name = `Ch${i + 1}`;
+                            source = 'RAW';
+                        }
+                        metadata.channel_names.push(name);
+                        metadata.channel_sources.push(source);
+                    }
+                    console.log('Extracted channel_names:', metadata.channel_names);
+                } catch (e) {
+                    console.warn('Info dataset read error:', e);
+                }
+            }
+
+
+            // 如果没有通道名，生成默认名
+            if (metadata.channel_names.length === 0) {
+                for (let i = 0; i < metadata.num_channels; i++) {
+                    metadata.channel_names.push(`Ch${i + 1}`);
+                    metadata.channel_sources.push('RAW');
+                }
+            }
+
+            return metadata;
+        }
+
+        function decodeAttr(val) {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            if (val instanceof Uint8Array) return new TextDecoder().decode(val);
+            if (Array.isArray(val)) return val[0]?.toString() || '';
+            return val.toString();
+        }
+
+        /**
+         * 自动识别 u+X 和 u-X 电极配对，生成计算导联映射
+         * 例如: u+HRA, u-HRA -> HRA (差分)
+         * @param {Object} metadata - 包含 channel_names 和 channel_sources 的元数据对象
+         * @returns {Object} 修改后的 metadata，包含 computed_leads 映射
+         */
+        function buildComputedLeads(metadata) {
+            const names = metadata.channel_names;
+            const sources = metadata.channel_sources;
+
+            // 检测是否有 u+ 和 u- 前缀的电极（表示原始单极模式）
+            const plusPattern = /^u\+(.+)$/;  // 匹配 u+XXX
+            const minusPattern = /^u-(.+)$/;  // 匹配 u-XXX
+
+            const plusElectrodes = {};  // { leadName: channelIndex }
+            const minusElectrodes = {}; // { leadName: channelIndex }
+            const otherChannels = [];   // 非配对通道的索引
+
+            for (let i = 0; i < names.length; i++) {
+                const name = names[i];
+                const plusMatch = name.match(plusPattern);
+                const minusMatch = name.match(minusPattern);
+
+                if (plusMatch) {
+                    plusElectrodes[plusMatch[1]] = i;
+                } else if (minusMatch) {
+                    minusElectrodes[minusMatch[1]] = i;
+                } else {
+                    otherChannels.push(i);
+                }
+            }
+
+            // 找出可以配对的导联
+            const computedLeads = [];  // [{name, plusIdx, minusIdx}]
+            const pairedPlusKeys = new Set();
+
+            for (const leadName of Object.keys(plusElectrodes)) {
+                if (minusElectrodes.hasOwnProperty(leadName)) {
+                    computedLeads.push({
+                        name: leadName,
+                        plusIdx: plusElectrodes[leadName],
+                        minusIdx: minusElectrodes[leadName]
+                    });
+                    pairedPlusKeys.add(leadName);
+                }
+            }
+
+            // 检测是否应该使用计算导联模式
+            // 如果有配对的导联，就使用计算模式
+            if (computedLeads.length > 0) {
+                console.log(`Found ${computedLeads.length} computed leads:`, computedLeads.map(l => l.name));
+
+                // 存储到 metadata
+                metadata.computed_leads = computedLeads;
+                metadata.is_computed_mode = true;
+
+                // 生成新的通道名称列表（只包含计算导联和其他通道）
+                metadata.display_channel_names = [
+                    ...computedLeads.map(l => l.name),
+                    ...otherChannels.map(i => names[i])
+                ];
+                metadata.display_num_channels = metadata.display_channel_names.length;
+            } else {
+                // 没有配对，保持原样
+                metadata.computed_leads = [];
+                metadata.is_computed_mode = false;
+                metadata.display_channel_names = names;
+                metadata.display_num_channels = names.length;
+            }
+
+            return metadata;
+        }
+
+        // ========== 后端 API 上传 (回退方案) ==========
+        async function uploadFileToBackend(file) {
+            showLoading('正在上传文件...');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/ecg/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || '上传失败');
+                }
+
+                const result = await response.json();
+
+                // 使用通用初始化
+                // 这里的 result 结构应该和 open_local 返回的一致
+                // 但需要在 result 中补全 filename，因为 upload 接口可能没返回 filename?
+                // 看之前的代码，filename 是从 file.name 取的。
+                // initializeFileSession 会从 metadata 构造标题，或者如果result里有filename。
+                // 我们手动注入一个。
+                result.filename = file.name;
+
+                await initializeFileSession(result, false);
+
+                hideLoading();
+                showToast('文件加载成功', 'success');
+
+            } catch (error) {
+                hideLoading();
+                showToast(error.message, 'error');
+                console.error('Upload error:', error);
+            }
+        }
+
+        // ...
+
+        function updateFileInfo(result) {
+            const meta = result.metadata;
+
+            // 研究/患者信息（如果存在则显示）
+            if (meta.study_id) {
+                document.getElementById('info-study-id').textContent = meta.study_id;
+                document.getElementById('info-study-row').style.display = 'flex';
+            }
+            if (meta.log_id) {
+                document.getElementById('info-log-id').textContent = meta.log_id;
+                document.getElementById('info-log-row').style.display = 'flex';
+            }
+            if (meta.patient_name || meta.patient_id) {
+                const patientText = meta.patient_name || meta.patient_id;
+                document.getElementById('info-patient').textContent = patientText;
+                document.getElementById('info-patient-row').style.display = 'flex';
+            }
+            if (meta.generated_by) {
+                document.getElementById('info-source').textContent = meta.generated_by;
+                document.getElementById('info-source-row').style.display = 'flex';
+            }
+
+            // 技术信息
+            document.getElementById('info-fs').textContent = `${meta.sampling_freq} Hz`;
+            document.getElementById('info-channels').textContent = meta.num_channels;
+            document.getElementById('info-duration').textContent = formatDuration(meta.duration_seconds);
+            document.getElementById('info-samples').textContent = formatNumber(meta.num_samples);
+        }
+
+        async function loadAnnotations() {
+            if (!state.fileId) return;
+
+            try {
+                const response = await fetch(`/api/ecg/annotations/${state.fileId}`);
+                if (response.ok) {
+                    const result = await response.json();
+                    state.annotations = result.annotations || [];
+                    renderAnnotationList();
+                }
+            } catch (error) {
+                console.warn('加载标注失败:', error);
+            }
+        }
+
+        function renderChannelList() {
+            const container = document.getElementById('channel-list');
+            const meta = state.metadata;
+
+            // 使用 display_channel_names（如果存在计算导联模式则是合并后的名称）
+            const displayNames = meta.display_channel_names || meta.channel_names;
+            const displayCount = meta.display_num_channels || meta.num_channels;
+
+            let html = '';
+            for (let i = 0; i < displayCount; i++) {
+                const name = displayNames[i] || `Ch ${i + 1}`;
+                const color = CHANNEL_COLORS[i % CHANNEL_COLORS.length];
+                const isActive = state.activeChannels.includes(i);
+
+                // 判断是否为计算导联
+                const isComputed = meta.is_computed_mode && i < (meta.computed_leads?.length || 0);
+                const sourceTag = isComputed
+                    ? `<span class="channel-tag computed">差分</span>`
+                    : `<span class="channel-tag raw">原始</span>`;
+
+                // 检查是否有单独的滤波设置
+                const filter = state.channelFilters?.[i];
+                const filterBadge = filter
+                    ? `<span class="channel-filter-badge">${filter.hp || 'DC'}-${filter.lp || '∞'}</span>`
+                    : '';
+
+                // 转义通道名中的单引号
+                const escapedName = name.replace(/'/g, "\\'");
+
+                html += `
+                    <div class="channel-item ${isActive ? 'active' : ''}" 
+                         onclick="toggleChannel(${i})"
+                         oncontextmenu="showChannelContextMenu(event, ${i}, '${escapedName}')">
+                        <div class="channel-color" style="background: ${color}"></div>
+                        <span class="channel-name">${name}</span>
+                        ${sourceTag}
+                        ${filterBadge}
+                        <div class="channel-toggle">${isActive ? '✓' : ''}</div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderAnnotationList() {
+            const container = document.getElementById('annotation-list');
+
+            if (state.annotations.length === 0) {
+                container.innerHTML = '<div class="empty-state" style="padding: 20px;"><span style="font-size: 12px;">无标注数据</span></div>';
+                return;
+            }
+
+            // 格式化相对时间为 MM:SS.ss
+            function formatRelativeTime(sec) {
+                const minutes = Math.floor(sec / 60);
+                const seconds = sec % 60;
+                return `${minutes.toString().padStart(2, '0')}:${seconds.toFixed(2).padStart(5, '0')}`;
+            }
+
+            // 从 metadata 获取录制开始时间戳（秒级 Unix 时间戳）
+            // 支持多种命名约定：大写 Timestamp（普通模式）和 小写 timestamp（merged 模式）
+            const recordStartTimestamp = state.metadata?.attributes?.Timestamp ||
+                state.metadata?.attributes?.timestamp ||
+                state.metadata?.Timestamp ||
+                state.metadata?.timestamp || 0;
+
+            // 格式化实际时间戳为 HH:MM:SS（与 Log Parser 一致）
+            function formatAbsoluteTime(timeSec) {
+                if (!recordStartTimestamp) return null;
+                // 计算实际时间：录制开始时间 + 相对秒数
+                const actualTimestampMs = (recordStartTimestamp + timeSec) * 1000;
+                const d = new Date(actualTimestampMs);
+                if (isNaN(d.getTime())) return null;
+                return d.toLocaleTimeString('en-GB', { hour12: false }); // HH:MM:SS
+            }
+
+            let html = '';
+            // 获取搜索关键词
+            const searchInput = document.getElementById('annotation-search');
+            const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+            // 过滤并渲染标注
+            let matchCount = 0;
+            for (const annot of state.annotations) {
+                const timeSec = annot.time_sec || 0;
+
+                // 使用录制开始时间 + time_sec 计算实际时间
+                const absoluteTime = formatAbsoluteTime(timeSec);
+                const timeStr = absoluteTime || formatRelativeTime(timeSec);
+
+                const label = annot.label || annot.message || 'Mark';
+                const group = annot.group || '';
+
+                // 过滤逻辑
+                if (searchTerm) {
+                    const matchText = `${label} ${group} ${timeStr}`.toLowerCase();
+                    if (!matchText.includes(searchTerm)) continue;
+                }
+                matchCount++;
+
+                // 显示分组标签（如果有）
+                const groupTag = group ? `<span style="background: #334155; color: #94a3b8; padding: 1px 4px; border-radius: 3px; font-size: 10px; margin-right: 4px;">${group}</span>` : '';
+
+                html += `
+                    <div class="annotation-item" onclick="jumpToTime(${timeSec})" title="点击跳转到 ${timeSec.toFixed(2)}s">
+                        <span class="annotation-time">${timeStr}</span>
+                        <span class="annotation-label">${groupTag}${label}</span>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html || '<div class="empty-state" style="padding: 12px;"><span style="font-size: 11px;">无匹配标注</span></div>';
+
+            // 更新计数
+            const countEl = document.getElementById('annotation-count');
+            if (countEl) {
+                countEl.textContent = searchTerm ? `(${matchCount}/${state.annotations.length})` : `(${state.annotations.length})`;
+            }
+        }
+
+        // 过滤标注（搜索框触发）
+        function filterAnnotations() {
+            renderAnnotationList();
+        }
+
+        // ========== 数据加载与渲染 ==========
+        async function loadAndRenderData(showLoadingOverlay = true) {
+            if (!state.fileId || state.activeChannels.length === 0) return;
+
+            if (showLoadingOverlay) showLoading('正在加载波形数据...');
+
+            // 计算降采样因子
+            // 为了保证波形不发生视觉位移（MinMax 算法的固有缺陷），且 WebGL 性能足够
+            // 我们强制不进行降采样，始终加载原始数据。
+            const viewDuration = state.viewEnd - state.viewStart;
+            // const targetPoints = 2000; // 旧逻辑
+            // const fs = state.metadata.sampling_freq;
+            // const rawPoints = viewDuration * fs;
+            // const downsample = Math.max(1, Math.floor(rawPoints / targetPoints));
+
+            // 始终使用原始数据
+            const downsample = 1;
+
+            try {
+                let result;
+
+                if (state.isLocalFile && state.h5file) {
+                    // 本地 h5wasm 读取
+                    result = readDataFromH5wasm(state.viewStart, state.viewEnd, state.activeChannels, downsample);
+                } else {
+                    // 后端 API 读取 - 限制参数精度避免 URL 问题
+                    const channelsParam = state.activeChannels.join(',');
+                    const startParam = state.viewStart.toFixed(3);
+                    const endParam = state.viewEnd.toFixed(3);
+
+                    const params = new URLSearchParams();
+                    params.append('start', startParam);
+                    params.append('end', endParam);
+                    params.append('channels', channelsParam);
+                    params.append('downsample', downsample);
+
+                    if (state.notchFreq) params.append('notch', state.notchFreq);
+                    if (state.lpFreq) params.append('lp', state.lpFreq);
+                    if (state.hpFreq) params.append('hp', state.hpFreq);
+                    if (state.filterMethod) params.append('filter_method', state.filterMethod);
+                    if (state.channelFilters && Object.keys(state.channelFilters).length > 0) {
+                        params.append('channel_filters', JSON.stringify(state.channelFilters));
+                    }
+
+                    const url = `/api/ecg/data/${state.fileId}?${params.toString()}`;
+                    console.log(`正在请求数据: ${url}`);
+
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error || '数据加载失败');
+                    }
+
+                    result = await response.json();
+                }
+
+                state.currentData = result;
+                renderWaveforms(result);
+                updateViewRange();
+
+                hideLoading();
+
+            } catch (error) {
+                hideLoading();
+                showToast(error.message, 'error');
+                console.error('Data load error:', error);
+            }
+        }
+
+        // ========== DSP (数字信号处理) 工具类 ==========
+        class DSP {
+            // IIR 滤波器直接形式 II 转置实现 (Direct Form II Transposed)
+            // b: 分子系数, a: 分母系数, x: 输入数组, zi: 初始状态 (可选)
+            static lfilter(b, a, x, zi = null) {
+                const n = x.length;
+                const m = b.length;
+                if (a.length !== m) throw new Error("Filter coefficients usually have same length");
+
+                const y = new Float32Array(n);
+                const z = zi ? new Float32Array(zi) : new Float32Array(m - 1);
+
+                // 归一化系数 (如果 a[0] != 1) - 通常 SciPy 生成的 a[0]=1
+                if (a[0] !== 1.0) {
+                    const a0 = a[0];
+                    for (let i = 0; i < m; i++) { b[i] /= a0; a[i] /= a0; }
+                }
+
+                for (let i = 0; i < n; i++) {
+                    const xi = x[i];
+                    const yi = b[0] * xi + z[0];
+                    y[i] = yi;
+
+                    for (let j = 0; j < m - 2; j++) {
+                        z[j] = b[j + 1] * xi - a[j + 1] * yi + z[j + 1];
+                    }
+                    if (m > 1) {
+                        z[m - 2] = b[m - 1] * xi - a[m - 1] * yi;
+                    }
+                }
+                return { y, zf: z };
+            }
+
+            // 零相位滤波 (类似于 scipy.signal.filtfilt)
+            static filtfilt(b, a, x) {
+                const n = x.length;
+                // 正向滤波
+                const { y: y_fwd } = this.lfilter(b, a, x);
+                // 反向
+                let x_rev = new Float32Array(n);
+                for (let i = 0; i < n; i++) x_rev[i] = y_fwd[n - 1 - i];
+
+                // 反向滤波
+                const { y: y_rev } = this.lfilter(b, a, x_rev);
+
+                // 再次反转回正序
+                let y_final = new Float32Array(n);
+                for (let i = 0; i < n; i++) y_final[i] = y_rev[n - 1 - i];
+
+                return y_final;
+            }
+
+            // 计算 Butterworth 滤波器系数 (简化版: 仅直接计算 b/a，不涉及多项式展开的复杂库)
+            // 这里我们硬编码一些常用滤波器或者使用近似公式？
+            // 实际上在 JS 中完整实现 butter() 比较复杂。
+            // 为了稳健，我们暂时只支持预定义的系数 (针对常用 50Hz notch, 35Hz LP, 0.5Hz HP 结合常见采样率 500/1000Hz)
+            // 或者：实现双线性变换 (Bilinear Transform) 来设计滤波器。
+
+            static designButterworthLowpass(cutoff, fs, order = 2) {
+                if (order === 1) {
+                    // 1st Order Butterworth Lowpass
+                    // H(s) = 1 / (s + 1) -> Pre-warped Bilinear transform
+                    const K = Math.tan(Math.PI * cutoff / fs);
+                    const norm = 1 / (1 + K);
+                    const b0 = K * norm;
+                    const b1 = K * norm;
+                    const a0 = 1; // Normalized
+                    const a1 = (K - 1) * norm;
+                    return { b: [b0, b1], a: [a0, a1] };
+                }
+
+                // 2nd Order
+                const w0 = 2 * Math.PI * cutoff / fs;
+                const cosw0 = Math.cos(w0);
+                const sinw0 = Math.sin(w0);
+                const alpha_butt = sinw0 / (2 * 0.70710678); // Q = 1/sqrt(2)
+
+                const b0 = (1 - cosw0) / 2;
+                const b1 = 1 - cosw0;
+                const b2 = (1 - cosw0) / 2;
+                const a0 = 1 + alpha_butt;
+                const a1 = -2 * cosw0;
+                const a2 = 1 - alpha_butt;
+
+                return {
+                    b: [b0 / a0, b1 / a0, b2 / a0],
+                    a: [1, a1 / a0, a2 / a0]
+                };
+            }
+
+            // 为了达到 4 阶效果，我们可以运行两次 2 阶滤波器
+            static applyLowPass(data, fs, cutoff, method) {
+                if (!cutoff || cutoff >= fs / 2) return data;
+
+                // 选择阶数：
+                // ★ Zero-phase (filtfilt) 使用 1阶基础系数 ★
+                // filtfilt(1st) = 有效 2阶衰减 + 零相位
+                // 这比 filtfilt(2nd) = 有效 4阶 保留更多高频
+                // Causal 模式因相位失真会产生锯齿，不推荐用于显示
+                const order = (method === 'causal') ? 2 : 1;
+
+                const { b, a } = this.designButterworthLowpass(cutoff, fs, order);
+
+                let result = data;
+
+                if (method === 'causal') {
+                    // Causal: 单向滤波，有相位失真（会产生锯齿）
+                    // 仅用于需要因果关系的实时处理，不建议用于回放显示
+                    result = this.lfilter(b, a, result).y;
+
+                } else {
+                    // Zero-phase (filtfilt): 前后双向滤波
+                    // 1阶系数 + filtfilt = 有效 2阶衰减 + 零相位
+                    result = this.filtfilt(b, a, result);
+                }
+                return result;
+            }
+
+            static designButterworthHighpass(cutoff, fs) {
+                const w0 = 2 * Math.PI * cutoff / fs;
+                const cosw0 = Math.cos(w0);
+                const sinw0 = Math.sin(w0);
+                const alpha_butt = sinw0 / (2 * 0.70710678);
+
+                const b0 = (1 + cosw0) / 2;
+                const b1 = -(1 + cosw0);
+                const b2 = (1 + cosw0) / 2;
+                const a0 = 1 + alpha_butt;
+                const a1 = -2 * cosw0;
+                const a2 = 1 - alpha_butt;
+
+                return {
+                    b: [b0 / a0, b1 / a0, b2 / a0],
+                    a: [1, a1 / a0, a2 / a0]
+                };
+            }
+
+            static applyHighPass(data, fs, cutoff, method) {
+                if (!cutoff || cutoff <= 0) return data;
+                const { b, a } = this.designButterworthHighpass(cutoff, fs);
+
+                let result = data;
+                if (method === 'causal') {
+                    result = this.lfilter(b, a, result).y;
+                } else {
+                    result = this.filtfilt(b, a, result);
+                }
+                return result;
+            }
+
+            // ★ Q 值降低：Q=30 振铃严重，Q=10 较平衡 ★
+            static designNotch(freq, fs, q = 10) {
+                const w0 = 2 * Math.PI * freq / fs;
+                const cosw0 = Math.cos(w0);
+                const sinw0 = Math.sin(w0);
+                const alpha = sinw0 / (2 * q);
+
+                const b0 = 1;
+                const b1 = -2 * cosw0;
+                const b2 = 1;
+                const a0 = 1 + alpha;
+                const a1 = -2 * cosw0;
+                const a2 = 1 - alpha;
+
+                return {
+                    b: [b0 / a0, b1 / a0, b2 / a0],
+                    a: [1, a1 / a0, a2 / a0]
+                };
+            }
+
+            static applyNotch(data, fs, freq, method) {
+                if (!freq) return data;
+                const { b, a } = this.designNotch(freq, fs);
+                if (method === 'causal') {
+                    return this.lfilter(b, a, data).y;
+                } else {
+                    return this.filtfilt(b, a, data);
+                }
+            }
+        }
+
+        function readDataFromH5wasm(startSec, endSec, channels, downsample) {
+            const fs = state.metadata.sampling_freq;
+            const startIdx = Math.floor(startSec * fs);
+            const endIdx = Math.ceil(endSec * fs);
+            const meta = state.metadata;
+
+            const dataNode = state.h5file.get('Data');
+            if (!dataNode) throw new Error('Data dataset not found');
+
+            const shape = dataNode.shape;
+            const numAllChannels = shape[1];
+            const clampedEnd = Math.min(endIdx, shape[0]);
+
+            // 读取完整切片数据 (一维 TypedArray)
+            // 为了滤波边缘效应，稍微多读一点 (例如前后各 1 秒，或者 20%)
+            // 简单起见，这里暂不预读 Padding，因为 h5wasm slice 比较快但也可能受限
+            const rawDataSlice = dataNode.slice([[startIdx, clampedEnd]]);
+            const numToRead = clampedEnd - startIdx;
+
+            // 预处理：解构多通道数据为独立的 Float32Array 数组以便滤波
+            // rawDataSlice 是 interlaced: [ch0, ch1, ch2, ch0, ch1, ch2...]
+            const channelDataMap = new Map(); // realChIdx -> Float32Array(samples)
+
+            // 找出所有需要读取的 unique 原始通道索引
+            const uniqueRawIndices = new Set();
+            channels.forEach(ch => {
+                if (isComputedMode && ch < computedLeads.length) {
+                    uniqueRawIndices.add(computedLeads[ch].plusIdx);
+                    uniqueRawIndices.add(computedLeads[ch].minusIdx);
+                } else if (isComputedMode) {
+                    // Find mapped real index (omitted for brevity, assume simple mapping or re-scan)
+                    // ... Re-scanning logic found below in getChannelValue ...
+                    // 为简化，我们先全部解包，或者按需解包。全部解包可能太费内存。
+                    // 鉴于 JS 性能，我们还是在 getChannelValue 里即时计算比较好？
+                    // 不，滤波必须在时域连续数据上进行。必须先解包成连续数组。
+                } else {
+                    uniqueRawIndices.add(ch);
+                }
+            });
+
+            // 如果计算模式比较复杂，我们不妨先解包“所有涉及到的”通道
+            // 简化策略：将 interlaced 数据转换成 planar (ch, time)
+
+            // 1. Deinterlace desired channels
+            // 由于我们还要支持 filter，我们需要完整的时序数组
+            const rawChannelData = {}; // chIdx -> Float32Array
+
+            // 慢但是通用：
+            // 我们只滤波可视的 Raw Channels。
+            // 重新扫描 uniqueRawIndices (如果是 Computed Mode，逻辑比较绕，这里先假设非Computed或简单处理)
+
+            // 针对当前 Active Channels 所需的 Raw Channels
+            const requiredRawChs = new Set();
+            if (isComputedMode) {
+                // 暂时不支持 Computed Lead 的本地滤波，或者应用到所有 Raw
+                // 为安全起见，简单起见：
+                // 如果是 local 滤波，解包所有通道可能太慢。
+                // 我们假设 Active Channels 直接对应 Raw Channels (非 Computed 模式常见)
+                // 如果是 Computed，我们只滤 Raw 数据。
+                for (let i = 0; i < numAllChannels; i++) requiredRawChs.add(i); // 暴利解包所有? 
+            } else {
+                channels.forEach(ch => requiredRawChs.add(ch));
+            }
+
+            for (let ch of requiredRawChs) {
+                rawChannelData[ch] = new Float32Array(numToRead);
+            }
+
+            for (let i = 0; i < numToRead; i++) {
+                const base = i * numAllChannels;
+                for (let ch of requiredRawChs) {
+                    rawChannelData[ch][i] = rawDataSlice[base + ch];
+                }
+            }
+
+            // 2. Apply Filters to each Raw Channel
+            const filterMethod = state.filterMethod || 'zero_phase';
+
+            for (let ch of requiredRawChs) {
+                let sig = rawChannelData[ch];
+
+                // 应用顺序：Notch -> HP -> LP (参考后端)
+
+                // ★ 调试开关：设为 true 可完全跳过滤波，显示原始数据 ★
+                const BYPASS_ALL_FILTERS = false; // 恢复正常滤波
+
+                if (!BYPASS_ALL_FILTERS) {
+                    // Notch
+                    if (state.notchFreq) {
+                        sig = DSP.applyNotch(sig, fs, parseFloat(state.notchFreq), filterMethod);
+                    }
+
+                    // HP
+                    if (state.hpFreq) {
+                        sig = DSP.applyHighPass(sig, fs, parseFloat(state.hpFreq), filterMethod);
+                    }
+
+                    // LP
+                    if (state.lpFreq) {
+                        sig = DSP.applyLowPass(sig, fs, parseFloat(state.lpFreq), filterMethod);
+                    }
+                } // else: 跳过所有滤波，显示原始数据
+
+                rawChannelData[ch] = sig;
+            }
+
+            // 3. 替换 getChannelValue 以使用已滤波的数据
+            function getChannelValue(sampleIdx, displayIdx) {
+                // const baseIdx = sampleIdx * numAllChannels; // 旧逻辑
+
+                if (isComputedMode && displayIdx < computedLeads.length) {
+                    const lead = computedLeads[displayIdx];
+                    // 使用已滤波的 planar 数据
+                    const v1 = rawChannelData[lead.plusIdx]?.[sampleIdx] || 0;
+                    const v2 = rawChannelData[lead.minusIdx]?.[sampleIdx] || 0;
+                    return v1 - v2;
+                } else if (isComputedMode) {
+                    // ... 复杂映射 ... 
+                    // 因上方我们已经暴利解包了所有通道 (requiredRawChs 包含了 all)，所有这里简化
+                    // 这里需要找到 displayIdx 对应的 realIdx
+                    // 略过复杂映射，暂不支持 Local Computed Mode 的部分复杂通道，回退到原始 slice?
+                    // 只有当 rawChannelData[realIdx] 存在时才用，否则用 rawDataSlice
+                    return 0; // TODO: Fix computed mode mapping for local filter
+                } else {
+                    // 非计算模式
+                    return rawChannelData[displayIdx][sampleIdx];
+                }
+            }
+
+            const time = [];
+            const data = [];
+
+            if (downsample <= 1) {
+                // 无需降采样，逐点读取
+                for (let i = 0; i < numToRead; i++) {
+                    time.push(startSec + (i / fs));
+                    const row = new Float32Array(outputChannelCount);
+                    for (let c = 0; c < outputChannelCount; c++) {
+                        row[c] = getChannelValue(i, channels[c]);
+                    }
+                    data.push(row);
+                }
+            } else {
+                // Min-Max 降采样：保留每个窗口内的最小值和最大值
+                const nWindows = Math.floor(numToRead / downsample);
+                const remainder = numToRead % downsample;
+
+                for (let w = 0; w < nWindows; w++) {
+                    const windowStart = w * downsample;
+                    const windowEnd = windowStart + downsample;
+                    const windowMidTime = startSec + ((windowStart + downsample / 2) / fs);
+
+                    // Min 行
+                    const minRow = new Float32Array(outputChannelCount);
+                    // Max 行
+                    const maxRow = new Float32Array(outputChannelCount);
+
+                    // 初始化
+                    for (let c = 0; c < outputChannelCount; c++) {
+                        minRow[c] = Infinity;
+                        maxRow[c] = -Infinity;
+                    }
+
+                    // 遍历窗口内所有采样点
+                    for (let i = windowStart; i < windowEnd && i < numToRead; i++) {
+                        for (let c = 0; c < outputChannelCount; c++) {
+                            const val = getChannelValue(i, channels[c]);
+                            if (val < minRow[c]) minRow[c] = val;
+                            if (val > maxRow[c]) maxRow[c] = val;
+                        }
+                    }
+
+                    // 交错添加 min 和 max（保持波形形态）
+                    time.push(startSec + (windowStart / fs));
+                    data.push(minRow);
+                    time.push(startSec + ((windowEnd - 1) / fs));
+                    data.push(maxRow);
+                }
+
+                // 处理余数部分（确保覆盖完整时间范围）
+                if (remainder > 0) {
+                    const remStart = nWindows * downsample;
+                    const minRow = new Float32Array(outputChannelCount);
+                    const maxRow = new Float32Array(outputChannelCount);
+
+                    for (let c = 0; c < outputChannelCount; c++) {
+                        minRow[c] = Infinity;
+                        maxRow[c] = -Infinity;
+                    }
+
+                    for (let i = remStart; i < numToRead; i++) {
+                        for (let c = 0; c < outputChannelCount; c++) {
+                            const val = getChannelValue(i, channels[c]);
+                            if (val < minRow[c]) minRow[c] = val;
+                            if (val > maxRow[c]) maxRow[c] = val;
+                        }
+                    }
+
+                    time.push(startSec + (remStart / fs));
+                    data.push(minRow);
+                    time.push(endSec); // 确保覆盖到结束时间
+                    data.push(maxRow);
+                }
+            }
+
+            // 构建通道名（使用 display 名称）
+            const channelNames = channels.map(ch => displayNames[ch] || `Ch${ch + 1}`);
+
+            return {
+                time,
+                data,
+                channel_names: channelNames,
+                sampling_freq: fs / downsample,
+                units: 'mV'
+            };
+        }
+
+        function renderWaveforms(data) {
+            if (!data || !data.channel_names) {
+                console.warn('renderWaveforms: Invalid data', data);
+                return;
+            }
+            // 分页逻辑
+            const totalChannels = data.channel_names.length;
+
+            // 越界保护
+            if (state.currentPage * state.channelsPerPage >= totalChannels && totalChannels > 0) {
+                console.warn(`renderWaveforms: Page ${state.currentPage} out of bounds. Resetting.`);
+                state.currentPage = 0;
+                // 此时不递归调用，而是继续执行，因为 startIndex 会重算
+                updatePaginationUI();
+            }
+
+            const startIndex = state.currentPage * state.channelsPerPage;
+            const endIndex = Math.min(startIndex + state.channelsPerPage, totalChannels);
+
+            // 截取当前页显示的通道数据
+            const visibleChannelNames = data.channel_names.slice(startIndex, endIndex);
+            const numVisibleChannels = visibleChannelNames.length;
+
+            // 如果没有数据，清空图表
+            if (numVisibleChannels === 0) {
+                Plotly.purge('ecg-plot');
+                return;
+            }
+
+            const traces = [];
+
+            // 数据结构是 data.data[sampleIndex][channelIndex]
+            // 我们需要对每个采样点截取对应的通道
+            const visibleData = data.data.map(row => {
+                // 兼容 TypedArray (subarray) 和普通 Array (slice)
+                return (row.subarray || row.slice).call(row, startIndex, endIndex);
+            });
+
+            if (visibleData.length > 0) {
+                console.log('Visible Data Sample (Row 0):', visibleData[0]);
+            }
+
+            const time = data.time;
+
+            // 将相对时间转换为绝对时间戳 (Date 对象，用于 Plotly)
+            const recordStartTimestamp = state.metadata?.attributes?.Timestamp ||
+                state.metadata?.attributes?.timestamp ||
+                state.metadata?.Timestamp ||
+                state.metadata?.timestamp || 0;
+
+            let absoluteTime;
+            if (recordStartTimestamp) {
+                absoluteTime = time.map(t => new Date((recordStartTimestamp + t) * 1000));
+            } else {
+                // 无录制开始时间，回退到相对时间
+                absoluteTime = time;
+            }
+            const xAxisData = absoluteTime;
+
+            // ★ 物理定标逻辑 (Workmate 风格 - 纯物理坐标系) ★
+            // Y 轴单位：mm (毫米)
+            // 总高度：320 mm (模拟 Workmate 垂直显示器)
+            const PHYSICAL_SCREEN_HEIGHT_MM = 320;
+
+            // 每个通道分配的高度 (mm)
+            const channelHeightMm = PHYSICAL_SCREEN_HEIGHT_MM / numVisibleChannels;
+
+            // 检测数据单位可能是 uV (微伏) 而不是 mV
+            let dataMin = Infinity, dataMax = -Infinity;
+            for (let i = 0; i < numVisibleChannels; i++) {
+                for (let j = 0; j < Math.min(visibleData.length, 1000); j += 5) {
+                    const val = visibleData[j][i];
+                    if (val < dataMin) dataMin = val;
+                    if (val > dataMax) dataMax = val;
+                }
+            }
+            const dataRange = dataMax - dataMin;
+            // 自动缩放因子: 如果数据看起来像 uV (range > 50), 则除以 1000 转为 mV
+            const unitScaleFactor = dataRange > 50 ? 0.001 : 1.0;
+
+            console.log(`PhysRefactor: Height=${PHYSICAL_SCREEN_HEIGHT_MM}mm | ChHeight=${channelHeightMm.toFixed(2)}mm | UnitScale=${unitScaleFactor}`);
+
+            if (state.displayMode === 'stacked') {
+                for (let i = 0; i < numVisibleChannels; i++) {
+                    const actualChIndex = state.activeChannels[startIndex + i];
+                    const filter = state.channelFilters?.[actualChIndex] || {};
+                    const amplitude = filter.amplitude ? parseFloat(filter.amplitude) : 1.0; // mV/cm
+                    const clipping = filter.clipping ? parseFloat(filter.clipping) : null; // cm (1cm = 10mm)
+
+                    // 1. 计算通道中心基线 (mm) - 从上到下排列
+                    // 第 0 个通道在最上方 (Offset 最大)
+                    const offsetMm = (numVisibleChannels - 1 - i) * channelHeightMm + (channelHeightMm / 2);
+
+                    let chData = visibleData.map(row => row[i]);
+
+                    // 2. 统一转换为 mV
+                    if (unitScaleFactor !== 1.0) {
+                        chData = chData.map(v => v * unitScaleFactor);
+                    }
+
+                    // 3. 应用 Amplitude 缩放 (转换为 mm)
+                    // 1 mV/cm => 1 mV 对应 10 mm 高度
+                    // 公式: y_mm = val_mV * (10 / amplitude_mV_per_cm)
+                    const mmPerMv = 10 / amplitude;
+                    chData = chData.map(v => v * mmPerMv);
+
+                    // 4. 应用 Clipping (在 mm 空间)
+                    // clipping = 1 cm => ±10 mm
+                    if (clipping) {
+                        const clipLimitMm = clipping * 10;
+                        chData = chData.map(v => Math.max(-clipLimitMm, Math.min(clipLimitMm, v)));
+                    }
+
+                    // 5. 加上基线偏移 (mm)
+                    chData = chData.map(v => v + offsetMm);
+
+                    // ★ 视觉平滑处理 ★
+                    // 1. [数据层] 微弱预平滑 (权重 [0.1, 0.8, 0.1])
+                    if (chData.length > 3) {
+                        const smoothed = new Float32Array(chData.length);
+                        smoothed[0] = chData[0];
+                        for (let k = 1; k < chData.length - 1; k++) {
+                            smoothed[k] = chData[k - 1] * 0.1 + chData[k] * 0.8 + chData[k + 1] * 0.1;
+                        }
+                        smoothed[chData.length - 1] = chData[chData.length - 1];
+                        chData = smoothed;
+                    }
+
+                    // 2. [采样层] LTTB 降采样
+                    // 目标点数：4000点 (极大化保留细节，接近无损)
+                    const targetPoints = 4000;
+                    let plotX = xAxisData;
+                    let plotY = chData;
+
+                    if (chData.length > targetPoints) {
+                        // console.log(`[LTTB] Processing channel ${i}, points: ${chData.length}`);
+                        try {
+                            // 准备 LTTB 输入: [[index, value], ...]
+                            // 标准库只接受数组形式的数据点
+                            const points = new Array(chData.length);
+                            for (let k = 0; k < chData.length; k++) {
+                                points[k] = [k, chData[k]];
+                            }
+
+                            // 调用标准库
+                            const sampled = LTTB.process(points, targetPoints);
+
+                            // 映射回时间和数值
+                            // sampled 是 [[index, value], ...]
+                            plotX = new Float32Array(sampled.length);
+                            plotY = new Float32Array(sampled.length);
+
+                            for (let k = 0; k < sampled.length; k++) {
+                                const originalIndex = sampled[k][0];
+                                plotX[k] = xAxisData[originalIndex];
+                                plotY[k] = sampled[k][1];
+                            }
+                        } catch (e) {
+                            console.warn('LTTB error, fallback to raw data', e);
+                            plotX = xAxisData;
+                            plotY = chData;
+                        }
+                    }
+
+
+
+                    // Debug info
+                    // console.log(`Trace ${visibleChannelNames[i]}: ${plotX.length} points`);
+
+                    traces.push({
+                        type: 'scatter',  // ★ 切换为 SVG 渲染以获得更好的抗锯齿和 Spline 支持
+                        x: plotX,
+                        y: plotY,
+                        mode: 'lines',
+                        name: visibleChannelNames[i],
+                        line: {
+                            color: CHANNEL_COLORS[(startIndex + i) % CHANNEL_COLORS.length],
+                            width: 2,
+                            shape: 'spline', // ★ 启用样条插值，使波形更圆润
+                            smoothing: 0.3   // 0.3: 极低平滑，最大程度保留细节，仅消除锯齿
+                        },
+                        hoverinfo: 'x+y+name'
+                    });
+                }
+            } else {
+                // 叠加模式 (Overlay)
+                for (let i = 0; i < numVisibleChannels; i++) {
+                    let chData = visibleData.map(row => row[i]);
+
+                    // 1. [数据层] 微弱预平滑
+                    if (chData.length > 3) {
+                        const smoothed = new Float32Array(chData.length);
+                        smoothed[0] = chData[0];
+                        for (let k = 1; k < chData.length - 1; k++) {
+                            smoothed[k] = chData[k - 1] * 0.1 + chData[k] * 0.8 + chData[k + 1] * 0.1;
+                        }
+                        smoothed[chData.length - 1] = chData[chData.length - 1];
+                        chData = smoothed;
+                    }
+
+                    // 2. [采样层] LTTB 降采样
+                    const targetPoints = 4000;
+                    let plotX = xAxisData;
+                    let plotY = chData;
+
+                    if (chData.length > targetPoints) {
+                        try {
+                            const points = new Array(chData.length);
+                            for (let k = 0; k < chData.length; k++) { points[k] = [k, chData[k]]; }
+
+                            const sampled = LTTB.process(points, targetPoints);
+
+                            plotX = new Float32Array(sampled.length);
+                            plotY = new Float32Array(sampled.length);
+
+                            for (let k = 0; k < sampled.length; k++) {
+                                const originalIndex = sampled[k][0];
+                                plotX[k] = xAxisData[originalIndex];
+                                plotY[k] = sampled[k][1];
+                            }
+                        } catch (e) {
+                            console.warn('LTTB error overlay', e);
+                            plotX = xAxisData;
+                            plotY = chData;
+                        }
+                    }
+
+                    traces.push({
+                        type: 'scatter',
+                        x: plotX,
+                        y: plotY,
+                        mode: 'lines',
+                        name: visibleChannelNames[i],
+                        line: {
+                            color: CHANNEL_COLORS[(startIndex + i) % CHANNEL_COLORS.length],
+                            width: 2,
+                            opacity: 1.0,
+                            shape: 'spline',
+                            smoothing: 0.3
+                        }
+                    });
+                }
+            }
+
+            // 3. 处理标注 (Annotations)
+            const viewAnnots = state.annotations.filter(a =>
+                a.time_sec >= state.viewStart && a.time_sec <= state.viewEnd
+            );
+
+            const shapes = viewAnnots.map(a => {
+                const xVal = recordStartTimestamp ? new Date((recordStartTimestamp + a.time_sec) * 1000) : a.time_sec;
+                return {
+                    type: 'line',
+                    x0: xVal,
+                    x1: xVal,
+                    y0: 0,
+                    y1: 1,
+                    yref: 'paper',
+                    line: { color: '#f59e0b', width: 1, dash: 'dot' }
+                };
+            });
+
+            const annotationMarkers = viewAnnots.map((a, idx) => {
+                const xVal = recordStartTimestamp ? new Date((recordStartTimestamp + a.time_sec) * 1000) : a.time_sec;
+                const fullLabel = a.label || 'M';
+                const displayLabel = fullLabel.length > 15 ? fullLabel.substring(0, 12) + '...' : fullLabel;
+                return {
+                    x: xVal,
+                    y: 0.96,  // 图表内部上方
+                    yref: 'paper',
+                    text: displayLabel,
+                    hovertext: `${fullLabel} (点击跳转)`,
+                    showarrow: true,
+                    arrowhead: 2,
+                    ax: 0,
+                    ay: -25,
+                    font: { size: 11, color: '#f59e0b' },
+                    bgcolor: 'rgba(0, 0, 0, 0.85)',
+                    bordercolor: '#f59e0b',
+                    borderwidth: 1,
+                    borderpad: 3,
+                    captureevents: true,  // 允许捕获点击事件
+                    name: `annot_${a.time_sec}`  // 用于识别点击的标注
+                };
+            });
+
+            // 5. 在堆叠模式下，添加左侧通道名称标注
+            const channelNameAnnotations = [];
+            if (state.displayMode === 'stacked' && traces.length > 0) {
+                // 需要计算每个通道的 Y 位置
+                // traces 是按照 (numVisibleChannels - 1 - i) * offsetStep 偏移的
+                // 第一个 trace (i=0) 有最大 offset，最后一个 (i=n-1) offset 为 0
+                const dataRange = traces.length > 0 ? (traces[0].y[0] - traces[traces.length - 1].y[0]) / (traces.length > 1 ? 1 : 1) : 1;
+
+                for (let i = 0; i < numVisibleChannels; i++) {
+                    // 计算这个通道的平均 Y 值（用第一个点即可）
+                    const yPos = traces[i].y[0];
+
+                    channelNameAnnotations.push({
+                        xref: 'paper',
+                        yref: 'y',
+                        x: -0.01,
+                        y: yPos,
+                        text: visibleChannelNames[i],
+                        showarrow: false,
+                        font: {
+                            size: 10,
+                            color: CHANNEL_COLORS[(startIndex + i) % CHANNEL_COLORS.length]
+                        },
+                        xanchor: 'right',
+                        yanchor: 'middle',
+                        captureevents: true,  // 允许点击事件
+                        name: `ch-${i}`       // 用于标识是哪个通道
+                    });
+                }
+            }
+
+            // 6. 构建 Layout
+            const layout = {
+                paper_bgcolor: '#0f0f13',
+                plot_bgcolor: '#0f0f13',
+                margin: { l: 80, r: 20, t: 10, b: 40 },  // 扩大左边距容纳通道名，减小顶部边距
+                xaxis: {
+                    title: { text: recordStartTimestamp ? 'Time' : 'Time (s)', font: { color: '#a0a0b0', size: 12 } },
+                    color: '#a0a0b0',
+                    gridcolor: state.showGrid ? '#2a2a3a' : 'transparent',
+                    zerolinecolor: '#2a2a3a',
+                    tickfont: { size: 11 },
+                    type: recordStartTimestamp ? 'date' : 'linear',
+                    tickformatstops: [
+                        { dtickrange: [null, 1000], value: '%H:%M:%S.%L' }, // < 1s 间隔显示毫秒
+                        { dtickrange: [1000, null], value: '%H:%M:%S' }     // >= 1s 间隔显示秒
+                    ],
+                    // 移除固定 format，改用 stops
+                    // tickformat: ...
+                    // 明确设置 X 轴范围，防止 Plotly 自动扩展
+                    range: recordStartTimestamp
+                        ? [new Date((recordStartTimestamp + state.viewStart) * 1000),
+                        new Date((recordStartTimestamp + state.viewEnd) * 1000)]
+                        : [state.viewStart, state.viewEnd]
+                },
+                yaxis: {
+                    title: { text: state.displayMode === 'overlay' ? `Amplitude (${state.metadata.units})` : '', font: { color: '#a0a0b0', size: 12 } },
+                    color: '#a0a0b0',
+                    gridcolor: state.showGrid ? '#2a2a3a' : 'transparent',
+                    zerolinecolor: '#2a2a3a',
+                    showticklabels: state.displayMode === 'overlay',
+                    tickfont: { size: 11 },
+                    // ★ 物理定标：锁定 Y 轴范围 ★
+                    autorange: false,
+                    // Y 轴使用物理定标 (mm)
+                    // 范围固定为 [0, 320] mm
+                    range: state.displayMode === 'stacked'
+                        ? [0, 320]
+                        : undefined,
+                    // 网格线每 10mm (1cm) 一条，对应标准心电图纸的大格
+                    dtick: 10,
+                },
+                // 隐藏右侧 legend，使用左侧通道名点击切换
+                showlegend: false,
+
+                shapes: shapes,
+                annotations: [...annotationMarkers, ...channelNameAnnotations],
+
+                // 动态高度：使用容器高度减去底部控件
+                height: document.querySelector('.waveform-container')?.clientHeight - 20 || Math.max(400, numVisibleChannels * 50),
+                hovermode: 'closest'
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: false,
+                scrollZoom: true,
+                editable: true,  // 允许编辑
+                edits: {
+                    annotationPosition: true, // 仅允许移动标注
+                    annotationTail: false,
+                    annotationText: false,
+                    axisTitleText: false,
+                    colorbarTitleText: false,
+                    figureTitleText: false,
+                    legendPosition: false,
+                    legendText: false,
+                    shapePosition: false,
+                    titleText: false
+                }
+            };
+
+            Plotly.react('ecg-plot', traces, layout, config);
+
+            // 更新分页 UI (确保状态同步)
+            updatePaginationUI();
+
+            // 首次渲染后绑定 Plotly 事件（只绑定一次）
+            if (!state.plotlyEventsInitialized) {
+                state.plotlyEventsInitialized = true;
+                const plotDiv = document.getElementById('ecg-plot');
+                plotDiv.on('plotly_relayout', function (eventData) {
+                    if (eventData['xaxis.range[0]'] !== undefined) {
+                        // 获取录制开始时间戳
+                        const recordStartTimestamp = state.metadata?.attributes?.Timestamp ||
+                            state.metadata?.attributes?.timestamp ||
+                            state.metadata?.Timestamp ||
+                            state.metadata?.timestamp || 0;
+
+                        let newStart = eventData['xaxis.range[0]'];
+                        let newEnd = eventData['xaxis.range[1]'];
+
+                        // 如果是绝对时间轴，Plotly 返回的是 Date 字符串，需要转换回相对秒数
+                        if (recordStartTimestamp && typeof newStart === 'string') {
+                            const startDate = new Date(newStart);
+                            const endDate = new Date(newEnd);
+                            newStart = (startDate.getTime() / 1000) - recordStartTimestamp;
+                            newEnd = (endDate.getTime() / 1000) - recordStartTimestamp;
+                        }
+
+                        // 确保是数字
+                        state.viewStart = typeof newStart === 'number' ? newStart : parseFloat(newStart) || 0;
+                        state.viewEnd = typeof newEnd === 'number' ? newEnd : parseFloat(newEnd) || 10;
+
+                        updateViewRange();
+
+                        // 防抖加载新数据
+                        clearTimeout(state.loadTimeout);
+                        state.loadTimeout = setTimeout(() => {
+                            loadAndRenderData();
+                        }, 300);
+                        return; // X 轴缩放/平移不继续处理标注移动
+                    }
+
+                    // 2. 检测标注移动 (annotations[i].x)
+                    // eventData 格式可能是 {'annotations[0].x': 12.34}
+                    const keys = Object.keys(eventData);
+                    let annotationMoved = false;
+
+                    keys.forEach(key => {
+                        if (key.match(/^annotations\[\d+\]\.x$/)) {
+                            const index = parseInt(key.match(/\d+/)[0]);
+                            const newX = eventData[key];
+
+                            // 获取被移动的标注对象 (从 Plotly layout 中)
+                            // 注意：eventData 触发时 layout 可能还没更新，或者已经更新，最好直接看 plotDiv.layout
+                            if (plotDiv.layout.annotations && plotDiv.layout.annotations[index]) {
+                                const annotName = plotDiv.layout.annotations[index].name;
+
+                                if (annotName && annotName.startsWith('annot_')) {
+                                    const oldTimeSec = parseFloat(annotName.replace('annot_', ''));
+
+                                    // 在 state.annotations 中找到并更新
+                                    // 注意：这里可能有多条标注时间相同，简单起见匹配时间
+                                    // 更严谨应该用唯一 ID，但目前只有时间
+                                    const targetAnnot = state.annotations.find(a => Math.abs(a.time_sec - oldTimeSec) < 0.001);
+
+                                    if (targetAnnot) {
+                                        // 计算新的时间 (如果是 Date 对象需转换，如果是线性值直接用)
+                                        // 我们的 x 是绝对时间 (Date) 或 相对时间 (sec)
+                                        let newTimeSec = newX;
+
+                                        // 如果是 Date 字符串或对象
+                                        if (typeof newX === 'string' || newX instanceof Date) {
+                                            const newDate = new Date(newX);
+                                            const recordStart = state.metadata?.attributes?.Timestamp ||
+                                                state.metadata?.attributes?.timestamp || 0;
+                                            if (recordStart) {
+                                                newTimeSec = (newDate.getTime() / 1000) - recordStart;
+                                            }
+                                        }
+
+                                        console.log(`Annotation Moved: ${oldTimeSec.toFixed(3)}s -> ${newTimeSec.toFixed(3)}s`);
+                                        targetAnnot.time_sec = newTimeSec;
+                                        annotationMoved = true;
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    if (annotationMoved) {
+                        renderAnnotationList(); // 更新侧边栏
+                        // 不一定要重绘整个波形，除非需要更新标注的 name (id)
+                        // 暂时不重绘，等待用户下次操作或防抖
+                        // 或者仅更新 layout.annotations 的 name? 
+                        // 为了保持一致性，还是建议重绘，否则下次再拖同一个旧 name 会找不到
+                        // 但重绘会导致拖拽“闪烁”或重置交互，体验不好。
+                        // 妥协：只更新列表，不重绘波形，反正 name 其实可以不更新，只要内存里的 state 更新了就行。
+                        // 但等一下，如果不更新 name，下次拖拽 eventData 还是旧 name，还是能找到旧 time。
+                        // 问题是 targetAnnot.time_sec 已经变了。find 会失败。
+                        // 所以必须重绘，或者更新 layout 中的 name。
+
+                        // 简单起见：刷新整个图表 (可能体验稍顿)
+                        setTimeout(() => loadAndRenderData(), 50);
+                    }
+                });
+
+                // 点击左侧通道名切换显示/隐藏，或点击标注跳转
+                plotDiv.on('plotly_clickannotation', function (eventData) {
+                    const annotName = eventData.annotation.name;
+
+                    // 标注点击跳转
+                    if (annotName && annotName.startsWith('annot_')) {
+                        const timeSec = parseFloat(annotName.replace('annot_', ''));
+                        if (!isNaN(timeSec)) {
+                            jumpToTime(timeSec);
+                        }
+                        return;
+                    }
+
+                    // 通道名点击切换显示/隐藏
+                    if (annotName && annotName.startsWith('ch-')) {
+                        const traceIndex = parseInt(annotName.split('-')[1]);
+                        // 切换 trace 的可见性
+                        const currentVisibility = plotDiv.data[traceIndex].visible;
+                        const newVisibility = (currentVisibility === true || currentVisibility === undefined) ? 'legendonly' : true;
+
+                        Plotly.restyle(plotDiv, { visible: newVisibility }, [traceIndex]);
+
+                        // 更新 annotation 样式显示隐藏状态
+                        const annotIndex = plotDiv.layout.annotations.findIndex(a => a.name === annotName);
+                        if (annotIndex !== -1) {
+                            const newOpacity = newVisibility === true ? 1 : 0.3;
+                            Plotly.relayout(plotDiv, {
+                                [`annotations[${annotIndex}].font.color`]: newVisibility === true
+                                    ? CHANNEL_COLORS[traceIndex % CHANNEL_COLORS.length]
+                                    : '#555'
+                            });
+                        }
+                    }
+                });
+            }
+        }
+
+        // [NEW] 波形区域右键菜单 - 用于设置单通道滤波
+        // 使用事件委托确保在 Plotly 动态渲染后也能正常工作
+        document.addEventListener('contextmenu', function (event) {
+            // 检查是否点击在 ecg-plot 区域内
+            const plotDiv = document.getElementById('ecg-plot');
+            if (!plotDiv || !plotDiv.contains(event.target)) return;
+
+            // 只要在 ecg-plot 区域内，就阻止默认右键菜单
+            event.preventDefault();
+            event.stopPropagation();
+
+            // 检查是否有数据
+            if (!state.metadata || state.activeChannels.length === 0) {
+                console.log('无数据，跳过通道菜单');
+                return;
+            }
+
+            // 获取 Plotly 图表区域信息
+            const plotLayout = plotDiv._fullLayout;
+            const plotBBox = plotDiv.querySelector('.nsewdrag')?.getBoundingClientRect();
+
+            if (!plotLayout || !plotBBox) {
+                console.log('Plotly 未渲染，跳过通道菜单');
+                return;
+            }
+
+            // 计算相对于图表区域的 Y 位置
+            const relativeY = event.clientY - plotBBox.top;
+            const plotHeight = plotBBox.height;
+
+            // 考虑分页：获取当前页显示的通道
+            const startIndex = state.currentPage * state.channelsPerPage;
+            const endIndex = Math.min(startIndex + state.channelsPerPage, state.activeChannels.length);
+            const visibleChannelCount = endIndex - startIndex;
+
+            // 根据 Y 位置判断点击了哪个通道 (假设通道均匀分布)
+            const channelHeight = plotHeight / visibleChannelCount;
+            const clickedVisibleIndex = Math.floor(relativeY / channelHeight);
+
+            // 确保索引有效
+            const validVisibleIndex = Math.max(0, Math.min(clickedVisibleIndex, visibleChannelCount - 1));
+            // 转换为实际的通道索引
+            const channelIdx = state.activeChannels[startIndex + validVisibleIndex];
+            const displayNames = state.metadata.display_channel_names || state.metadata.channel_names;
+            const channelName = displayNames[channelIdx] || `Ch${channelIdx + 1}`;
+
+            console.log(`右键点击通道: ${channelName} (索引: ${channelIdx}, 页内位置: ${validVisibleIndex})`);
+
+            // 显示右键菜单
+            showChannelContextMenu(event, channelIdx, channelName);
+        }, true); // 使用捕获阶段
+
+        // ========== 控制函数 ==========
+        function toggleChannel(index) {
+            const pos = state.activeChannels.indexOf(index);
+            if (pos > -1) {
+                if (state.activeChannels.length > 1) {
+                    state.activeChannels.splice(pos, 1);
+                }
+            } else {
+                state.activeChannels.push(index);
+                state.activeChannels.sort((a, b) => a - b);
+            }
+
+            renderChannelList();
+            updatePaginationUI(); // 更新分页信息
+            loadAndRenderData();
+        }
+
+        function toggleAllChannels() {
+            const totalChannels = state.metadata.display_num_channels || state.metadata.num_channels;
+            if (state.activeChannels.length === totalChannels) {
+                state.activeChannels = [0];
+            } else {
+                state.activeChannels = Array.from({ length: totalChannels }, (_, i) => i);
+            }
+
+            renderChannelList();
+            updatePaginationUI(); // 更新分页信息
+            loadAndRenderData();
+        }
+
+        function toggleGrid() {
+            state.showGrid = !state.showGrid;
+            if (state.currentData) {
+                renderWaveforms(state.currentData);
+            }
+            showToast(state.showGrid ? '网格已显示' : '网格已隐藏');
+        }
+
+        function toggleDisplayMode() {
+            state.displayMode = state.displayMode === 'stacked' ? 'overlay' : 'stacked';
+            if (state.currentData) {
+                renderWaveforms(state.currentData);
+            }
+            showToast(state.displayMode === 'stacked' ? '堆叠显示模式' : '叠加显示模式');
+        }
+
+        function resetView() {
+            if (!state.metadata) return;
+
+            state.viewStart = 0;
+            // 根据当前速度计算初始时间窗
+            const screenWidthMm = 400;
+            const initialRange = screenWidthMm / (state.speed || 25);
+            state.viewEnd = Math.min(initialRange, state.metadata.duration_seconds);
+            state.zoomLevel = 1;
+            loadAndRenderData();
+        }
+
+        // 格式化相对秒为绝对时间 HH:MM:SS
+        function formatAbsoluteTimeForInput(relativeSec) {
+            const recordStartTimestamp = state.metadata?.attributes?.Timestamp ||
+                state.metadata?.attributes?.timestamp ||
+                state.metadata?.Timestamp ||
+                state.metadata?.timestamp || 0;
+            if (!recordStartTimestamp) {
+                return relativeSec.toFixed(2) + 's';
+            }
+            const d = new Date((recordStartTimestamp + relativeSec) * 1000);
+            return d.toLocaleTimeString('en-GB', { hour12: false }); // HH:MM:SS
+        }
+
+        // 解析绝对时间回相对秒
+        function parseAbsoluteTimeFromInput(timeStr) {
+            if (!timeStr) return 0;
+
+            const recordStartTimestamp = state.metadata?.attributes?.Timestamp ||
+                state.metadata?.attributes?.timestamp ||
+                state.metadata?.Timestamp ||
+                state.metadata?.timestamp || 0;
+
+            // 尝试解析 HH:MM:SS 或 HH:MM:SS.sss
+            const match = timeStr.match(/^(\d{1,2}):(\d{2}):(\d{2})(\.\d+)?$/);
+            if (match && recordStartTimestamp) {
+                const h = parseInt(match[1]);
+                const m = parseInt(match[2]);
+                const sInt = parseInt(match[3]);
+                const sFrac = match[4] ? parseFloat(match[4]) : 0;
+                const s = sInt + sFrac;
+
+                // 从录制开始时间获取日期部分
+                const baseDate = new Date(recordStartTimestamp * 1000);
+                const targetDate = new Date(baseDate);
+                targetDate.setHours(h, m, sInt, Math.round(sFrac * 1000));
+                // 计算相对秒数
+                const result = (targetDate.getTime() / 1000) - recordStartTimestamp;
+                return isNaN(result) ? 0 : result;
+            }
+            // 回退：尝试解析为纯数字 (秒)
+            const parsed = parseFloat(timeStr.replace(/s$/i, ''));
+            return isNaN(parsed) ? 0 : parsed;
+        }
+
+        function updateViewRange() {
+            const startInput = document.getElementById('view-start-input');
+            const endInput = document.getElementById('view-end-input');
+            if (startInput) startInput.value = formatAbsoluteTimeForInput(state.viewStart);
+            if (endInput) endInput.value = formatAbsoluteTimeForInput(state.viewEnd);
+        }
+
+        // 手动跳转到指定范围
+        function jumpToStartTime() {
+            const startInput = document.getElementById('view-start-input');
+            if (!startInput || !state.metadata) return;
+
+            let start = parseAbsoluteTimeFromInput(startInput.value);
+
+            // 保持当前视图时长
+            const viewDuration = state.viewEnd - state.viewStart;
+            const duration = state.metadata.duration_seconds;
+
+            start = Math.max(0, Math.min(start, duration - viewDuration));
+
+            state.viewStart = start;
+            state.viewEnd = Math.min(duration, start + viewDuration);
+
+            updateViewRange();
+            loadAndRenderData();
+        }
+
+        // 保留原函数用于其他调用
+        function jumpToRange() {
+            jumpToStartTime();
+        }
+
+        function zoomIn() {
+            if (!state.metadata) return;
+
+            const center = (state.viewStart + state.viewEnd) / 2;
+            const halfRange = (state.viewEnd - state.viewStart) / 4;
+
+            state.viewStart = Math.max(0, center - halfRange);
+            state.viewEnd = Math.min(state.metadata.duration_seconds, center + halfRange);
+
+            loadAndRenderData();
+        }
+
+        function zoomOut() {
+            if (!state.metadata) return;
+
+            const center = (state.viewStart + state.viewEnd) / 2;
+            const halfRange = (state.viewEnd - state.viewStart);
+
+            state.viewStart = Math.max(0, center - halfRange);
+            state.viewEnd = Math.min(state.metadata.duration_seconds, center + halfRange);
+
+            loadAndRenderData();
+        }
+
+        function panLeft() {
+            if (!state.metadata) return;
+
+            const range = state.viewEnd - state.viewStart;
+            const step = 0.01; // 固定步进 0.01 秒
+
+            state.viewStart = Math.max(0, state.viewStart - step);
+            state.viewEnd = state.viewStart + range;
+
+            loadAndRenderData(false);
+        }
+
+        function panRight() {
+            if (!state.metadata) return;
+
+            const range = state.viewEnd - state.viewStart;
+            const step = 0.01; // 固定步进 0.01 秒
+
+            state.viewEnd = Math.min(state.metadata.duration_seconds, state.viewEnd + step);
+            state.viewStart = state.viewEnd - range;
+
+            loadAndRenderData(false);
+        }
+
+        function panLeftFast() {
+            if (!state.metadata) return;
+
+            const range = state.viewEnd - state.viewStart;
+            const step = 1; // 固定步进 1 秒
+
+            state.viewStart = Math.max(0, state.viewStart - step);
+            state.viewEnd = state.viewStart + range;
+
+            loadAndRenderData(false);
+        }
+
+        function panRightFast() {
+            if (!state.metadata) return;
+
+            const range = state.viewEnd - state.viewStart;
+            const step = 1; // 固定步进 1 秒
+
+            state.viewEnd = Math.min(state.metadata.duration_seconds, state.viewEnd + step);
+            state.viewStart = state.viewEnd - range;
+
+            loadAndRenderData(false);
+        }
+
+        function fitToWindow() {
+            if (!state.metadata) return;
+
+            state.viewStart = 0;
+            state.viewEnd = state.metadata.duration_seconds;
+
+            loadAndRenderData();
+        }
+
+        function jumpToTime(time) {
+            if (!state.metadata) return;
+
+            const range = state.viewEnd - state.viewStart;
+            const offset = range * 0.1;  // 标注放在视图起始位置后 10% 处
+
+            state.viewStart = Math.max(0, time - offset);
+            state.viewEnd = Math.min(state.metadata.duration_seconds, state.viewStart + range);
+
+            if (state.viewEnd > state.metadata.duration_seconds) {
+                state.viewEnd = state.metadata.duration_seconds;
+                state.viewStart = Math.max(0, state.viewEnd - range);
+            }
+
+            updateViewRange();
+            loadAndRenderData();
+            console.log(`跳转到时间: ${time.toFixed(2)}s, 视图范围: ${state.viewStart.toFixed(2)} - ${state.viewEnd.toFixed(2)}`);
+        }
+
+        // ========== 导出功能 ==========
+        async function exportImage() {
+            if (!state.currentData) {
+                showToast('无数据可导出', 'error');
+                return;
+            }
+            try {
+                const plotDiv = document.getElementById('ecg-plot');
+                if (!plotDiv || !plotDiv.data || plotDiv.data.length === 0) {
+                    showToast('图表未渲染，无法导出', 'error');
+                    return;
+                }
+                showToast('正在导出图片...', 'info');
+
+                // 获取图片数据
+                const dataUrl = await Plotly.toImage(plotDiv, {
+                    format: 'png',
+                    width: plotDiv.clientWidth || 1920,
+                    height: plotDiv.clientHeight || 1080
+                });
+
+                // 直接使用 data URL 下载
+                const link = document.createElement('a');
+                link.href = dataUrl;
+                link.download = `ecg_export_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.png`;
+                link.click();
+
+                showToast('图片已导出', 'success');
+            } catch (err) {
+                console.error('Export failed:', err);
+                showToast('导出失败: ' + (err.message || '未知错误'), 'error');
+            }
+        }
+
+        function exportCSV() {
+            if (!state.currentData) {
+                showToast('无数据可导出', 'error');
+                return;
+            }
+
+            const data = state.currentData;
+            let csv = '时间(秒),' + data.channel_names.join(',') + '\n';
+
+            for (let i = 0; i < data.time.length; i++) {
+                const row = [data.time[i].toFixed(4)];
+                for (let j = 0; j < data.channel_names.length; j++) {
+                    row.push(data.data[i][j].toFixed(4));
+                }
+                csv += row.join(',') + '\n';
+            }
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `ecg_${state.viewStart.toFixed(1)}-${state.viewEnd.toFixed(1)}s.csv`;
+            link.click();
+
+            showToast('CSV 已导出', 'success');
+        }
+
+        // ========== 初始化 ==========
+        document.addEventListener('DOMContentLoaded', () => {
+            // 检查 API 可用性
+            fetch('/api/ecg/check')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.h5py_available) {
+                        showToast('警告: h5py 未安装，部分功能不可用', 'warning');
+                    }
+                })
+                .catch(() => {
+                    showToast('ECG API 不可用', 'error');
+                });
+        });
+
+        // 快捷键
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') panLeft();
+            else if (e.key === 'ArrowRight') panRight();
+            else if (e.key === '+' || e.key === '=') zoomIn();
+            else if (e.key === '-') zoomOut();
+            else if (e.key === 'r' || e.key === 'R') resetView();
+            else if (e.key === 'g' || e.key === 'G') toggleGrid();
+        });
+    </script>
+
+    <!-- Channel Right-Click Filter Menu (Horizontal Bar Style) -->
+    <div id="channel-context-menu" class="channel-context-menu">
+        <div class="menu-header">🎛️ <span id="ctx-channel-name"></span></div>
+        <div class="menu-row">
+            <label>Amplitude:</label>
+            <select id="ctx-amplitude-select">
+                <option value="">Auto</option>
+                <option value="0.1">0.1 mV/cm</option>
+                <option value="0.2">0.2 mV/cm</option>
+                <option value="0.3">0.3 mV/cm</option>
+                <option value="0.4">0.4 mV/cm</option>
+                <option value="0.5">0.5 mV/cm</option>
+                <option value="1">1.0 mV/cm</option>
+                <option value="2">2.0 mV/cm</option>
+                <option value="3">3.0 mV/cm</option>
+                <option value="4">4.0 mV/cm</option>
+                <option value="5">5.0 mV/cm</option>
+                <option value="10">10 mV/cm</option>
+                <option value="20">20 mV/cm</option>
+                <option value="50">50 mV/cm</option>
+                <option value="100">100 mV/cm</option>
+            </select>
+        </div>
+        <div class="menu-row">
+            <label>Clipping:</label>
+            <select id="ctx-clipping-select">
+                <option value="">Off</option>
+                <option value="1">1 cm</option>
+                <option value="2">2 cm</option>
+                <option value="3">3 cm</option>
+                <option value="4">4 cm</option>
+                <option value="5">5 cm</option>
+                <option value="6">6 cm</option>
+                <option value="7">7 cm</option>
+                <option value="8">8 cm</option>
+                <option value="9">9 cm</option>
+                <option value="10">10 cm</option>
+            </select>
+        </div>
+        <div class="menu-row">
+            <label>High Pass:</label>
+            <select id="ctx-hp-select">
+                <option value="">DC</option>
+                <option value="0.05">0.05 Hz</option>
+                <option value="0.5">0.5 Hz</option>
+                <option value="1">1 Hz</option>
+                <option value="2">2 Hz</option>
+                <option value="5">5 Hz</option>
+                <option value="10">10 Hz</option>
+                <option value="20">20 Hz</option>
+                <option value="30">30 Hz</option>
+                <option value="40">40 Hz</option>
+                <option value="50">50 Hz</option>
+                <option value="60">60 Hz</option>
+                <option value="80">80 Hz</option>
+                <option value="100">100 Hz</option>
+                <option value="200">200 Hz</option>
+            </select>
+        </div>
+        <div class="menu-row">
+            <label>Low Pass:</label>
+            <select id="ctx-lp-select">
+                <option value="">Off</option>
+                <option value="10">10 Hz</option>
+                <option value="20">20 Hz</option>
+                <option value="30">30 Hz</option>
+                <option value="40">40 Hz</option>
+                <option value="50">50 Hz</option>
+                <option value="60">60 Hz</option>
+                <option value="80">80 Hz</option>
+                <option value="100">100 Hz</option>
+                <option value="200">200 Hz</option>
+                <option value="300">300 Hz</option>
+                <option value="400">400 Hz</option>
+                <option value="500">500 Hz</option>
+            </select>
+        </div>
+        <div class="menu-actions">
+            <button class="btn-cancel" onclick="hideChannelContextMenu()">✕</button>
+            <button class="btn-apply" onclick="applyChannelFilter()">Apply</button>
+        </div>
+    </div>
+
+    <script>
+        // ========== 通道右键菜单逻辑 ==========
+        let contextMenuChannelIndex = null;
+        let contextMenuClickHandler = null;
+
+        function showChannelContextMenu(event, channelIndex, channelName) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            contextMenuChannelIndex = channelIndex;
+            const menu = document.getElementById('channel-context-menu');
+            document.getElementById('ctx-channel-name').textContent = channelName;
+
+            // 加载当前通道的设置
+            const filter = state.channelFilters?.[channelIndex] || {};
+            document.getElementById('ctx-lp-select').value = filter.lp || '';
+            document.getElementById('ctx-hp-select').value = filter.hp || '';
+            document.getElementById('ctx-amplitude-select').value = filter.amplitude || '';
+            document.getElementById('ctx-clipping-select').value = filter.clipping || '';
+
+            // 定位菜单
+            menu.style.left = event.clientX + 'px';
+            menu.style.top = event.clientY + 'px';
+            menu.classList.add('visible');
+
+            // 移除之前的监听器（如果有）
+            if (contextMenuClickHandler) {
+                document.removeEventListener('click', contextMenuClickHandler);
+            }
+
+            // 点击菜单外部关闭菜单
+            contextMenuClickHandler = function (e) {
+                const menu = document.getElementById('channel-context-menu');
+                if (!menu.contains(e.target)) {
+                    hideChannelContextMenu();
+                    document.removeEventListener('click', contextMenuClickHandler);
+                    contextMenuClickHandler = null;
+                }
+            };
+
+            // 延迟添加监听器，避免立即触发
+            setTimeout(() => {
+                document.addEventListener('click', contextMenuClickHandler);
+            }, 50);
+        }
+
+        function hideChannelContextMenu() {
+            document.getElementById('channel-context-menu').classList.remove('visible');
+            contextMenuChannelIndex = null;
+            if (contextMenuClickHandler) {
+                document.removeEventListener('click', contextMenuClickHandler);
+                contextMenuClickHandler = null;
+            }
+        }
+
+        async function applyChannelFilter() {
+            if (contextMenuChannelIndex === null) return;
+
+            const lp = document.getElementById('ctx-lp-select').value;
+            const hp = document.getElementById('ctx-hp-select').value;
+            const amplitude = document.getElementById('ctx-amplitude-select').value;
+            const clipping = document.getElementById('ctx-clipping-select').value;
+
+            // 保存通道信息（在 hideChannelContextMenu 之前获取）
+            const savedChannelIndex = contextMenuChannelIndex;
+            const chName = state.metadata?.display_channel_names?.[savedChannelIndex] || `Ch${savedChannelIndex + 1}`;
+
+            // 初始化 channelFilters
+            if (!state.channelFilters) state.channelFilters = {};
+
+            // 保存设置
+            if (lp || hp || amplitude || clipping) {
+                state.channelFilters[savedChannelIndex] = { lp, hp, amplitude, clipping };
+            } else {
+                delete state.channelFilters[savedChannelIndex];
+            }
+
+            hideChannelContextMenu();
+            renderChannelList(); // 更新通道列表显示
+            await loadAndRenderData(); // 等待数据重新加载
+
+            const parts = [];
+            if (hp) parts.push(`HP=${hp}Hz`);
+            if (lp) parts.push(`LP=${lp}Hz`);
+            if (amplitude) parts.push(`Amp=${amplitude}mV/cm`);
+            if (clipping) parts.push(`Clip=${clipping}cm`);
+            showToast(`${chName}: ${parts.length > 0 ? parts.join(', ') : '默认设置'}`, 'success');
+        }
+
+        // 初始化 UI 状态
+        document.addEventListener('DOMContentLoaded', () => {
+            // 同步 filterMethod 下拉框
+            const filterMethodSelect = document.getElementById('filter-method-select');
+            if (filterMethodSelect && state.filterMethod) {
+                filterMethodSelect.value = state.filterMethod;
+            }
+        });
+    </script>
+</body>
+
+</html>

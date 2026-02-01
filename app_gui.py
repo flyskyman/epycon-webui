@@ -250,6 +250,15 @@ except ImportError as e:
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
+# 注册 ECG API Blueprint
+try:
+    from epycon.api_ecg import ecg_api
+    app.register_blueprint(ecg_api)
+    print("✅ ECG API 已加载")
+except ImportError as e:
+    print(f"⚠️ ECG API 未加载 (可选): {e}")
+
+
 # ========================================================
 # 📝 [核心] 全局日志配置 (同时输出到文件和控制台)
 # ========================================================
@@ -701,8 +710,8 @@ def execute_epycon_conversion(cfg):
                             "subject_name": subject_name,
                             "study_id": study_id,
                             "datalog_ids": ",".join([d['id'] for d in group_files]),
-                            "timestamp": first_timestamp,
-                            "datetime": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+                            "Timestamp": first_timestamp,  # 统一使用大写 Timestamp
+                            "RecordDate": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
                             "merged": True,
                             "num_files": len(group_files),
                         }
@@ -884,6 +893,46 @@ def execute_epycon_conversion(cfg):
                                         entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
                                     
                                     conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
+                                
+                                # [NEW] 常规模式: 输出 H5 波形文件
+                                if cfg["data"]["output_format"] == "h5":
+                                    h5_out_path = os.path.join(study_out_dir, f"{datalog_id}.h5")
+                                    
+                                    # 构建元数据属性
+                                    hdf_attributes = {
+                                        "StudyID": study_id,
+                                        "LogID": datalog_id,
+                                        "sampling_freq": fs,
+                                        "num_channels": len(column_names),
+                                        "Timestamp": log_start_sec,  # Unix 时间戳（秒）
+                                        "RecordDate": datetime.fromtimestamp(log_start_sec).isoformat() if log_start_sec else "",
+                                    }
+                                    
+                                    with HDFPlanter(
+                                        h5_out_path,
+                                        column_names=column_names,
+                                        sampling_freq=fs,  # ✅ 正确传递采样率
+                                        factor=1000,
+                                        units="mV",
+                                        attributes=hdf_attributes,
+                                        compression=cfg["data"].get("compression"),
+                                        compression_opts=cfg["data"].get("compression_opts")
+                                    ) as planter:
+                                        for chunk in parser:
+                                            chunk = mount_channels(chunk, mappings)
+                                            planter.write(chunk)
+                                        
+                                        # 嵌入标注（如启用）
+                                        if cfg["data"]["pin_entries"] and target_entries_rel:
+                                            valid_marks = []
+                                            for e in target_entries_rel:
+                                                sample_pos = int(e.timestamp * fs)
+                                                valid_marks.append((sample_pos, e.group, e.msg))
+                                            if valid_marks:
+                                                p, g, m = zip(*valid_marks)
+                                                planter.add_marks(list(p), list(g), list(m))
+                                    
+                                    conv_logger.info(f"   -> 📊 生成波形: {datalog_id}.h5")
 
                         except Exception as e:
                             conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
@@ -994,6 +1043,7 @@ def serve_ui(filename):
         
     # 处理子页 HTML (自动注入返回主中心的按钮)
     try:
+        print(f"[DEBUG] Serving UI file: {file_full_path}")
         with open(file_full_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
@@ -1018,6 +1068,10 @@ def serve_ui(filename):
             
     response = make_response(content)
     response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    # ★ 强制禁用缓存，解决更新不生效的问题
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     return response
 
 @app.route('/vendor/<path:filename>')
@@ -1396,16 +1450,78 @@ def handle_preview_channels():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def open_browser(port=5050):
+    """
+    打开浏览器访问 Web UI。
+    
+    注意：本项目仅针对 Google Chrome 进行优化和测试。
+    不对其他浏览器（Safari、Firefox、Edge 等）提供兼容性保证。
+    """
     try:
         url = f"http://127.0.0.1:{port}/"
         logging.getLogger(__name__).info(f"Opening browser to {url}")
-        if os.environ.get('NO_BROWSER') != '1':
+        
+        if os.environ.get('NO_BROWSER') == '1':
+            print(f"跳过打开浏览器 (NO_BROWSER=1)，请手动访问: {url}")
+            return
+            
+        # 优先使用 Chrome 浏览器
+        if sys.platform == 'darwin':
+            # macOS: 使用 open 命令指定 Chrome
+            import subprocess
+            chrome_paths = [
+                '/Applications/Google Chrome.app',
+                '/Applications/Google Chrome Canary.app',
+                '/Applications/Chromium.app'
+            ]
+            for chrome_path in chrome_paths:
+                if os.path.exists(chrome_path):
+                    try:
+                        subprocess.run(['open', '-a', chrome_path, url], check=True)
+                        logging.getLogger(__name__).info(f"Opened with {chrome_path}")
+                        return
+                    except subprocess.CalledProcessError:
+                        continue
+            # 如果没找到 Chrome，使用默认浏览器并提示
+            print("⚠️  未检测到 Chrome，使用系统默认浏览器。建议安装 Chrome 以获得最佳体验。")
+            webbrowser.open(url)
+        elif sys.platform == 'win32':
+            # Windows: 尝试使用 Chrome
+            try:
+                chrome = webbrowser.get('chrome')
+                chrome.open(url)
+                return
+            except webbrowser.Error:
+                pass
+            # 备选
+            try:
+                chrome = webbrowser.get('google-chrome')
+                chrome.open(url)
+                return
+            except webbrowser.Error:
+                pass
+            print("⚠️  未检测到 Chrome，使用系统默认浏览器。建议安装 Chrome 以获得最佳体验。")
             webbrowser.open(url)
         else:
-            print(f"跳过打开浏览器 (NO_BROWSER=1)，请手动访问: {url}")
+            # Linux 或其他平台
+            try:
+                chrome = webbrowser.get('google-chrome')
+                chrome.open(url)
+                return
+            except webbrowser.Error:
+                pass
+            try:
+                chrome = webbrowser.get('chromium-browser')
+                chrome.open(url)
+                return
+            except webbrowser.Error:
+                pass
+            print("⚠️  未检测到 Chrome，使用系统默认浏览器。建议安装 Chrome 以获得最佳体验。")
+            webbrowser.open(url)
+            
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to open browser: {e}")
         print(f"请手动打开浏览器访问: {url}")
+
 
 if __name__ == '__main__':
     try:

@@ -285,7 +285,8 @@ class LogParser(abc.Iterator):
         # Handle tuple or scalar return from parsebin
         if isinstance(timestamp_raw, tuple):
             timestamp_raw = timestamp_raw[0]
-        timestamp = int(timestamp_raw) // self.timestampfactor
+        # [FIX] 使用浮点除法保留毫秒精度，避免标注位置计算偏差
+        timestamp = int(timestamp_raw) / self.timestampfactor
 
         # Get number of active channels
         startbyte, endbyte = self.diary.header.num_channels
@@ -408,7 +409,7 @@ class LogParser(abc.Iterator):
         return Header(
             timestamp,
             num_channels,
-            channels.content,  # Pass the list of channels, not the Channels object
+            channels,  # [FIX] 传递完整的 Channels 对象以保留双极导联映射（mount）
             amp_settings,  # type: ignore  # __post_init__ will convert dict to AmplifierSettings
             datablock_startbyte,
         )

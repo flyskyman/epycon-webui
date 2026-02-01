@@ -238,8 +238,8 @@ def main():
                     "subject_name": subject_name,
                     "study_id": study_id,
                     "datalog_ids": ",".join([d['id'] for d in group_files]),
-                    "timestamp": first_timestamp,
-                    "datetime": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+                    "Timestamp": first_timestamp,  # 统一使用大写 Timestamp
+                    "RecordDate": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
                     "merged": True,
                     "num_files": len(group_files),
                 }
@@ -420,12 +420,31 @@ def main():
                         output_filename = datalog_id + "." + output_fmt
                         full_output_path = os.path.join(output_target_dir, output_filename)
 
+                        # 构建 HDF5 属性（包含患者信息）
+                        hdf_attributes = {
+                            "SubjectID": subject_id,
+                            "SubjectName": subject_name,
+                            "StudyID": study_id,
+                            "LogID": datalog_id,
+                            "Timestamp": ref_timestamp,
+                            "RecordDate": datetime.fromtimestamp(ref_timestamp).isoformat() if ref_timestamp else "",
+                        }
+                        # 添加凭证信息
+                        credentials = cfg["global_settings"].get("credentials", {})
+                        if credentials:
+                            hdf_attributes.update({
+                                "Author": credentials.get("author", ""),
+                                "Device": credentials.get("device", ""),
+                                "Owner": credentials.get("owner", ""),
+                            })
+
                         with DataPlanter(
                             f_path=full_output_path,
-                            chnames=column_names,
+                            column_names=column_names,
                             sampling_freq=header.amp.sampling_freq,
                             factor=1000,
                             units="mV",
+                            attributes=hdf_attributes if output_fmt == "h5" else {},
                         ) as planter:
                             # create mandatory datasets
                             for chunk in parser:

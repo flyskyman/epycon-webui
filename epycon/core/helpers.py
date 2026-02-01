@@ -122,36 +122,35 @@ def get_channel_mappings(header, cfg):
         
     Returns:
         dict: Mapping of channel names to indices/references
+              - computed 模式: 双极导联自动合并 (CS 1-2 = u+ - u-)
+              - original 模式: 返回原始单极通道 (u+CS 1-2, u-CS 1-2)
     """
-    if hasattr(header.channels, 'add_custom_mount'):
-        # ChannelCollection 对象
+    from epycon.core._dataclasses import Channels
+    
+    # 检查是否是 Channels 对象（包含 mount 映射）
+    if isinstance(header.channels, Channels):
+        channels_obj = header.channels
+        
+        # 添加自定义通道映射（如果有）
         custom_channels = cfg.get("data", {}).get("custom_channels", {})
         if custom_channels:
-            header.channels.add_custom_mount(custom_channels, override=False)
+            channels_obj.add_custom_mount(custom_channels, override=False)
+        
+        # 根据配置返回计算导联或原始导联
         if cfg.get("data", {}).get("leads") == "computed":
-            return header.channels.computed_mappings
+            return channels_obj.computed_mappings  # 双极合并后的映射
         else:
-            return header.channels.raw_mappings
+            return channels_obj.raw_mappings  # 原始单极通道映射
+    
+    # 兼容旧版：如果是简单 list
     elif isinstance(header.channels, list) and header.channels:
-        # 简单 list，每个元素是 Channel 对象（有 name 和 reference 属性）
-        # reference 是实际数据列的索引
         mappings = {}
         for ch in header.channels:
             if hasattr(ch, 'name') and hasattr(ch, 'reference'):
-                # Channel 对象：使用 reference 作为数据列索引
-                # 只包含 reference 在有效范围内的通道
                 if ch.reference is not None and ch.reference < header.num_channels:
-                    mappings[ch.name] = [ch.reference]
-            elif hasattr(ch, 'name'):
-                # 只有 name 没有 reference，跳过或使用默认
-                pass
-            elif isinstance(ch, str):
-                # 字符串通道名，使用索引（legacy 支持）
-                idx = list(header.channels).index(ch)
-                if idx < header.num_channels:
-                    mappings[ch] = [idx]
-        return mappings if mappings else {f"ch{i}": [i] for i in range(header.num_channels)}
-    else:
-        # fallback: 使用默认名称
-        return {f"ch{i}": [i] for i in range(header.num_channels)} if header.num_channels > 0 else {"ch0": [0]}
+                    mappings[ch.name] = (ch.reference,)
+        return mappings if mappings else {f"ch{i}": (i,) for i in range(header.num_channels)}
+    
+    # fallback
+    return {f"ch{i}": (i,) for i in range(header.num_channels)} if header.num_channels > 0 else {"ch0": (0,)}
 

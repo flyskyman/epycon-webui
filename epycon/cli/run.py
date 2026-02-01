@@ -1,3 +1,15 @@
+"""
+⚠️ 弃用说明 (Deprecation Notice)
+================================
+本文件是早期的基准测试/示例代码，用于 CLI 入口点测试和性能评估。
+
+重要提示：
+- 主程序转码功能请使用 WebUI (editor.html → /run-direct API)
+- 此文件存在采样率传递缺失等问题，不建议用于生产转码
+- 保留此文件仅为确保 pytest 集成测试 (test_cli_integration.py) 正常运行
+
+如需修改转码逻辑，请编辑 app_gui.py 中的 execute_epycon_conversion 函数。
+"""
 import os
 import json
 import argparse
@@ -44,8 +56,10 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
-    jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
+    # 配置路径修正：使用 epycon/config/ 而非 cli/config/
+    config_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_path = os.environ.get("EPYCON_CONFIG", os.path.join(config_dir, 'config.json'))
+    jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(config_dir, 'schema.json'))
     
     # Instantiate basic logger
     from ..core.helpers import default_log_path as get_default_log_path
@@ -166,13 +180,14 @@ def main():
             
             start = time.time()
             file_id = os.path.basename(logfile).split('.')[0]
-            header = _readheader(logfile)            
+            header = _readheader(logfile)
+            fs = header.amp.sampling_freq  # [FIX] 获取采样率
             data = cast(np.ndarray, _readdata(logfile, version='4.2', mount=False))
                         
             # ---------------- read header ---------------
             if file_id in [entry.fid for entry in marks]:        
                 entries_for_file = [entry for entry in marks if entry.fid == file_id]
-                temp = [(item.group, int(cast(float, difftimestamp([int(item.timestamp), int(header.timestamp)])) * 2000), item.message) for item in entries_for_file]
+                temp = [(item.group, int(cast(float, difftimestamp([int(item.timestamp), int(header.timestamp)])) * fs), item.message) for item in entries_for_file]
                 group, start_sample, info = list(zip(*temp))        
             else:
                 group, start_sample, info = list(), list(), list()
@@ -182,7 +197,7 @@ def main():
 
             # ---------------- create hdf with no compression ---------------
             start = time.time()
-            planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '.h5'))
+            planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '.h5'), sampling_freq=fs)
             with planter:
                 planter.write(data)
 
@@ -204,7 +219,7 @@ def main():
 
             # ---------------- create hdf with gzip compression ---------------
             start = time.time()
-            planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '_gzip.h5'))
+            planter = HDFPlanter(f_path=os.path.join(out_path, fold_id, file_id + '_gzip.h5'), sampling_freq=fs)
             with planter:
                 planter.write(data)
 

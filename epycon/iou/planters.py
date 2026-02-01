@@ -326,12 +326,21 @@ class HDFPlanter(DatalogPlanter):
         # [NEW] 压缩选项
         self.compression = kwargs.pop("compression", None)  # e.g., 'lzf', 'gzip'
         self.compression_opts = kwargs.pop("compression_opts", None)
+        
+        # [NEW] Append 模式支持
+        self.append_mode = kwargs.pop("append", False)
 
         self._header_isstored = False
 
     def __enter__(self):
-        try:            
-            self._f_obj = h.File(self.f_path, "w")
+        try:
+            # [FIX] 根据 append_mode 选择文件打开模式
+            mode = "a" if self.append_mode and os.path.exists(self.f_path) else "w"
+            self._f_obj = h.File(self.f_path, mode)
+            
+            # 如果是 append 模式且文件已有数据，标记 header 已存储
+            if mode == "a" and self._DATASET_DNAME in self._f_obj:
+                self._header_isstored = True
         except IOError as e:
             raise IOError(e)
         return self

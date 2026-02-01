@@ -23,6 +23,54 @@
 2. 运行工具集：打开 `ui/index.html` 或运行 `python app_gui.py`
 3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
 
+## 核心技术：ECG 信号处理与渲染流水线 ("Golden Configuration")
+
+本系统采用医疗级信号处理标准，确保波形渲染既具备 WorkMate 级别的平滑质感，又完整保留诊断所需的微小病理细节（如 aVL 导联切迹）。
+
+### 📊 信号流水线图解
+
+```mermaid
+graph TD
+    A[💾 硬盘原始数据] --> B{后端去噪 (Python)}
+    
+    subgraph Backend [后端处理]
+        B -->|1. ActiveNotch™| C(谐波陷波 50/100/150Hz)
+        C -->|2. LowPass| D(因果低通 40Hz 1阶)
+        D -->|3. HighPass| E(高通去漂移 0.5Hz)
+    end
+
+    E --> F{前端预处理 (JS)}
+
+    subgraph Frontend_Pre [前端优化]
+        F -->|4. Micro-Smooth| G(微平滑 [0.1, 0.8])
+        G -->|5. LTTB| H(高密度降采样 4000点)
+    end
+
+    H --> I{渲染引擎 (SVG)}
+
+    subgraph Frontend_Render [矢量绘制]
+        I -->|6. Spline| J(紧致样条 0.3)
+    end
+    
+    J --> K[👀 最终画面]
+```
+
+### 关键技术参数
+
+1.  **后端去噪 (Signal Hygiene)**
+    *   **ActiveNotch™**: 级联陷波器，同时滤除基频 (**50Hz**) 及其二次/三次谐波 (**100Hz/150Hz**)，消除非线性负载微锯齿。
+    *   **Causal LowPass**: **40Hz 1阶** IIR 滤波器。优先保证**相位线性**和**无预振铃**，还原真实生理信号起始点。
+    *   **HighPass**: **0.5Hz** 去基线漂移。用于消除呼吸波动带来的基线不稳。
+
+2.  **前端微调 (Visual Polish)**
+    *   **Micro-Smoothing**: 极柔和的高斯核 **`[0.1, 0.8, 0.1]`**。作为“视觉降噪器”，擦除 1 阶滤波器残留下的高频模糊（Fuzz），而不侵蚀信号波峰。
+
+3.  **高保真渲染 (High Fidelity)**
+    *   **LTTB 采样**: **4000 点/通道**。在 1080p 下提供 >2x 像素密度的“视觉无损”精度，防止高速 (100mm/s) 下的折线感。
+    *   **SVG + Spline 0.3**: 弃用 WebGL，改用原生 SVG 矢量抗锯齿。配合 **0.3** 的紧致样条系数，消除数字阶梯感的同时，完美贴合原始数据点。
+
+---
+
 ## 开发：运行测试与生成覆盖率
 
 - 使用项目内的 PowerShell 脚本（推荐，保留在 `scripts/`）：
