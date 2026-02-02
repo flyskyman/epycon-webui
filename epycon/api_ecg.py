@@ -57,22 +57,26 @@ def _convert_numpy_types(obj):
     return obj
 
 
-def apply_notch_filter(data, fs, freq=50.0, q=35.0, method='zero_phase'):
+def apply_notch_filter(data, fs, freq=50.0, q=35.0, method='zero_phase', enhanced=False):
     """
-    应用级联双级陷波滤波器去除特定频率干扰（模拟 ActiveNotch™）
+    应用陷波滤波器去除特定频率干扰。
     
-    ActiveNotch™ 规格：±0.35Hz 带宽 (<3dB 衰减外)，相当于 Q≈71
-    我们使用级联两个 Q=35 的滤波器来达到类似效果，同时减少振铃
+    模式说明:
+    1. 标准模式 (enhanced=False):
+       - 仅去除基频 (如 50Hz)
+       - 仅运行一次滤波器 (Standard Scipy)
+       
+    2. ActiveNotch™ 增强模式 (enhanced=True):
+       - 去除基频及 2/3 次谐波 (50, 100, 150 Hz)
+       - 双重级联 (Double Cascade)，加深衰减深度
     
     Args:
-        data: 输入数据，shape 可以是 (samples,) 或 (samples, channels)
-        fs: 采样频率 (Hz)
-        freq: 要去除的频率 (Hz)，默认 50Hz
-        q: 单级品质因子，默认 35（级联后等效更窄）
-        method: 'zero_phase' 或 'causal'
-    
-    Returns:
-        滤波后的数据，shape 与输入相同
+        data: 输入数据
+        fs: 采样频率
+        freq: 基频 (Hz)
+        q: 品质因子 (默认 35.0)
+        method: 'zero_phase' (filtfilt) 或 'causal' (lfilter)
+        enhanced: 是否开启增强模式 (默认 False)
     """
     if not SCIPY_AVAILABLE:
         logger.warning("scipy 不可用，跳过滤波")
@@ -81,51 +85,66 @@ def apply_notch_filter(data, fs, freq=50.0, q=35.0, method='zero_phase'):
     # 统计信息用于调试
     std_before = np.std(data)
     
-    # ★ 增强版 ActiveNotch™ 模拟：去除基频及 2/3 次谐波 (50Hz, 100Hz, 150Hz) ★
-    harmonics = [1, 2, 3] # 去除基频、二次谐波、三次谐波
+    # 根据模式决定处理的频率列表
+    if enhanced:
+        harmonics = [1, 2, 3] # 增强模式：基频 + 2/3次谐波
+    else:
+        harmonics = [1]       # 标准模式：仅基频
     
     current_data = data
     
     for k in harmonics:
         target_freq = freq * k
         if target_freq >= fs / 2:
-            continue # 超过奈奎斯特频率，跳过
+            continue # 超过奈奎斯特频率
             
         # 设计单级陷波滤波器
         b, a = scipy_signal.iirnotch(target_freq, q, fs)
         
-        # 应用滤波器 (级联两次以加深衰减)
+        # 应用滤波器
         if method == 'causal':
-            # 因果滤波 (lfilter)，级联两次
+            # 因果滤波 (lfilter)
             if len(current_data.shape) == 1:
                 zi = scipy_signal.lfilter_zi(b, a)
-                filtered, _ = scipy_signal.lfilter(b, a, current_data, zi=zi*current_data[0])
-                # 第二次级联
-                zi = scipy_signal.lfilter_zi(b, a)
-                filtered, _ = scipy_signal.lfilter(b, a, filtered, zi=zi*filtered[0])
+                current_data, _ = scipy_signal.lfilter(b, a, current_data, zi=zi*current_data[0])
+                
+                # [增强模式] 第二次级联
+                if enhanced:
+                    zi = scipy_signal.lfilter_zi(b, a)
+                    current_data, _ = scipy_signal.lfilter(b, a, current_data, zi=zi*current_data[0])
             else:
                 filtered = np.zeros_like(current_data)
                 for ch in range(current_data.shape[1]):
                     zi = scipy_signal.lfilter_zi(b, a)
                     temp, _ = scipy_signal.lfilter(b, a, current_data[:, ch], zi=zi*current_data[0, ch])
-                    # 第二次级联
-                    zi = scipy_signal.lfilter_zi(b, a)
-                    filtered[:, ch], _ = scipy_signal.lfilter(b, a, temp, zi=zi*temp[0])
+                    
+                    # [增强模式] 第二次级联
+                    if enhanced:
+                        zi = scipy_signal.lfilter_zi(b, a)
+                        temp, _ = scipy_signal.lfilter(b, a, temp, zi=zi*temp[0])
+                        
+                    filtered[:, ch] = temp
+                current_data = filtered
         else:
-            # 零相位滤波 (filtfilt)，级联两次
+            # 零相位滤波 (filtfilt)
             if len(current_data.shape) == 1:
-                filtered = scipy_signal.filtfilt(b, a, current_data)
-                filtered = scipy_signal.filtfilt(b, a, filtered)  # 第二次级联
+                current_data = scipy_signal.filtfilt(b, a, current_data)
+                # [增强模式] 第二次级联
+                if enhanced:
+                    current_data = scipy_signal.filtfilt(b, a, current_data)
             else:
                 filtered = np.zeros_like(current_data)
                 for ch in range(current_data.shape[1]):
                     temp = scipy_signal.filtfilt(b, a, current_data[:, ch])
-                    filtered[:, ch] = scipy_signal.filtfilt(b, a, temp)  # 第二次级联
-        
-        current_data = filtered
+                    # [增强模式] 第二次级联
+                    if enhanced:
+                        temp = scipy_signal.filtfilt(b, a, temp)
+                    filtered[:, ch] = temp
+                current_data = filtered
     
     std_after = np.std(current_data)
-    logger.info(f"ActiveNotch™ 增强版完成 ({method}, 2×Q={q}): 基频{freq}Hz+谐波, fs={fs}Hz, 信号标准差变化: {std_before:.4f} -> {std_after:.4f}")
+    mode_str = "ActiveNotch™ Enhanced" if enhanced else "Standard Scipy"
+    logger.info(f"{mode_str} 完成 ({method}): Freq={freq}Hz, Harmonics={harmonics}, fs={fs}Hz")
     
     return current_data, True
 
@@ -1052,9 +1071,16 @@ def get_data(file_id):
                 if notch_freq:
                     try:
                         freq = float(notch_freq)
-                        raw_data_full, applied = apply_notch_filter(raw_data_full, fs, freq=freq, method=filter_method)
+                        raw_data_full, applied = apply_notch_filter(
+                            raw_data_full, 
+                            fs, 
+                            freq=freq, 
+                            method=filter_method,
+                            enhanced=enhanced_notch  # 传递增强标志
+                        )
                         if applied:
-                            logger.info(f"[预降采样] 已应用 {freq}Hz 陷波滤波 ({filter_method})")
+                            mode = "ActiveNotch™" if enhanced_notch else "Standard"
+                            logger.info(f"[预降采样] 已应用 {freq}Hz 陷波滤波 ({mode}, {filter_method})")
                     except Exception as e:
                         logger.warning(f"[预降采样] 陷波滤波失败: {e}")
                 
@@ -1237,9 +1263,10 @@ def get_annotations(file_id):
     fs = metadata['sampling_freq']
     
     # 解析参数
-    start_sec = request.args.get('start')
-    end_sec = request.args.get('end')
-    annot_type = request.args.get('type')
+    notch_freq = request.args.get('notch')
+    enhanced_notch = request.args.get('enhanced_notch') == 'true'  # 解析增强标志
+    lp_cutoff = request.args.get('lp')
+    hp_cutoff = request.args.get('hp')
     
     # 筛选
     result = []

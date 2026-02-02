@@ -894,6 +894,12 @@
             </div>
 
             <div class="toolbar-right">
+                <label
+                    style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; color: var(--text-secondary);">
+                    <input type="checkbox" id="smoothing-toggle" checked onchange="toggleSmoothing()">
+                    <span style="font-weight: 500;">✨ 平滑</span>
+                </label>
+                <div class="divider"></div>
                 <!-- 分页控件 -->
                 <div id="pagination-controls"
                     style="display: none; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
@@ -942,6 +948,13 @@
                         <option value="50" selected>50Hz</option>
                         <option value="60">60Hz</option>
                     </select>
+                    <!-- 增强陷波开关 -->
+                    <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; margin-left: 2px;"
+                        title="ActiveNotch™ Enhanced: Remove Harmonics (100/150Hz) + Double Cascade">
+                        <input type="checkbox" id="enhanced-notch-toggle" onchange="toggleEnhancedNotch(this.checked)"
+                            style="transform: scale(0.9);">
+                        <span style="font-size: 10px; color: var(--text-muted);">增强</span>
+                    </label>
                 </div>
 
                 <!-- Filter Mode 选择器 (全局) -->
@@ -952,6 +965,28 @@
                         style="padding: 2px 4px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
                         <option value="zero_phase">Zero-phase</option>
                         <option value="causal">Causal</option>
+                    </select>
+                </div>
+
+                <!-- 渲染引擎选择器 -->
+                <div
+                    style="display: flex; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <span style="font-size: 10px; color: var(--text-secondary);">渲染:</span>
+                    <select id="render-engine-select" onchange="updateRenderEngine(this.value)"
+                        style="padding: 2px 4px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
+                        <option value="svg" selected>✨ 画质 (SVG)</option>
+                        <option value="webgl">🚀 性能 (WebGL)</option>
+                    </select>
+                </div>
+
+                <!-- 降采样算法选择器 -->
+                <div
+                    style="display: flex; align-items: center; gap: 4px; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <span style="font-size: 10px; color: var(--text-secondary);">算法:</span>
+                    <select id="downsample-algo-select" onchange="updateDownsampleAlgo(this.value)"
+                        style="padding: 2px 4px; font-size: 10px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">
+                        <option value="lttb" selected>LTTB (视觉)</option>
+                        <option value="minmax">MinMax (峰值)</option>
                     </select>
                 </div>
 
@@ -1130,6 +1165,10 @@
     <script>
         // ========== 全局状态 ==========
         const state = {
+            enableSmoothing: true, // 默认开启高斯微平滑
+            enhancedNotch: false,  // 默认关闭 ActiveNotch 增强 (级联谐波)
+            renderEngine: 'svg',   // 'svg' (Quality) or 'webgl' (Performance)
+            downsampleAlgo: 'lttb',// 'lttb' (Visual) or 'minmax' (Peak)
             fileId: null,
             metadata: null,
             annotations: [],
@@ -1238,7 +1277,35 @@
         // 更新陷波滤波频率
         function updateNotchFilter(val) {
             state.notchFreq = val || null;
+            // 只有当选择了频率时，增强开关才有效（UI上可以不用禁用，但逻辑上如此）
             loadAndRenderData();
+        }
+
+        // 切换增强陷波模式
+        function toggleEnhancedNotch(checked) {
+            state.enhancedNotch = checked;
+            if (state.notchFreq) {
+                loadAndRenderData();
+                showToast(checked ? '已开启 ActiveNotch™ 增强 (级联谐波)' : '已切换至标准陷波滤波');
+            }
+        }
+
+        // 更新渲染引擎
+        function updateRenderEngine(val) {
+            state.renderEngine = val;
+            if (state.currentData) {
+                renderWaveforms(state.currentData);
+                showToast(val === 'svg' ? '已切换至高画质模式 (SVG)' : '已切换至高性能模式 (WebGL)');
+            }
+        }
+
+        // 更新降采样算法
+        function updateDownsampleAlgo(val) {
+            state.downsampleAlgo = val;
+            if (state.currentData) {
+                renderWaveforms(state.currentData);
+                showToast(val === 'lttb' ? '已切换至 LTTB 算法 (视觉优化)' : '已切换至 Min-Max 算法 (峰值保留)');
+            }
         }
 
         // 更新低通滤波频率
@@ -2072,19 +2139,23 @@
                 } else {
                     // 后端 API 读取 - 限制参数精度避免 URL 问题
                     const channelsParam = state.activeChannels.join(',');
-                    const startParam = state.viewStart.toFixed(3);
-                    const endParam = state.viewEnd.toFixed(3);
-
+                    // 后端模式：通过 API 参数传递滤波设置
+                    // 构建查询参数
                     const params = new URLSearchParams();
-                    params.append('start', startParam);
-                    params.append('end', endParam);
-                    params.append('channels', channelsParam);
-                    params.append('downsample', downsample);
-
                     if (state.notchFreq) params.append('notch', state.notchFreq);
+                    // 传递增强标志
+                    params.append('enhanced_notch', state.enhancedNotch);
+
                     if (state.lpFreq) params.append('lp', state.lpFreq);
                     if (state.hpFreq) params.append('hp', state.hpFreq);
-                    if (state.filterMethod) params.append('filter_method', state.filterMethod);
+                    params.append('method', state.filterMethod);
+
+                    // 添加视窗范围参数
+                    params.append('start', state.viewStart);
+                    params.append('end', state.viewEnd);
+                    params.append('downsample', '4000'); // 请求 4000 点用于高平滑度显示
+                    // 强制请求所有通道以便前端处理布局
+                    params.append('channels', state.activeChannels.join(',')); // Ensure active channels are passed
                     if (state.channelFilters && Object.keys(state.channelFilters).length > 0) {
                         params.append('channel_filters', JSON.stringify(state.channelFilters));
                     }
@@ -2134,36 +2205,28 @@
 
                 for (let i = 0; i < n; i++) {
                     const xi = x[i];
-                    const yi = b[0] * xi + z[0];
-                    y[i] = yi;
-
+                    y[i] = b[0] * xi + z[0];
                     for (let j = 0; j < m - 2; j++) {
-                        z[j] = b[j + 1] * xi - a[j + 1] * yi + z[j + 1];
+                        z[j] = b[j + 1] * xi + z[j + 1] - a[j + 1] * y[i];
                     }
-                    if (m > 1) {
-                        z[m - 2] = b[m - 1] * xi - a[m - 1] * yi;
-                    }
+                    z[m - 2] = b[m - 1] * xi - a[m - 1] * y[i];
                 }
-                return { y, zf: z };
+
+                return { y, z };
             }
 
-            // 零相位滤波 (类似于 scipy.signal.filtfilt)
+            // 零相位滤波 (filtfilt) - 类似 scipy.signal.filtfilt
             static filtfilt(b, a, x) {
-                const n = x.length;
-                // 正向滤波
-                const { y: y_fwd } = this.lfilter(b, a, x);
-                // 反向
-                let x_rev = new Float32Array(n);
-                for (let i = 0; i < n; i++) x_rev[i] = y_fwd[n - 1 - i];
-
-                // 反向滤波
-                const { y: y_rev } = this.lfilter(b, a, x_rev);
-
-                // 再次反转回正序
-                let y_final = new Float32Array(n);
-                for (let i = 0; i < n; i++) y_final[i] = y_rev[n - 1 - i];
-
-                return y_final;
+                const len = x.length;
+                // 1. 前向滤波
+                const { y: y_forward } = this.lfilter(b, a, x);
+                // 2. 反转
+                y_forward.reverse();
+                // 3. 后向滤波 (再次通过前向滤波器)
+                const { y: y_backward } = this.lfilter(b, a, y_forward);
+                // 4. 反转回来
+                y_backward.reverse();
+                return y_backward;
             }
 
             // 计算 Butterworth 滤波器系数 (简化版: 仅直接计算 b/a，不涉及多项式展开的复杂库)
@@ -2656,8 +2719,13 @@
                                 points[k] = [k, chData[k]];
                             }
 
-                            // 调用标准库
-                            const sampled = LTTB.process(points, targetPoints);
+                            // 根据算法选择降采样方式
+                            let sampled;
+                            if (state.downsampleAlgo === 'minmax') {
+                                sampled = DSP.minMaxDownsample(chData, targetPoints);
+                            } else {
+                                sampled = LTTB.process(points, targetPoints);
+                            }
 
                             // 映射回时间和数值
                             // sampled 是 [[index, value], ...]
@@ -2670,7 +2738,7 @@
                                 plotY[k] = sampled[k][1];
                             }
                         } catch (e) {
-                            console.warn('LTTB error, fallback to raw data', e);
+                            console.warn('Downsample error, fallback to raw data', e);
                             plotX = xAxisData;
                             plotY = chData;
                         }
@@ -2681,8 +2749,11 @@
                     // Debug info
                     // console.log(`Trace ${visibleChannelNames[i]}: ${plotX.length} points`);
 
+                    // 根据引擎选择 Plotly 类型和线条样式
+                    const isSVG = state.renderEngine === 'svg';
+
                     traces.push({
-                        type: 'scatter',  // ★ 切换为 SVG 渲染以获得更好的抗锯齿和 Spline 支持
+                        type: isSVG ? 'scatter' : 'scattergl', // SVG vs WebGL
                         x: plotX,
                         y: plotY,
                         mode: 'lines',
@@ -2690,8 +2761,8 @@
                         line: {
                             color: CHANNEL_COLORS[(startIndex + i) % CHANNEL_COLORS.length],
                             width: 2,
-                            shape: 'spline', // ★ 启用样条插值，使波形更圆润
-                            smoothing: 0.3   // 0.3: 极低平滑，最大程度保留细节，仅消除锯齿
+                            shape: isSVG ? 'spline' : 'linear', // WebGL 不支持 spline
+                            smoothing: isSVG ? 0.3 : 0          // 仅 SVG 有效
                         },
                         hoverinfo: 'x+y+name'
                     });
@@ -2701,8 +2772,8 @@
                 for (let i = 0; i < numVisibleChannels; i++) {
                     let chData = visibleData.map(row => row[i]);
 
-                    // 1. [数据层] 微弱预平滑
-                    if (chData.length > 3) {
+                    // 1. [数据层] 微弱预平滑 (可选)
+                    if (state.enableSmoothing && chData.length > 3) {
                         const smoothed = new Float32Array(chData.length);
                         smoothed[0] = chData[0];
                         for (let k = 1; k < chData.length - 1; k++) {
@@ -2722,7 +2793,13 @@
                             const points = new Array(chData.length);
                             for (let k = 0; k < chData.length; k++) { points[k] = [k, chData[k]]; }
 
-                            const sampled = LTTB.process(points, targetPoints);
+                            // 根据算法选择降采样方式
+                            let sampled;
+                            if (state.downsampleAlgo === 'minmax') {
+                                sampled = DSP.minMaxDownsample(chData, targetPoints);
+                            } else {
+                                sampled = LTTB.process(points, targetPoints);
+                            }
 
                             plotX = new Float32Array(sampled.length);
                             plotY = new Float32Array(sampled.length);
@@ -2733,14 +2810,17 @@
                                 plotY[k] = sampled[k][1];
                             }
                         } catch (e) {
-                            console.warn('LTTB error overlay', e);
+                            console.warn('Downsample error overlay', e);
                             plotX = xAxisData;
                             plotY = chData;
                         }
                     }
 
+                    // 根据引擎选择 Plotly 类型和线条样式
+                    const isSVG = state.renderEngine === 'svg';
+
                     traces.push({
-                        type: 'scatter',
+                        type: isSVG ? 'scatter' : 'scattergl',
                         x: plotX,
                         y: plotY,
                         mode: 'lines',
@@ -2749,8 +2829,8 @@
                             color: CHANNEL_COLORS[(startIndex + i) % CHANNEL_COLORS.length],
                             width: 2,
                             opacity: 1.0,
-                            shape: 'spline',
-                            smoothing: 0.3
+                            shape: isSVG ? 'spline' : 'linear',
+                            smoothing: isSVG ? 0.3 : 0
                         }
                     });
                 }
@@ -3139,6 +3219,15 @@
                 renderWaveforms(state.currentData);
             }
             showToast(state.displayMode === 'stacked' ? '堆叠显示模式' : '叠加显示模式');
+        }
+
+        function toggleSmoothing() {
+            const checkbox = document.getElementById('smoothing-toggle');
+            state.enableSmoothing = checkbox.checked;
+            if (state.currentData) {
+                renderWaveforms(state.currentData);
+            }
+            showToast(state.enableSmoothing ? '以开启微平滑' : '已关闭微平滑 (原始锐度)');
         }
 
         function resetView() {
