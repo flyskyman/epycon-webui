@@ -27,5 +27,4 @@
 - `CLAUDE.md` — 维护约定（发版流程、台账、删除代码规矩、常用命令）
 - `README.md` 项目结构一节
 - `docs/KNOWN_ISSUES.md` — 待办与调查项
-- `docs/archive/layout_logic_analysis.md` — ECG 查看器布局逻辑规范
-  （历史，曾名 ECG_LAYOUT_SPEC.md；重复副本已去除，此为唯一正本）
+- `docs/ECG_LAYOUT_SPEC.md` — ECG 查看器排版逻辑规范（Workmate 物理定标对比分析）

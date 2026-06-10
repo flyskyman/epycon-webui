@@ -5,6 +5,7 @@
 | 文件 | 用途 |
 |---|---|
 | `ARCHITECTURE.md` | 转码入口点与调用链（conversion.py 单一实现的导览图） |
+| `ECG_LAYOUT_SPEC.md` | Workmate vs Web Viewer 排版逻辑对比与物理定标（1mV=1cm）分析 |
 | `KNOWN_ISSUES.md` | 已知问题台账：发现暂不处理的问题入账，处理后移入"已解决" |
 | `technical_rendering_spec.md` | ECG 渲染"黄金配置"技术规范（README 流水线图的依据） |
 | `papers/315_CinCFinalPDF.pdf` | 上游 CinC 论文——HDF5 数据模型与文件格式的最高权威（Table 1） |

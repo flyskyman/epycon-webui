@@ -37,7 +37,11 @@
 
 ## 低优先级
 
-（暂无——原 9–13 条已于 2026-06-10 解决，见底部"已解决"）
+### 18. `planter.delimiter` 兼容别名待迁移
+- **位置**：`epycon/iou/planters.py`（`self.delimiter = self._delimiter` 历史兼容别名）
+- **现状**：别名仍在代码中；使用点清单与安全迁移方案见
+  `docs/archive/delimiter_migration.md`（该文档因此待办而保有参考价值）
+- **建议**：确认无外部调用方依赖后按迁移方案移除别名
 
 ---
 
