@@ -1,7 +1,7 @@
 # WorkMate 数据处理中心
 
 ![CI](https://github.com/flyskyman/epycon-webui/workflows/CI/badge.svg)
-![Coverage](https://img.shields.io/badge/coverage-76%25-green)
+![Coverage](https://img.shields.io/badge/coverage-82%25-green)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -130,16 +130,16 @@ git push origin <branch>
 
 **注意**：这是目录模式打包，包含 EXE 和支持文件。您可以压缩整个文件夹分发。
 
-运行 EXE 后，自动打开浏览器访问 `http://127.0.0.1:5000` 使用工具集。
+运行 EXE 后，自动打开浏览器访问 `http://127.0.0.1:5050` 使用工具集（端口被占用时自动在 5050-5099 范围内选择）。
 
 下载与分发
 
-- 已在 GitHub Releases 上传可分发压缩包：WorkMateDataCenter-v0.0.2-alpha.zip（包含 `WorkMateDataCenter.exe` 及必要支持文件）。
-- Release 页面： https://github.com/flyskyman/epycon-webui/releases/tag/v0.0.2-alpha
+- 可分发包发布在 GitHub Releases（含 `WorkMateDataCenter.exe` 及支持文件），版本变更说明见各 Release 页面。
+- 最新版本： https://github.com/flyskyman/epycon-webui/releases/latest
 
 快速下载安装并运行（Windows）：
 
-1. 从上面 Release 页面下载 `WorkMateDataCenter-v0.0.2-alpha.zip`。
+1. 从 Release 页面下载最新的 WorkMateDataCenter 压缩包。
 2. 右键解压到任意目录（例如 `C:\Tools\WorkMateDataCenter`）。
 3. 双击 `WorkMateDataCenter.exe` 启动，或在 PowerShell 中运行：
 
@@ -147,7 +147,7 @@ git push origin <branch>
 Start-Process -FilePath "C:\path\to\WorkMateDataCenter.exe"
 ```
 
-4. 程序会启动本地服务并在默认浏览器打开 `http://127.0.0.1:5000`，可在界面中选择示例数据或上传自己的 `.log` 文件进行转换。
+4. 程序会启动本地服务并在默认浏览器打开 `http://127.0.0.1:5050`，可在界面中选择示例数据或上传自己的 `.log` 文件进行转换。
 
 提示：若你希望在无浏览器（服务器）环境使用批处理功能，请使用源码方式运行：
 
@@ -174,6 +174,7 @@ python -m epycon
 - `config/`：运行时配置（`config.json`, `schema.json`）。
 - `docs/`：项目文档与历史发布档案（`release_notes_v0.0.3-alpha.md`, 压缩包等）。
 - `examples/`：示例和示例数据（`examples/demo.py`, `examples/data/`）。
-- 项目根还包含：`README.md`, `CHANGELOG.md`, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
+- 项目根还包含：`README.md`, `CLAUDE.md`（维护约定）, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
+- 变更记录：用户可见变更见 [GitHub Releases](https://github.com/flyskyman/epycon-webui/releases)；开发细节见 git log；待办问题见 `docs/KNOWN_ISSUES.md`。
 
 打包说明：为了简化 PyInstaller 配置，`--add-data "ui;ui"` 可用于包含整个前端目录（示例命令已在上方“打包为可执行文件”部分）。
