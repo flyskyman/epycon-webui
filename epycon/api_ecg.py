@@ -8,6 +8,7 @@ import base64
 import tempfile
 import logging
 from datetime import datetime
+from functools import lru_cache
 from flask import Blueprint, request, jsonify, send_file
 import numpy as np
 
@@ -57,6 +58,31 @@ def _convert_numpy_types(obj):
     return obj
 
 
+@lru_cache(maxsize=64)
+def _iirnotch_coeffs(freq, q, fs):
+    """陷波器系数缓存：同参数请求免重复设计"""
+    return scipy_signal.iirnotch(freq, q, fs)
+
+
+@lru_cache(maxsize=64)
+def _butter_coeffs(order, normal_cutoff, btype):
+    """Butterworth 系数缓存"""
+    return scipy_signal.butter(order, normal_cutoff, btype=btype, analog=False)
+
+
+def _apply_iir(b, a, data, method):
+    """对 1D/2D 数据整体应用 IIR 滤波（2D 沿 axis=0 向量化，免逐通道 Python 循环）"""
+    if method == 'causal':
+        zi = scipy_signal.lfilter_zi(b, a)
+        if data.ndim == 1:
+            filtered, _ = scipy_signal.lfilter(b, a, data, zi=zi * data[0])
+        else:
+            filtered, _ = scipy_signal.lfilter(b, a, data, axis=0, zi=zi[:, np.newaxis] * data[0])
+        return filtered
+    axis = 0 if data.ndim > 1 else -1
+    return scipy_signal.filtfilt(b, a, data, axis=axis)
+
+
 def apply_notch_filter(data, fs, freq=50.0, q=35.0, method='zero_phase', enhanced=False):
     """
     应用陷波滤波器去除特定频率干扰。
@@ -95,49 +121,13 @@ def apply_notch_filter(data, fs, freq=50.0, q=35.0, method='zero_phase', enhance
         if target_freq >= fs / 2:
             continue  # 超过奈奎斯特频率
 
-        # 设计单级陷波滤波器
-        b, a = scipy_signal.iirnotch(target_freq, q, fs)
+        # 设计单级陷波滤波器（系数按参数缓存）
+        b, a = _iirnotch_coeffs(float(target_freq), float(q), float(fs))
 
-        # 应用滤波器
-        if method == 'causal':
-            # 因果滤波 (lfilter)
-            if len(current_data.shape) == 1:
-                zi = scipy_signal.lfilter_zi(b, a)
-                current_data, _ = scipy_signal.lfilter(b, a, current_data, zi=zi * current_data[0])
-
-                # [增强模式] 第二次级联
-                if enhanced:
-                    zi = scipy_signal.lfilter_zi(b, a)
-                    current_data, _ = scipy_signal.lfilter(b, a, current_data, zi=zi * current_data[0])
-            else:
-                filtered = np.zeros_like(current_data)
-                for ch in range(current_data.shape[1]):
-                    zi = scipy_signal.lfilter_zi(b, a)
-                    temp, _ = scipy_signal.lfilter(b, a, current_data[:, ch], zi=zi * current_data[0, ch])
-
-                    # [增强模式] 第二次级联
-                    if enhanced:
-                        zi = scipy_signal.lfilter_zi(b, a)
-                        temp, _ = scipy_signal.lfilter(b, a, temp, zi=zi * temp[0])
-
-                    filtered[:, ch] = temp
-                current_data = filtered
-        else:
-            # 零相位滤波 (filtfilt)
-            if len(current_data.shape) == 1:
-                current_data = scipy_signal.filtfilt(b, a, current_data)
-                # [增强模式] 第二次级联
-                if enhanced:
-                    current_data = scipy_signal.filtfilt(b, a, current_data)
-            else:
-                filtered = np.zeros_like(current_data)
-                for ch in range(current_data.shape[1]):
-                    temp = scipy_signal.filtfilt(b, a, current_data[:, ch])
-                    # [增强模式] 第二次级联
-                    if enhanced:
-                        temp = scipy_signal.filtfilt(b, a, temp)
-                    filtered[:, ch] = temp
-                current_data = filtered
+        # 增强模式双重级联；1D/2D 统一向量化应用
+        passes = 2 if enhanced else 1
+        for _ in range(passes):
+            current_data = _apply_iir(b, a, current_data, method)
 
     mode_str = "ActiveNotch™ Enhanced" if enhanced else "Standard Scipy"
     logger.info(f"{mode_str} 完成 ({method}): Freq={freq}Hz, Harmonics={harmonics}, fs={fs}Hz")
@@ -173,30 +163,9 @@ def apply_lowpass_filter(data, fs, cutoff=35.0, order=None, method='zero_phase')
     if normal_cutoff >= 1.0:
         return data
 
-    # 设计滤波器
-    b, a = scipy_signal.butter(order, normal_cutoff, btype='low', analog=False)
-
-    # 应用滤波器
-    if method == 'causal':
-        # 因果滤波 (lfilter)
-        if len(data.shape) == 1:
-            zi = scipy_signal.lfilter_zi(b, a)
-            filtered, _ = scipy_signal.lfilter(b, a, data, zi=zi * data[0])
-        else:
-            filtered = np.zeros_like(data)
-            for ch in range(data.shape[1]):
-                zi = scipy_signal.lfilter_zi(b, a)
-                filtered[:, ch], _ = scipy_signal.lfilter(b, a, data[:, ch], zi=zi * data[0, ch])
-    else:
-        # 零相位滤波 (filtfilt)
-        if len(data.shape) == 1:
-            filtered = scipy_signal.filtfilt(b, a, data)
-        else:
-            filtered = np.zeros_like(data)
-            for ch in range(data.shape[1]):
-                filtered[:, ch] = scipy_signal.filtfilt(b, a, data[:, ch])
-
-    return filtered
+    # 设计滤波器（系数按参数缓存），1D/2D 统一向量化应用
+    b, a = _butter_coeffs(int(order), float(normal_cutoff), 'low')
+    return _apply_iir(b, a, data, method)
 
 
 def apply_highpass_filter(data, fs, cutoff=0.5, order=None, method='zero_phase'):
@@ -217,30 +186,9 @@ def apply_highpass_filter(data, fs, cutoff=0.5, order=None, method='zero_phase')
     if normal_cutoff <= 0 or normal_cutoff >= 1.0:
         return data
 
-    # 设计滤波器
-    b, a = scipy_signal.butter(order, normal_cutoff, btype='high', analog=False)
-
-    # 应用滤波器
-    if method == 'causal':
-        # 因果滤波 (lfilter)
-        if len(data.shape) == 1:
-            zi = scipy_signal.lfilter_zi(b, a)
-            filtered, _ = scipy_signal.lfilter(b, a, data, zi=zi * data[0])
-        else:
-            filtered = np.zeros_like(data)
-            for ch in range(data.shape[1]):
-                zi = scipy_signal.lfilter_zi(b, a)
-                filtered[:, ch], _ = scipy_signal.lfilter(b, a, data[:, ch], zi=zi * data[0, ch])
-    else:
-        # 零相位滤波 (filtfilt) (双向)
-        if len(data.shape) == 1:
-            filtered = scipy_signal.filtfilt(b, a, data)
-        else:
-            filtered = np.zeros_like(data)
-            for ch in range(data.shape[1]):
-                filtered[:, ch] = scipy_signal.filtfilt(b, a, data[:, ch])
-
-    return filtered
+    # 设计滤波器（系数按参数缓存），1D/2D 统一向量化应用
+    b, a = _butter_coeffs(int(order), float(normal_cutoff), 'high')
+    return _apply_iir(b, a, data, method)
 
 
 def minmax_downsample(data, factor):
@@ -1229,9 +1177,8 @@ def get_data(file_id):
             output_channel_names = [display_channel_names[c]
                                     for c in display_channels if c < len(display_channel_names)]
 
-        # 生成时间轴
+        # 时间轴为等差数列，由前端按 start_sec/downsample/fs 重建（payload 减半）
         actual_samples = len(data_list)
-        time_axis = [start_sec + (i * downsample / fs) for i in range(actual_samples)]
 
         return jsonify({
             'file_id': file_id,
@@ -1241,7 +1188,6 @@ def get_data(file_id):
             'channel_names': output_channel_names,
             'downsample': downsample,
             'num_samples': actual_samples,
-            'time': time_axis,
             'data': data_list,
             'is_computed_mode': is_computed_mode
         })

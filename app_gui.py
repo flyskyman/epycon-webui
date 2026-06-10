@@ -272,6 +272,13 @@ except ImportError as e:
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
+# gzip/brotli 响应压缩：波形 JSON 可压缩 3-5 倍
+try:
+    from flask_compress import Compress
+    Compress(app)
+except ImportError:
+    pass  # 未安装时退化为不压缩，功能不受影响
+
 # 注册 ECG API Blueprint
 try:
     from epycon.api_ecg import ecg_api

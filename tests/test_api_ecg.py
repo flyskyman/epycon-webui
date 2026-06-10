@@ -310,7 +310,9 @@ class TestDataEndpoint:
         assert len(body["data"]) == N_SAMPLES
         assert len(body["data"][0]) == len(CH_NAMES)
         assert body["channel_names"] == CH_NAMES
-        assert len(body["time"]) == N_SAMPLES
+        # time 数组不再下发（前端按 start_sec/downsample/fs 重建）
+        assert "time" not in body
+        assert body["start_sec"] == 0 and body["downsample"] == 1
 
     def test_channel_subset(self, client, planter_h5):
         file_id = _open_local(client, planter_h5)["file_id"]
