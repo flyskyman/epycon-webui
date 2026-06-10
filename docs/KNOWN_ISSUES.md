@@ -50,7 +50,14 @@
 - `setup.py` 改为动态读取该版本号，并更新 fork 后的作者/邮箱/仓库 URL
 
 ### 4. 死代码 `epycon/iou/constants.py`（2026-06-10）
-- 已删除；确认全仓库无 import，真实实现在 `core/_formatting.py`
+- 已删除。git 考古确认删除安全、无功能丢失：
+  - 2024-03 上游初始版（8ebd16f）中 planters.py 仅有装饰性 import，
+    函数体对 HDFConfig 引用为零——真正生效的自始至终是
+    `core/_formatting.py` 的 `SignalPlantDefaults`
+  - 属上游未完成的重构意图（HDFConfig 聚合类从未投入使用），
+    两文件共享 `ActiveLAyer` 拼写错误佐证誊抄关系
+  - 2026-01 的 mypy/ruff 清理（bab5db2/34a15ab）删除无用 import 后彻底孤儿化；
+    期间 9d6e111 还给该孤儿文件修过类型注解（无用功）
 
 ### 5. 弃用代码 `epycon/cli/run.py`（2026-06-10）
 - 已删除；同步移除 `test_cli_integration.py` / `test_cli_coverage.py` 中对它的导入测试
