@@ -1,46 +1,30 @@
 # Epycon 架构说明
 
-## 转码逻辑入口点
+## 转码逻辑入口点（2026-06-10 治本重构后）
 
-### 推荐使用（生产转码）
-| 入口 | 描述 |
-|------|------|
-| **WebUI** `editor.html` → `/run-direct` API → `app_gui.py:execute_epycon_conversion` | 主程序转码逻辑，支持合并模式和常规模式 |
+转换语义的**唯一实现**：`epycon/conversion.py`（`convert_study` + `entries_to_marks`）。
+任何转换行为（标注定位、合并、缩放）的修改只允许发生在该模块。
 
-### 仅供测试/参考
-| 入口 | 描述 |
-|------|------|
-| `epycon/cli/run.py` | **弃用**。早期基准测试代码，仅为 pytest 测试保留。**不建议用于生产转码**。 |
+| 入口 | 调用链 |
+|------|--------|
+| **WebUI**（生产） | `editor.html` → `/run-direct` API → `app_gui.py:execute_epycon_conversion` → `epycon.conversion.convert_study` |
+| **CLI** | `python -m epycon` → `epycon/__main__.py` → `epycon.conversion.convert_study` |
 
----
+两条入口的差异仅在前置处理：WebUI 多做 entries 清洗（ASCII/SNR 净化）、
+进度回调、汇总 CSV、智能输出目录；采样级行为由
+`tests/test_conversion.py` 的等价性测试锁定一致。
 
-## 重要历史背景
+## 历史注记
 
-### `epycon/iou/planters.py`
-- **Commit `76ed04b`**：修复 H5 导出数据丢失，添加 `_logical_length` 追踪
-- **Commit `e99352e`**：Revert 误删了 `append` 模式（后已恢复）
-- **关键功能**：`_logical_length` 追踪、压缩支持、append 模式
+- 此前 WebUI 与 CLI 各自维护平行实现并漂移出多个标注定位 bug
+  （墙钟偏移映射、亚秒截断、字段名漂移等），2026-06-10 合一。
+- `epycon/cli/run.py`（弃用的早期基准代码）已删除。
+- 本文件曾随未合入的侧线提交（a82e626）游离于主线外，2026-06-10 恢复并入库。
 
-### `epycon/cli/run.py`
-- **状态**：已弃用，仅为测试保留
-- **采样率**：✅ 已修复（从 header.amp.sampling_freq 获取并传递）
-- **配置路径**：已修复为 `../config/`
+## 延伸阅读
 
----
-
-## 采样率处理
-
-| 路径 | 采样率来源 |
-|------|-----------|
-| WebUI 查看器 `api_ecg.py:get_data` | 从 HDF5 文件 `Fs` 属性读取 ✅ |
-| WebUI 转码 `app_gui.py` (合并模式) | 从 LogParser header 传递 ✅ |
-| WebUI 转码 `app_gui.py` (常规模式) | 从 LogParser header 传递 ✅ |
-| CLI `run.py` | **未传递** ⚠️（弃用代码）|
-
----
-
-## 测试依赖
-
-以下测试文件依赖 `epycon.cli.run`，请勿移动或删除：
-- `tests/test_cli_integration.py`
-- `tests/test_cli_coverage.py`
+- `CLAUDE.md` — 维护约定（发版流程、台账、删除代码规矩、常用命令）
+- `README.md` 项目结构一节
+- `docs/KNOWN_ISSUES.md` — 待办与调查项
+- `.agent/ECG_LAYOUT_SPEC.md` — ECG 查看器布局逻辑规范
+  （与 `docs/archive/layout_logic_analysis.md` 同源）

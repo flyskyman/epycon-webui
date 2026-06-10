@@ -182,3 +182,6 @@ docs/*.zip
 
 # 转换输出产物不入库（CI 用 artifact 传递）
 examples/data/out/
+
+# 统一本地缓存目录（pytest 等）
+.cache/
