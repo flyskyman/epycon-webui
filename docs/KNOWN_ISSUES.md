@@ -50,14 +50,17 @@
 - `setup.py` 改为动态读取该版本号，并更新 fork 后的作者/邮箱/仓库 URL
 
 ### 4. 死代码 `epycon/iou/constants.py`（2026-06-10）
-- 已删除。git 考古确认删除安全、无功能丢失：
-  - 2024-03 上游初始版（8ebd16f）中 planters.py 仅有装饰性 import，
-    函数体对 HDFConfig 引用为零——真正生效的自始至终是
-    `core/_formatting.py` 的 `SignalPlantDefaults`
-  - 属上游未完成的重构意图（HDFConfig 聚合类从未投入使用），
-    两文件共享 `ActiveLAyer` 拼写错误佐证誊抄关系
-  - 2026-01 的 mypy/ruff 清理（bab5db2/34a15ab）删除无用 import 后彻底孤儿化；
-    期间 9d6e111 还给该孤儿文件修过类型注解（无用功）
+- 已删除。判定依据不是"没人用"，而是它与权威格式规格冲突：
+  - **权威规格 = 上游 CinC 论文 Table 1**（`docs/papers/315_CinCFinalPDF.pdf`）：
+    数据集名为 `ChannelSettings`、Data 为 FP32 C×N、属性 Fs/GeneratedBy/LeftI/RightI
+  - 现行代码（`SignalPlantDefaults` + `HDFPlanter`）与论文规格逐项一致；
+    constants.py 声明的 `'ChannelConfig'` 与论文及现行代码均不符——
+    它是上游内部一份与自家规格不一致的草稿，fork 原样继承，不存在"fork 曲解上游"
+  - git 考古：2024-03 上游初始版（8ebd16f）即仅有装饰性 import、函数体零引用；
+    2026-01 lint 清理删除 import 后彻底孤儿化
+  - **保留的知识点**：其 `DEFAULT_FS = 2000` 为真实平台规格
+    （论文 2.1：WorkMate 最高采样率 2000 Hz，分辨率 78 nV/LSb），该知识由论文承载
+  - 如需恢复文件：`git checkout 705f7af^ -- epycon/iou/constants.py`
 
 ### 5. 弃用代码 `epycon/cli/run.py`（2026-06-10）
 - 已删除；同步移除 `test_cli_integration.py` / `test_cli_coverage.py` 中对它的导入测试
