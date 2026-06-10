@@ -160,8 +160,16 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Examples / generated sample data (do not commit large binary/example datasets)
-examples/data/
+# Examples / generated sample data (do not commit large/clinical datasets).
+# 例外：study01 的合成测试夹具必须入库——多个测试断言（Marks 位置 1074/50、
+# 2048 样本数）依赖其精确内容；此前整目录被忽略导致 CI 上相关测试静默 skip。
+# real_test/（真实临床数据）与生成产物继续被忽略。
+examples/data/*
+!examples/data/study01/
+# 显式反忽略测试夹具（第 60 行的全局 *.log 会拦住它们）
+!examples/data/study01/0000000*.log
+!examples/data/study01/entries.log
+examples/data/study01/ci_generated.log
 
 # Build/dist artifacts
 dist/

@@ -84,9 +84,14 @@
 - 21 个一次性分析/调试脚本移入 `scripts/archive/`；分类规则写入 `scripts/README.md`
 - 根目录保留：CI 在用 6 个 + 开发工具 8 个 + 数据 2 个
 
-### 12. `examples/data/out/` 入库问题（2026-06-10）
-- **核实后修正原记载**：该目录从未被 git 追踪（当初误把文件系统列表当成 git 状态）
-- 已加预防性 .gitignore 规则；本地旧产物（与现行 Marks 行为不一致）仍在磁盘，可自行删除
+### 12. `examples/data/` 的 git 状态（2026-06-10，两次修正记载）
+- 真相：`.gitignore` 的 `examples/data/` 整目录忽略 + 全局 `*.log` 规则，
+  导致 **study01 合成测试夹具从未入库**——CI 上所有依赖示例数据的测试
+  （merge 集成、wmx64 系列等）一直静默 skip，"126 passed, 9 skipped" 的
+  skip 里就藏着它们
+- 处置：study01 四个合成夹具（两个日志 + entries.log + MASTER，46KB）显式
+  反忽略并入库，测试断言（1074/50/2048）从此在 CI 真实执行；
+  `real_test/`（真实临床数据）与 `out/`、`ci_generated.log` 继续忽略
 
 ### 13. CI 安装列表与 requirements 同步（2026-06-10）
 - CI 改为 `pip install -r requirements.txt -r requirements-dev.txt`
