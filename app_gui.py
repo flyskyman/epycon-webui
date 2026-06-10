@@ -258,10 +258,9 @@ except ImportError: pass
 # ========================================================
 try:
     from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN, MASTER_FILENAME
-    from epycon.iou import LogParser, EntryPlanter, CSVPlanter, HDFPlanter, readentries, mount_channels
+    from epycon.iou import LogParser, EntryPlanter, readentries
     from epycon.iou.parsers import _readmaster
     from epycon.utils.person import Tokenize
-    from epycon.core.helpers import difftimestamp
 except ImportError as e:
     print(f"无法加载 Epycon。\n{e}")
     if __name__ == "__main__":
@@ -490,22 +489,6 @@ def clean_entries_content(entries):
 # [REFACTOR] 使用核心库的统一通道映射函数
 from epycon.core.helpers import get_channel_mappings
 
-def get_raw_log_start_seconds(file_path):
-    try:
-        with open(file_path, 'rb') as f:
-            raw = float(struct.unpack('<Q', f.read(8))[0])
-            return to_unix_seconds(raw)
-    except Exception: return 0.0
-
-def get_safe_n_channels(header):
-    try:
-        if hasattr(header, 'n_channels'): return int(header.n_channels)
-        if hasattr(header.amp, 'n_channels'): return int(header.amp.n_channels)
-        if hasattr(header, 'channels'):
-            if hasattr(header.channels, 'raw_mappings'): return len(header.channels.raw_mappings)
-        return 0
-    except Exception: return 0
-
 def export_global_csv(entries, target_dir, study_id_for_name):
     try:
         filename = f"{study_id_for_name}_All_Entries_Normalized.csv"
@@ -580,10 +563,8 @@ def execute_epycon_conversion(cfg):
 
             processed_count = 0
             
-            # 获取配置选项
-            merge_mode = cfg["data"].get("merge_logs", False)
+            # 获取配置选项（merge/credentials 由 epycon.conversion 内部处理）
             pseudonymize = cfg["global_settings"].get("pseudonymize", False)
-            credentials = cfg["global_settings"].get("credentials", {})
 
             total_studies = len(study_list)
             for idx, study_path in enumerate(study_list):
@@ -668,308 +649,31 @@ def execute_epycon_conversion(cfg):
                     except Exception as e:
                         conv_logger.warning(f"⚠️ 汇总 CSV 导出失败: {e}")
 
-                # --- [Step 2] 处理数据文件 ---
-                # 筛选有效的 datalog 文件
-                valid_logs = []
-                for datalog_path in logs_in_study:
-                    datalog_id = os.path.basename(datalog_path).replace(".log", "")
-                    if valid_datalogs and datalog_id not in valid_datalogs: 
-                        continue
-                    valid_logs.append((datalog_path, datalog_id))
-                
-                if not valid_logs:
+                # --- [Step 2] 数据转换：统一调用核心库实现 (epycon.conversion) ---
+                # 此前这里维护着与 __main__.py 平行的 merge/normal 实现，
+                # 已漂移出多个标注定位缺陷（墙钟偏移映射、int 截断、e.msg 字段名、
+                # x32 时间戳误读等），现收敛到 epycon/conversion.py 单一实现
+                from epycon.conversion import convert_study
+
+                extra_attrs = {
+                    "PatientName": subject_name,
+                    "PatientID": subject_id,
+                }
+
+                try:
+                    n_processed = convert_study(
+                        study_path, study_id, study_out_dir, cfg, all_entries_norm,
+                        subject_id=subject_id, subject_name=subject_name,
+                        logger=conv_logger, extra_attributes=extra_attrs,
+                    )
+                    processed_count += n_processed
+                    if n_processed == 0:
+                        conv_logger.warning(f"⚠️ {study_id}: 未找到有效数据文件")
+                except Exception as conv_err:
+                    import traceback
+                    conv_logger.error(f"❌ {study_id} 转换失败: {conv_err}\n{traceback.format_exc()}")
                     continue
-                
-                # ===================== 合并模式 =====================
-                if merge_mode and output_fmt == "h5":
-                    conv_logger.info(f"📦 合并模式: 将 {len(valid_logs)} 个文件合并为单文件")
-                    
-                    # 收集所有文件的时间戳和通道信息
-                    datalog_info = []
-                    from epycon.core._dataclasses import Channels
-                    from collections import defaultdict
-                    
-                    for datalog_path, datalog_id in valid_logs:
-                        with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"], samplesize=1024) as p:
-                            header = p.get_header()
-                            if header is None:
-                                conv_logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
-                                continue
-                            
-                            # 获取该文件的通道映射
-                            # [REFACTOR] 使用核心库的统一函数
-                            file_mappings = get_channel_mappings(header, cfg)
-                            
-                            if cfg["data"]["channels"]:
-                                file_mappings = {k:v for k,v in file_mappings.items() if k in cfg["data"]["channels"]}
-                            
-                            datalog_info.append({
-                                'path': datalog_path,
-                                'id': datalog_id,
-                                'timestamp': header.timestamp,
-                                'header': header,
-                                'mappings': file_mappings,
-                                'num_output_channels': len(file_mappings),
-                            })
-                    
-                    # 按时间戳排序
-                    datalog_info.sort(key=lambda x: x['timestamp'])
-                    
-                    # 按通道数分组
-                    channel_groups = defaultdict(list)
-                    for d in datalog_info:
-                        channel_groups[d['num_output_channels']].append(d)
-                    
-                    conv_logger.info(f"✅ 通过验证的文件数: {len(datalog_info)}/{len(valid_logs)}")
-                    
-                    if len(channel_groups) > 1:
-                        conv_logger.warning(f"⚠️ 检测到不同通道数的文件，将分组处理:")
-                        for num_ch, files in channel_groups.items():
-                            conv_logger.warning(f"   {num_ch} 个通道: {len(files)} 个文件")
-                    
-                    # 对每个通道数组分别合并
-                    for group_channel_count, group_files in channel_groups.items():
-                        conv_logger.info(f"\n📦 处理通道组: {group_channel_count} 个通道, {len(group_files)} 个文件")
-                        
-                        # 该组的第一个文件定义列名
-                        first_mappings = group_files[0]['mappings']
-                        merged_column_names = list(first_mappings.keys())
-                        first_timestamp = group_files[0]['timestamp']
-                        
-                        # 构建 HDF5 元数据
-                        hdf_attributes = {
-                            "subject_id": subject_id,
-                            "subject_name": subject_name,
-                            "study_id": study_id,
-                            "datalog_ids": ",".join([d['id'] for d in group_files]),
-                            "Timestamp": first_timestamp,  # 统一使用大写 Timestamp
-                            "RecordDate": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
-                            "merged": True,
-                            "num_files": len(group_files),
-                        }
-                        if credentials:
-                            hdf_attributes.update({
-                                "author": credentials.get("author", ""),
-                                "device": credentials.get("device", ""),
-                                "owner": credentials.get("owner", ""),
-                            })
-                        
-                        # 合并输出文件名
-                        if len(channel_groups) > 1:
-                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged_{group_channel_count}ch.h5")
-                        else:
-                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged.h5")
-                        
-                        # 获取第一个文件的采样率作为基准，并补全元数据
-                        base_fs = group_files[0]['header'].amp.sampling_freq
-                        hdf_attributes.update({
-                            "sampling_freq": base_fs,
-                            "num_channels": len(merged_column_names),
-                            "PatientName": subject_name,
-                            "PatientID": subject_id,
-                            "StudyDate": datetime.fromtimestamp(first_timestamp).strftime("%Y-%m-%d") if first_timestamp else ""
-                        })
-                        
-                        # 合并输出文件名
-                        if len(channel_groups) > 1:
-                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged_{group_channel_count}ch.h5")
-                        else:
-                            merged_output_path = os.path.join(study_out_dir, f"{study_id}_merged.h5")
-                        
-                        total_samples = 0
-                        all_group_marks = []
-                        
-                        # [FIX] 将 HDFPlanter 移到文件循环外部：避免合并时文件被反复覆盖、丢失属性和标注
-                        with HDFPlanter(
-                            merged_output_path,
-                            column_names=merged_column_names,
-                            sampling_freq=base_fs,
-                            factor=1000,
-                            units="mV",
-                            attributes=hdf_attributes,
-                            compression=cfg["data"].get("compression"),
-                            compression_opts=cfg["data"].get("compression_opts")
-                        ) as planter:
-                            for idx, dlog_info in enumerate(group_files):
-                                datalog_path = dlog_info['path']
-                                datalog_id = dlog_info['id']
-                                header = dlog_info['header']
-                                fs = header.amp.sampling_freq
-                                
-                                processed_count += 1
-                                conv_logger.info(f"   合并 {idx+1}/{len(group_files)}: {datalog_id}.log")
-                                
-                                # 计算当前文件的时间范围
-                                file_start_sec = float(header.timestamp)
-                                n_channels = get_safe_n_channels(header)
-                                file_size = os.path.getsize(datalog_path)
-                                if n_channels > 0 and fs > 0:
-                                    n_samples = (file_size - 32) // (n_channels * 2)
-                                    file_duration_sec = n_samples / fs
-                                else:
-                                    file_duration_sec = 0
-                                file_end_sec = file_start_sec + file_duration_sec
-                                
-                                conv_logger.info(f"   ⏱️ 文件时间范围: {file_start_sec:.0f} - {file_end_sec:.2f} ({file_duration_sec:.3f}s)")
-                                
-                                # 筛选匹配当前文件的标注
-                                file_entries = [e for e in all_entries_norm if str(e.fid) == str(datalog_id)]
-                                if file_entries:
-                                    conv_logger.info(f"   📊 匹配标注: {len(file_entries)} 条")
-                                
-                                with LogParser(
-                                    datalog_path, 
-                                    version=cfg["global_settings"]["workmate_version"], 
-                                    samplesize=cfg["global_settings"]["processing"]["chunk_size"]
-                                ) as parser:
-                                    file_mappings = dlog_info['mappings']
-                                    file_sample_count = 0
-                                    for chunk in parser:
-                                        chunk = mount_channels(chunk, file_mappings)
-                                        planter.write(chunk)
-                                        file_sample_count += chunk.shape[0]
-                                    
-                                    # 预处理当前文件的标注，转换为 H5 里的全局采样点偏移
-                                    if cfg["data"]["pin_entries"] and file_entries:
-                                        global_base = total_samples 
-                                        file_end_global = global_base + file_sample_count
-                                        
-                                        for e in file_entries:
-                                            # 计算相对于整组起始点的时间偏移
-                                            offset_sec = e.timestamp - first_timestamp
-                                            global_p = int(offset_sec * fs)
-                                            
-                                            # 校验：标注必须落在此文件实际跨越的采样区间内 (relaxed: 允许超出结尾)
-                                            if global_base <= global_p:
-                                                all_group_marks.append((global_p, str(e.group), str(e.message)))
-                                    
-                                    total_samples += file_sample_count
-                            
-                            # [FIX] 在所有数据写入完成后，统一写入所有标注
-                            if all_group_marks:
-                                p, g, m = zip(*all_group_marks)
-                                planter.add_marks(list(p), list(g), list(m))
-                                conv_logger.info(f"   ✅ 已统一嵌入 {len(all_group_marks)} 条标注")
-                        
-                        conv_logger.info(f"   ✅ 合并完成: {merged_output_path} ({total_samples} samples)")
-                
-                else:
-                    # ===================== 常规模式 (每个文件单独输出) =====================
-                    for datalog_path, datalog_id in valid_logs:
-                        processed_count += 1
-                        conv_logger.info(f"处理文件: {datalog_id}.log")
-                        
-                        try:
-                            log_start_sec = get_raw_log_start_seconds(datalog_path)
-                            
-                            n_channels = 0
-                            with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"], samplesize=1024) as p:
-                                header = p.get_header()
-                                if header is None:
-                                    conv_logger.warning(f"⚠️ 无法读取文件头: {datalog_id}.log")
-                                    continue
-                                fs = header.amp.sampling_freq
-                                n_channels = get_safe_n_channels(header)
-                            
-                            file_size = os.path.getsize(datalog_path)
-                            duration_sec = 0.0
-                            if n_channels > 0 and fs > 0:
-                                n_samples = (file_size - 32) // (n_channels * 2)
-                                duration_sec = n_samples / fs
-                            
-                            log_end_sec = log_start_sec + duration_sec
-                            
-                            # --- [核心逻辑] 独立文件下的严格匹配 ---
-                            target_entries_rel = [] 
-                            for e in all_entries_norm:
-                                if str(e.fid) == str(datalog_id):
-                                    # 检查时间戳是否落在该文件的绝对时间内 (relaxed: 允许超出结尾)
-                                    # [FIX] 只要大于起始时间即可，允许记录后的标注
-                                    if log_start_sec <= e.timestamp:
-                                        diff_seconds = e.timestamp - log_start_sec
-                                        new_e = dataclasses.replace(e)
-                                        new_e.timestamp = diff_seconds # 转换为相对文件的偏移秒数
-                                        target_entries_rel.append(new_e)
-                                    else:
-                                        conv_logger.warning(f"   ⚠️ FID {datalog_id} 匹配但标注时间戳 {e.timestamp} 未在此文件生命周期内")
 
-                            # 转换波形
-                            with LogParser(
-                                datalog_path, 
-                                version=cfg["global_settings"]["workmate_version"], 
-                                samplesize=cfg["global_settings"]["processing"]["chunk_size"]
-                            ) as parser:
-                                # 导入 Channels 类以进行类型检查
-                                from epycon.core._dataclasses import Channels
-                                
-                                # [REFACTOR] 使用核心库的统一函数
-                                mappings = get_channel_mappings(header, cfg)
-                                if cfg["data"]["channels"]:
-                                    mappings = {k:v for k,v in mappings.items() if k in cfg["data"]["channels"]}
-                                column_names = list(mappings.keys())
-                                
-                                entryplanter = EntryPlanter(target_entries_rel)
-                                filter_groups = cfg["entries"]["filter_annotation_type"]
-                                criteria = {"groups": filter_groups} if filter_groups else {}
-                                
-                                # [FIX] 仅当用户启用 export 时才生成文件
-                                if cfg["entries"]["convert"]:
-                                    # Fix: Get file_fmt from config
-                                    file_fmt = cfg["entries"]["output_format"]
-                                    entry_out_name = f"{datalog_id}.{file_fmt}"
-                                    entry_out_path = os.path.join(study_out_dir, entry_out_name)
-                                    
-                                    if file_fmt == "csv":
-                                        entryplanter.savecsv(entry_out_path, criteria=criteria, ref_timestamp=0)
-                                    elif file_fmt == "sel":
-                                        entryplanter.savesel(entry_out_path, 0, fs, list(mappings.keys()), criteria=criteria)
-                                    
-                                    conv_logger.info(f"   -> 📄 精确生成: {datalog_id}.{file_fmt} ({len(target_entries_rel)}条)")
-                                
-                                # [NEW] 常规模式: 输出 H5 波形文件
-                                if cfg["data"]["output_format"] == "h5":
-                                    h5_out_path = os.path.join(study_out_dir, f"{datalog_id}.h5")
-                                    
-                                    # 构建元数据属性
-                                    hdf_attributes = {
-                                        "StudyID": study_id,
-                                        "LogID": datalog_id,
-                                        "sampling_freq": fs,
-                                        "num_channels": len(column_names),
-                                        "Timestamp": log_start_sec,  # Unix 时间戳（秒）
-                                        "RecordDate": datetime.fromtimestamp(log_start_sec).isoformat() if log_start_sec else "",
-                                    }
-                                    
-                                    with HDFPlanter(
-                                        h5_out_path,
-                                        column_names=column_names,
-                                        sampling_freq=fs,  # ✅ 正确传递采样率
-                                        factor=1000,
-                                        units="mV",
-                                        attributes=hdf_attributes,
-                                        compression=cfg["data"].get("compression"),
-                                        compression_opts=cfg["data"].get("compression_opts")
-                                    ) as planter:
-                                        for chunk in parser:
-                                            chunk = mount_channels(chunk, mappings)
-                                            planter.write(chunk)
-                                        
-                                        # 嵌入标注（如启用）
-                                        if cfg["data"]["pin_entries"] and target_entries_rel:
-                                            valid_marks = []
-                                            for e in target_entries_rel:
-                                                sample_pos = int(e.timestamp * fs)
-                                                valid_marks.append((sample_pos, e.group, e.msg))
-                                            if valid_marks:
-                                                p, g, m = zip(*valid_marks)
-                                                planter.add_marks(list(p), list(g), list(m))
-                                    
-                                    conv_logger.info(f"   -> 📊 生成波形: {datalog_id}.h5")
-
-                        except Exception as e:
-                            conv_logger.error(f"❌ 文件 {datalog_id} 转换失败: {str(e)}")
-                            continue
-                        
             update_progress(100, "✅ 转换圆满完成")
             conv_logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
             res_logs = mem_handler.logs
@@ -1003,11 +707,14 @@ def save_prefs():
                 print(f"Warning: Failed to read prefs: {read_err}")
                 pass
         
-        # Merge 'paths'
         # [FIX] 确保 curr 是字典
         if not isinstance(curr, dict):
             curr = {}
-            
+
+        # 合并请求数据（此前漏了这一步，"保存偏好"一直是写回旧内容的空操作）
+        if isinstance(data, dict):
+            curr.update(data)
+
         with open(PREFS_FILE, 'w', encoding='utf-8') as f:
             json.dump(curr, f, indent=2, ensure_ascii=False)
             
@@ -1212,53 +919,6 @@ def get_task_status(task_id):
         "logs": new_logs,
         "result": task['result']
     })
-
-def _process_datalog_file(log_file, study_id, output_folder, cfg, conv_logger, planter_cls, valid_datalogs, all_entries_norm, leads):
-    """
-    处理单个 datalog 文件的核心逻辑
-    """
-    datalog_id = os.path.basename(log_file).replace(".log", "")
-    merge_logs = cfg["data"].get("merge_logs", False)
-    
-    if not merge_logs and valid_datalogs and datalog_id not in valid_datalogs:
-        return False
-
-    conv_logger.info(f"📄 Processing: {datalog_id} ...")
-    parser = LogParser(log_file)
-    
-    # 转换并写入
-    output_ext = ".h5" if planter_cls == HDFPlanter else ".csv"
-    out_name = f"{datalog_id}{output_ext}"
-    out_path = os.path.join(output_folder, study_id, out_name)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    
-    # FID 匹配
-    file_entries = [e for e in all_entries_norm if str(e.fid) == str(datalog_id)]
-    
-    with planter_cls(out_path, column_names=parser.headers) as planter:
-        if isinstance(planter, HDFPlanter):
-            planter.extra_attributes.update({"StudyID": study_id, "LogID": datalog_id, "Leads": leads})
-            for chunk in parser.stream_data(chunk_size=cfg["global_settings"]["processing"]["chunk_size"]):
-                planter.write(chunk)
-            
-            if cfg["data"]["pin_entries"] and file_entries:
-                file_start_sec = parser.start_timestamp
-                valid_marks = []
-                for e in file_entries:
-                    if file_start_sec <= e.timestamp:
-                        offset_sec = e.timestamp - file_start_sec
-                        sample_pos = int(offset_sec * parser.sampling_freq)
-                        valid_marks.append((sample_pos, e.group, e.msg))
-                
-                if valid_marks:
-                    p, g, m = zip(*valid_marks)
-                    planter.add_marks(list(p), list(g), list(m))
-        else:
-            for chunk in parser.stream_data(chunk_size=cfg["global_settings"]["processing"]["chunk_size"]):
-                planter.write(chunk)
-    
-    conv_logger.info(f"✨ Finished: {out_name}")
-    return True
 
 # --- 新增的辅助分拆函数 ---
 def _prepare_conversion_config(cfg, script_dir):

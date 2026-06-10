@@ -162,8 +162,9 @@ def _tosel(
     output_txt = ''
 
     for item in entries:
-        start_sample = (datetime.fromtimestamp(item.timestamp) - datetime.fromtimestamp(ref_timestamp)).seconds
-        start_sample = int(start_sample * sampling_freq)
+        # 纯减法而非 timedelta.seconds：后者按天回绕（模 86400）且丢亚秒
+        offset_sec = float(item.timestamp) - float(ref_timestamp)
+        start_sample = round(offset_sec * sampling_freq)
 
         output_txt += (f'{idx}\t{start_sample}\t{start_sample}\t{item.group}'
                        f'\t{validity}\t{ch_idx}\t{ch_name}\t{item.message}\n')

@@ -9,6 +9,22 @@
 
 ## 中优先级
 
+### 15. 【调查】entries fid 十六进制 vs 日志文件名进制
+- **位置**：`epycon/iou/parsers.py` `_readentries` 中 `f"{datalog_uid:08x}"`（上游原状）
+- **疑点**：上游 CinC 论文写明日志文件名匹配 `^[0-9]{8}\.log$`；若真实文件名为十进制，
+  则第 10 个日志起（uid=10 → fid `0000000a` ≠ 文件名 `00000010`）标注 fid 匹配全断；
+  若文件名实为十六进制，则 `LOG_PATTERN = r'[0-9]*.log'` 又会漏掉含 a-f 的文件
+- **验证方法**（需真实数据，如 `examples/data/real_test/`）：取一个日志数 >9 的 study，
+  查看文件名是否出现 a-f；并对照 entries 解析出的 fid 集合与文件名集合的交集
+- **影响**：≥10 个日志的研究，标注归属可能系统性丢失
+
+### 16. 【调查】双极导联极性方向
+- **位置**：`Channels.computed_mappings` 返回 (u−, u+) 反序 + `_mount_channels` 做 source[0]−source[1]
+  → 计算导联 = u− − u+，与"正极减负极"惯例相反（仅影响 `leads: "computed"` 配置）
+- **上游一致**：与 fork 起点逐字相同，论文作者用 12 例动物数据验证过——可能 WorkMate
+  的 reference 语义本就如此，也可能是两个反号恰好抵消的隐性约定
+- **验证方法**：用真实数据转换一个双极导联，与 WorkMate 屏幕显示的同一导联波形对照极性
+
 ### 14. WebUI 性能优化路线图（剩余部分）
 - **已完成（2026-06-10）**：前端降采样管线修复（LTTB 内联实现）、downsample 因子契约、
   滤波向量化 + 系数缓存、time 数组改前端重建、flask-compress gzip
@@ -26,6 +42,21 @@
 ---
 
 ## 已解决
+
+### 17. 转码逻辑三套平行实现合一（2026-06-10，治本重构）
+- 新建 `epycon/conversion.py` 作为转换语义唯一实现（`convert_study` + `entries_to_marks`），
+  `__main__.py` 与 `app_gui.execute_epycon_conversion` 均改为调用它
+- 随平行实现消亡的 GUI 转码 bug：`e.msg` 字段名错误（单文件模式标注嵌入必崩）、
+  merge 标注按墙钟时间差映射无间隙采样轴（有录制间隙即错位）、int() 截断亚秒、
+  `get_raw_log_start_seconds` 固定按 x64 读时间戳（x32 全错）、错误时长公式残留、
+  重复代码块；另删除从未被调用且调用着不存在 API 的 `_process_datalog_file`（第四套实现，
+  bb74e5e 引入即死亡）
+- 附带修复：`save_prefs` 漏合并请求数据（保存偏好一直是空操作）；
+  `_tosel` 用 `timedelta.seconds`（按天回绕+丢亚秒）改为纯减法+round；
+  CLI 此前 `pin_entries=True 但 convert=False` 时不读 entries 导致嵌入静默失效，
+  与 GUI 语义统一为 need_entries
+- 新增 `tests/test_conversion.py`：标注定位单元测试 + GUI/CLI 等价性测试
+  （两端必须产出逐采样点一致的 Marks），防止再次分叉
 
 ### 8. CI 双轨测试合流（2026-06-10）
 - `scripts/test_version.py` + `test_business_functions.py`（自写 runner，10 个测试）
