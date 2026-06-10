@@ -159,21 +159,21 @@ python -m epycon
 ## 项目结构（当前）
 
 - `app_gui.py`：Flask Web 应用，项目的图形/HTTP 入口（保留为可执行主入口）。
-- `epycon/`：核心 Python 包，项目实现（`__main__.py`, `core/`, `iou/`, `cli/`, `config/` 等）。
-- `ui/`：前端静态资源目录（运行时界面）
-  - `index.html`：工具集入口页面（现在位于 `ui/index.html`）。
-  - `editor.html`：本地标注编辑器界面（`ui/editor.html`）。
-  - `WorkMate_Log_Parser.html`：日志解析器界面（`ui/WorkMate_Log_Parser.html`）。
-  - `h5_preview.html`：HDF5 预览页面（`ui/h5_preview.html`）。
-  - `vendor/`：第三方运行时 bundle（`ui/vendor/vue.js`, `ui/vendor/tailwind.js` 等）。
-- `scripts/`：构建与工具脚本
-  - `WorkMateDataCenter.spec`：PyInstaller 打包配置（现在在 `scripts/`）。
-  - `fix_encoding.py`：编码修复脚本（`scripts/fix_encoding.py`）。
-  - `generate_fake_wmx32.py`：测试数据生成脚本。
-  - `README.md`：脚本目录说明。
-- `config/`：运行时配置（`config.json`, `schema.json`）。
-- `docs/`：项目文档与历史发布档案（`release_notes_v0.0.3-alpha.md`, 压缩包等）。
-- `examples/`：示例和示例数据（`examples/demo.py`, `examples/data/`）。
+- `epycon/`：核心 Python 包
+  - `conversion.py`：**转换逻辑的唯一实现**（CLI 与 GUI 共用，标注定位等语义只改这里）。
+  - `__main__.py`：CLI 入口（config 处理 + 调用 conversion）。
+  - `api_ecg.py`：ECG 查看器 HTTP API（Flask Blueprint）。
+  - `iou/`：WorkMate 二进制解析（parsers）与输出（planters）。
+  - `core/`、`config/`、`utils/`：校验、格式化、byteschema、辅助。
+- `ui/`：前端静态资源（`index.html` 入口、`ecg_viewer.html`、`editor.html`、
+  `WorkMate_Log_Parser.html`、`h5_preview.html`、`vendor/` 第三方 bundle）。
+- `scripts/`：在用脚本（CI 数据生成/校验、性能基准、打包 spec、巡检工具）；
+  `scripts/archive/` 为一次性脚本留档。分类规则见 `scripts/README.md`。
+- `tests/`：pytest 套件（CI 强制全绿）。
+- `config/`：运行时配置（`config.json`, `schema.json`；与包内模板的分工见 `tests/test_config_sync.py`）。
+- `docs/`：活文档（台账、渲染规范、上游论文、工具用法）；`docs/archive/` 为历史留档。
+  索引见 `docs/README.md`。
+- `examples/`：示例（`demo.py`）与合成测试夹具（`examples/data/study01/`，测试断言依赖其精确内容）。
 - 项目根还包含：`README.md`, `CLAUDE.md`（维护约定）, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
 - 变更记录：用户可见变更见 [GitHub Releases](https://github.com/flyskyman/epycon-webui/releases)；开发细节见 git log；待办问题见 `docs/KNOWN_ISSUES.md`。
 

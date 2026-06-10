@@ -11,7 +11,7 @@ Abbott WorkMate EP 数据解析/转换工具（fork 自 FNUSA-ICRC epycon）+ Fl
   1. 更新 `epycon/__init__.py` 的 `__version__`（PEP 440，setup.py 动态读取）
   2. `git tag vX.Y.Z-alpha && git push --tags`（tag 触发 windows-build-release 构建 exe）
   3. `gh release create vX.Y.Z-alpha --notes "<从 git log 提炼的用户可见变更>"`
-- 不再新增 `docs/release_notes_*.md`（存量为历史留档）。
+- 不再新增 release notes 文件（存量已移至 `docs/archive/`）。
 
 ## 已知问题台账
 

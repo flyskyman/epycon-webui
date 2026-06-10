@@ -149,4 +149,4 @@ rg "\\.delimiter|\bdelimiter\b" || grep -R "delimiter" -n .
 		 - 统一改为 `_delimiter` 并在构造时通过 `delimiter=` 显式传参（更清晰）。
 	3. 小范围修改并运行 `python -m epycon` 验证，然后再做全仓替换。
 
-已在仓库生成迁移建议文档： docs/delimiter_migration.md
+已在仓库生成迁移建议文档： docs/archive/delimiter_migration.md
