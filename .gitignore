@@ -168,3 +168,6 @@ dist/
 build/
 .DS_Store
 temp_test/
+
+# 发布产物走 GitHub Releases，不入库
+docs/*.zip

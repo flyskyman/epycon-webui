@@ -5,20 +5,7 @@
 
 ## 高优先级
 
-### 1. 仓库携带 34.5MB 发布压缩包
-- **位置**：`docs/WorkMate_DataCenter-v0.0.3-alpha.zip`（git 已追踪）
-- **问题**：发布产物不应入库，该文件已上传 GitHub Releases，仓库里是冗余拷贝，每次 clone 都要下载
-- **建议**：`git rm --cached` 移出 HEAD；若在意历史体积，用 `git filter-repo` 清历史（需 force push，慎重）
-
-### 2. 版本号三处不一致
-- **位置**：`setup.py`（写 `1.02`，作者还是上游 FNUSA-ICRC）/ `CHANGELOG.md`（`v0.0.5-alpha`）/ `epycon/__init__.py`（空文件，无 `__version__`）
-- **问题**：包元数据完全未维护，安装后 `pip show` 信息错误
-- **建议**：统一以 CHANGELOG/git tag 为准；`__init__.py` 加 `__version__`；setup.py 更新 fork 后的作者与仓库 URL
-
-### 3. config 双份易漂移
-- **位置**：`config/config.json` + `config/schema.json` 与 `epycon/config/` 下同名文件
-- **问题**：两份各自演化（根目录版有 `merge_logs: true` 和示例路径，包内版是默认模板），改一处漏一处。2026-06-10 的 `--merge` KeyError bug 即源于此
-- **建议**：明确分工（包内 = 默认模板，根目录 = 本地运行配置并考虑 gitignore），或合并为一份
+（暂无——原 1–3 条已于 2026-06-10 解决，见底部"已解决"）
 
 ## 中优先级
 
@@ -72,4 +59,16 @@
 
 ## 已解决
 
-（处理完的条目移到这里，注明日期与提交）
+### 1. 仓库携带 34.5MB 发布压缩包（2026-06-10）
+- `git rm --cached` 移出追踪，`.gitignore` 增加 `docs/*.zip`，本地文件保留
+- **残留**：git 历史中仍占体积；如需彻底清除要 `git filter-repo` + force push，暂不做
+
+### 2. 版本号三处不一致（2026-06-10）
+- `epycon/__init__.py` 增加 `__version__ = "0.0.5a0"`（对应 v0.0.5-alpha）作为单一来源
+- `setup.py` 改为动态读取该版本号，并更新 fork 后的作者/邮箱/仓库 URL
+
+### 3. config 双份易漂移（2026-06-10）
+- 处置方式为"明确分工 + 守卫"而非合并：根目录 `config/` 被 CI、copilot-instructions、
+  多个脚本深度引用，合并代价大于收益
+- 新增 `tests/test_config_sync.py`：schema 漂移或任一 config 不过校验时 CI 立即报警；
+  职责分工已写入该测试的模块文档
