@@ -6,7 +6,7 @@ def main():
     import jsonschema
 
     from epycon.core._validators import _validate_path
-    from epycon.core.helpers import default_log_path, deep_override, difftimestamp
+    from epycon.core.helpers import default_log_path, deep_override
     from epycon.cli import batch
 
     config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
@@ -198,7 +198,7 @@ def main():
                     if cfg["data"]["channels"]:
                         valid_channels = set(cfg["data"]["channels"])
                         file_mappings = {k: v for k, v in file_mappings.items() if k in valid_channels}
-                    
+
                     datalog_info.append({
                         'path': datalog_path,
                         'id': datalog_id,
@@ -206,6 +206,7 @@ def main():
                         'header': header,
                         'mappings': file_mappings,
                         'num_output_channels': len(file_mappings),
+                        'num_samples': parser.num_samples,
                     })
             
             # Sort by timestamp
@@ -272,29 +273,17 @@ def main():
                     
                     print(f"Merging {datalog_id} ({idx+1}/{len(group_files)}): ", end="")
                     
-                    # Calculate file time range for entries filtering
                     file_start_sec = float(header.timestamp)
-                    file_size = os.path.getsize(datalog_path)
-                    n_channels = header.num_channels
                     fs = header.amp.sampling_freq
+                    file_duration_sec = dlog_info['num_samples'] / fs if fs > 0 else 0
+
+                    # Entries belong to the file their datalog id references (same rule as
+                    # per-file mode); position validity is checked after writing below.
+                    file_entries = [e for e in entries if e.fid == datalog_id] if entries else []
                     
-                    if n_channels > 0 and fs > 0:
-                        n_samples = (file_size - 32) // (n_channels * 2)
-                        file_duration_sec = n_samples / fs
-                    else:
-                        file_duration_sec = 0
-                    file_end_sec = file_start_sec + file_duration_sec
-                    
-                    # Filter entries for this file's time range
-                    is_last_file = (idx == len(group_files) - 1)
-                    if entries:
-                        if is_last_file:
-                            file_entries = [e for e in entries if file_start_sec <= e.timestamp <= file_end_sec]
-                        else:
-                            file_entries = [e for e in entries if file_start_sec <= e.timestamp < file_end_sec]
-                    else:
-                        file_entries = []
-                    
+                    # Samples already written to the merged file before this one
+                    file_offset_samples = total_samples
+
                     with LogParser(
                         datalog_path,
                         version=cfg["global_settings"]["workmate_version"],
@@ -324,48 +313,34 @@ def main():
                             
                             is_first_file = False
                             print("OK")
-                
+
+                    # Map this file's entries onto the merged timeline
+                    if file_entries and cfg["data"]["pin_entries"]:
+                        for entry in file_entries:
+                            # 有符号偏移并保留亚秒精度；早于文件起点的 entry 为负值，由下界校验拒绝。
+                            # round 而非 int：大数量级时间戳相减有浮点误差，截断会偏移一个采样点
+                            offset_sec = float(entry.timestamp) - file_start_sec
+                            local_pos = round(offset_sec * fs)
+                            if 0 <= local_pos < file_sample_count:
+                                accumulated_marks.append(
+                                    (file_offset_samples + local_pos, entry.group, entry.message)
+                                )
+                            else:
+                                logger.warning(f"   ⚠️ {datalog_id}: Entry '{entry.message}' at {offset_sec}s outside file range [0, {file_duration_sec}s], skipped.")
+
                 # After all files processed, inject all accumulated marks at once
                 if accumulated_marks and cfg["data"]["pin_entries"]:
-                    import h5py
-                    import numpy as np
-                    from epycon.core.utils import difftimestamp
-
-                    with h5py.File(merged_output_path, "a") as f_obj:
-                        positions, groups, messages = zip(*accumulated_marks)
-                        
-                        # Prepare marks array
-                        marks_data = []
-                        for pos, grp, msg in zip(positions, groups, messages):
-                            group_bytes = grp.encode('UTF-8') if isinstance(grp, str) else grp
-                            message_bytes = msg.encode('UTF-8') if isinstance(msg, str) else msg
-                            channel_id = merged_column_names[0].encode('UTF-8') if merged_column_names else b''
-                            
-                            marks_data.append((
-                                int(pos),
-                                int(pos),
-                                group_bytes,
-                                1.0,
-                                channel_id,
-                                message_bytes
-                            ))
-                        
-                        # Create marks dataset
-                        marks_dtype = np.dtype([
-                            ('SampleLeft', '<i4'),
-                            ('SampleRight', '<i4'),
-                            ('Group', 'S256'),
-                            ('Validity', '<f4'),
-                            ('Channel', 'S256'),
-                            ('Info', 'S256'),
-                        ])
-                        marks_array = np.array(marks_data, dtype=marks_dtype)
-                        
-                        # Remove old marks if exists and create new
-                        if 'Marks' in f_obj:
-                            del f_obj['Marks']
-                        f_obj.create_dataset('Marks', data=marks_array)
-                        
+                    positions, groups, messages = zip(*accumulated_marks)
+                    with HDFPlanter(
+                        merged_output_path,
+                        column_names=merged_column_names,
+                        append=True,
+                    ) as marks_planter:
+                        marks_planter.add_marks(
+                            positions=list(positions),
+                            groups=list(groups),
+                            messages=list(messages),
+                        )
                     logger.info(f"   ✅ Total {len(accumulated_marks)} entries injected into merged file")
                 
                 logger.info(f"Merged {len(group_files)} files into {merged_output_path} ({total_samples} total samples)")
@@ -447,8 +422,10 @@ def main():
                             attributes=hdf_attributes if output_fmt == "h5" else {},
                         ) as planter:
                             # create mandatory datasets
+                            num_samples_written = 0
                             for chunk in parser:
                                 planter.write(chunk)
+                                num_samples_written += chunk.shape[0]
 
                             # write entries to hdf file
                             if cfg["data"]["pin_entries"] and hasattr(planter, "add_marks"):
@@ -459,16 +436,18 @@ def main():
                                         if marked_entries:
                                             # Strict calculation of file boundaries relative to the file's reference timestamp
                                             file_start_sec = 0.0 # Relative to ref_timestamp of the current file
-                                            file_duration_sec = header.num_samples / header.amp.sampling_freq
+                                            file_duration_sec = num_samples_written / header.amp.sampling_freq
                                             file_end_sec = file_start_sec + file_duration_sec
                                             
                                             valid_marks = []
                                             for entry in marked_entries:
-                                                offset_sec = float(difftimestamp((int(entry.timestamp), int(ref_timestamp))))
+                                                # 有符号偏移：早于文件起点的 entry 为负值，被范围校验拒绝
+                                                offset_sec = float(entry.timestamp) - float(ref_timestamp)
                                                 
                                                 # Strict validation: No clamping. If it's outside, it's an error or belongs to another file.
                                                 if file_start_sec <= offset_sec < file_end_sec:
-                                                    local_pos = int(offset_sec * header.amp.sampling_freq)
+                                                    # round 而非 int：避免浮点误差下的截断偏移
+                                                    local_pos = round(offset_sec * header.amp.sampling_freq)
                                                     valid_marks.append((entry.group, local_pos, entry.message))
                                                 else:
                                                     logger.warning(f"   ⚠️ {datalog_id}: Entry '{entry.message}' timestamp {offset_sec}s outside file range [{file_start_sec}, {file_end_sec}]. Integrity check failed.")

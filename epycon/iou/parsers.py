@@ -169,6 +169,16 @@ class LogParser(abc.Iterator):
         if exc_type:
             print(f"Exception occurred: {exc_type}, {exc_value}")
 
+    @property
+    def num_samples(self) -> int:
+        """Number of samples from the data block start to the end of the selected
+        range (file end by default; the `start` offset is not subtracted).
+        Only valid inside the context manager."""
+        assert self._header is not None and self._stopbyte is not None
+        if not self._block_size:
+            return 0
+        return max(0, int(self._stopbyte - self._header.datablock_address) // self._block_size)
+
     def __iter__(self):
         return self
 

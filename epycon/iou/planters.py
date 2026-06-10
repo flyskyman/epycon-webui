@@ -577,10 +577,11 @@ class HDFPlanter(DatalogPlanter):
 
         marks = list()
         for position, group, message in zip(positions, groups, messages):
-            # filter out negative samples
-            position = max(1, position)
+            # filter out negative samples (sample 0 is valid: format is 0-indexed, see LeftI attr)
+            position = max(0, position)
 
-            group_bytes = group if isinstance(group, bytes) else group.encode('UTF-8')
+            # str() 兜底：未知 annotation group 在解析层是整数（GROUP_MAP 未命中时为 0）
+            group_bytes = group if isinstance(group, bytes) else str(group).encode('UTF-8')
             message_bytes = message if isinstance(message, bytes) else message.encode('UTF-8')
             _col_names = self.column_names or []
             channel_id = _col_names[0] if _col_names else b''

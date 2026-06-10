@@ -854,6 +854,7 @@ def open_local_file():
         logger.error(f"打开本地文件失败: {e}")
         return jsonify({'error': str(e)}), 500
 
+@ecg_api.route('/upload', methods=['POST'])
 def upload_file():
     """
     上传 HDF5 文件
@@ -879,9 +880,9 @@ def upload_file():
     
     # 生成唯一 ID
     file_id = str(uuid.uuid4())[:8]
-    
-    # 保存文件
-    save_path = os.path.join(TEMP_DIR, f"{file_id}_{file.filename}")
+
+    # 保存文件：路径只用 uuid + 白名单扩展名，客户端文件名不进入文件系统（防路径遍历）
+    save_path = os.path.join(TEMP_DIR, f"{file_id}{ext}")
     file.save(save_path)
     
     try:
@@ -1324,7 +1325,8 @@ def cleanup_all():
     for file_id in list(FILE_CACHE.keys()):
         info = FILE_CACHE.pop(file_id)
         try:
-            if os.path.exists(info['path']):
+            # 本地文件（用户原始数据）只清缓存，不物理删除
+            if not info.get('is_local', False) and os.path.exists(info['path']):
                 os.remove(info['path'])
                 count += 1
         except Exception:

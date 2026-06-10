@@ -1,6 +1,8 @@
 flask
 flask-cors
 numpy
+scipy
 h5py
 jsonschema
-psutilrequests
+psutil
+requests
