@@ -20,15 +20,6 @@ def test_main_cli_basic_execution():
         pytest.skip("Cannot import __main__ module")
 
 
-def test_cli_run_module_import():
-    """Test that cli.run module can be imported."""
-    try:
-        import epycon.cli.run
-        assert epycon.cli.run.__name__ == 'epycon.cli.run'
-    except ImportError:
-        pytest.skip("Cannot import cli.run module")
-
-
 def test_main_config_loading_logic():
     """Test config loading logic by extracting it to a testable function."""
     # We can test the config loading part by mocking file operations

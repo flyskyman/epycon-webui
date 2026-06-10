@@ -11,7 +11,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 
 from epycon.__main__ import main as entry_point
-import epycon.cli.run
 
 class TestCLIIntegration:
     """Integration tests for the epycon CLI entry points."""
@@ -31,21 +30,6 @@ class TestCLIIntegration:
                 entry_point()
             assert excinfo.value.code == 0
         
-        captured = capsys.readouterr()
-        assert "usage:" in captured.out or "usage:" in captured.err
-
-    def test_cli_run_module_import(self):
-        """Test that cli.run can be imported and main exists."""
-        assert hasattr(epycon.cli.run, 'main')
-        
-    def test_cli_run_help(self, capsys):
-        """Test that --help argument works for cli.run entry point."""
-        # epycon.cli.run expects specific arguments or config, but --help should exit early
-        with patch.object(sys, 'argv', ['run.py', '--help']):
-            with pytest.raises(SystemExit) as excinfo:
-                epycon.cli.run.main()
-            assert excinfo.value.code == 0
-            
         captured = capsys.readouterr()
         assert "usage:" in captured.out or "usage:" in captured.err
 

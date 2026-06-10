@@ -134,9 +134,26 @@ def check_port_available(port=5050):
     except OSError:
         return False
 
+def _is_our_process(pid):
+    """只识别本应用自己的旧实例：打包 exe，或命令行带 app_gui/epycon 的 python。
+    识别不了一律返回 False（宁可换端口也不误杀其他程序）。"""
+    try:
+        import psutil
+        p = psutil.Process(pid)
+        name = p.name().lower()
+        if 'workmatedatacenter' in name:
+            return True
+        if name.startswith('python'):
+            cmdline = ' '.join(p.cmdline()).lower()
+            return 'app_gui' in cmdline or 'workmatedatacenter' in cmdline or 'epycon' in cmdline
+    except Exception:
+        pass
+    return False
+
+
 def kill_port_occupier(port=5050):
     """
-    尝试终止占用端口的进程。
+    尝试终止占用端口的本应用旧实例（其他程序一律规避，由调用方换端口）。
     返回: (bool, str) -> (是否成功/跳过, 占用者名称)
     """
     import subprocess
@@ -158,8 +175,13 @@ def kill_port_occupier(port=5050):
                             # 禁止自杀或杀父（Reloader 环境下常见）
                             if target_pid == my_pid or target_pid == ppid:
                                 return False, "Self/Parent"
-                                
-                            pname = "Unknown Windows Process"
+
+                            # 只清理可识别的自家旧实例，其他程序一律规避
+                            if not _is_our_process(target_pid):
+                                print(f"🏷️  端口 {port} 被其他程序占用 (PID: {target_pid})，将规避而非终止。")
+                                return False, f"PID {target_pid}"
+
+                            pname = "旧实例"
                             print(f"发现占用者: {pname} (PID: {target_pid})")
                             subprocess.run(['taskkill', '/F', '/PID', str(target_pid)], timeout=5)
                             time.sleep(1.5)
@@ -181,11 +203,11 @@ def kill_port_occupier(port=5050):
                             # 端口是被自己或父进程占用的（例如 Flask Reloader 启动中），跳过清理
                             return False, "Self/Parent"
                             
-                        system_services = ['ControlCe', 'ControlCenter', 'launchd', 'rapportd']
-                        if pname in system_services:
-                            print(f"🏷️  端口 {port} 被系统服务 '{pname}' 占用，将尝试规避。")
+                        # 只清理可识别的自家旧实例，其他程序（含系统服务）一律规避
+                        if not _is_our_process(target_pid):
+                            print(f"🏷️  端口 {port} 被其他程序 '{pname}' 占用，将规避而非终止。")
                             return False, pname
-                        
+
                         print(f"发现占用者: {pname} (PID: {target_pid})")
                         subprocess.run(['kill', '-9', str(target_pid)], timeout=5)
                         time.sleep(1.5)

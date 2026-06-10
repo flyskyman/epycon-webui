@@ -9,24 +9,6 @@
 
 ## 中优先级
 
-### 4. 死代码：`epycon/iou/constants.py`
-- **证据**：51 条语句，全仓库无任何 import；真实实现是 `epycon/core/_formatting.py` 的 `SignalPlantDefaults`，两者内容重复且已出现字段拼写分叉（`ActiveLAyer`）
-- **建议**：直接删除
-
-### 5. 弃用代码：`epycon/cli/run.py`
-- **证据**：文件头自带弃用声明（"存在采样率传递缺失等问题，不建议用于生产转码"），覆盖率 23%，仅 `test_cli_integration.py` 的导入测试引用
-- **建议**：删除并同步精简对应测试；或下决心修好
-
-### 6. README 覆盖率徽章过期
-- **位置**：`README.md` 第 4 行，写死 53%
-- **现状**：2026-06-10 实测 76%（pytest --cov=epycon，134 个测试）
-- **建议**：更新数字；长期可改用 CI 生成的动态徽章
-
-### 7. `app_gui.py` 的 `kill_port_occupier` 行为激进
-- **位置**：`app_gui.py:137` 起
-- **问题**：启动时若 5050 端口被占，会尝试终止占用进程——可能误杀用户其他程序
-- **建议**：改为提示用户或自动换端口，不主动 kill
-
 ### 8. CI 双轨测试待合流
 - **位置**：`.github/workflows/ci.yml` 中 `scripts/test_version.py`、`scripts/test_business_functions.py`（自写 runner）与 pytest 套件并存
 - **问题**：scripts 系测试不产生覆盖率、不被 pytest 管理；长期维护两套
@@ -66,6 +48,20 @@
 ### 2. 版本号三处不一致（2026-06-10）
 - `epycon/__init__.py` 增加 `__version__ = "0.0.5a0"`（对应 v0.0.5-alpha）作为单一来源
 - `setup.py` 改为动态读取该版本号，并更新 fork 后的作者/邮箱/仓库 URL
+
+### 4. 死代码 `epycon/iou/constants.py`（2026-06-10）
+- 已删除；确认全仓库无 import，真实实现在 `core/_formatting.py`
+
+### 5. 弃用代码 `epycon/cli/run.py`（2026-06-10）
+- 已删除；同步移除 `test_cli_integration.py` / `test_cli_coverage.py` 中对它的导入测试
+
+### 6. README 覆盖率徽章过期（2026-06-10）
+- 53% → 76%；动态徽章方案待 CI 出真实数字后再考虑
+
+### 7. `kill_port_occupier` 误杀风险（2026-06-10）
+- 新增 `_is_our_process()` 守卫（psutil 按进程名+命令行验明正身）：
+  只清理本应用旧实例（打包 exe 或运行 app_gui/epycon 的 python），
+  其他程序一律规避、走既有的自动换端口逻辑；识别失败时默认不动手
 
 ### 3. config 双份易漂移（2026-06-10）
 - 处置方式为"明确分工 + 守卫"而非合并：根目录 `config/` 被 CI、copilot-instructions、
