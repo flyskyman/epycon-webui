@@ -272,9 +272,12 @@ except ImportError as e:
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
-# gzip/brotli 响应压缩：波形 JSON 可压缩 3-5 倍
+# gzip 响应压缩：波形 JSON 可压 2-3 倍。
+# 级别取 1：localhost 为主的场景压缩开销必须足够低（实测 level 6 的 CPU 开销
+# 会超过本地传输收益），level 1 仍有 ~2x 压缩率
 try:
     from flask_compress import Compress
+    app.config['COMPRESS_LEVEL'] = 1
     Compress(app)
 except ImportError:
     pass  # 未安装时退化为不压缩，功能不受影响
