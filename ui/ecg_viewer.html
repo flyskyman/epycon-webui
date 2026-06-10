@@ -82,7 +82,57 @@
             }
         };
 
+        // LTTB 标准实现（内联）。此前 lib/downsample-lttb.js 从未存在，
+        // 调用处 ReferenceError 被 catch 吞掉后静默回退原始数据，
+        // 导致 Plotly 渲染全分辨率点——前端降采样管线实际从未生效。
+        // 输入/输出均为 [[x, y], ...]，首末点保留。
+        const LTTB = {
+            process: function (data, threshold) {
+                const dataLength = data.length;
+                if (threshold >= dataLength || threshold <= 2) {
+                    return data;
+                }
+                const sampled = new Array(threshold);
+                let sampledIndex = 0;
+                const every = (dataLength - 2) / (threshold - 2);
+                let a = 0;
 
+                sampled[sampledIndex++] = data[0];
+                for (let i = 0; i < threshold - 2; i++) {
+                    // 下一桶的平均点
+                    const avgRangeStart = Math.floor((i + 1) * every) + 1;
+                    let avgRangeEnd = Math.floor((i + 2) * every) + 1;
+                    if (avgRangeEnd > dataLength) avgRangeEnd = dataLength;
+                    const avgRangeLength = avgRangeEnd - avgRangeStart;
+                    let avgX = 0, avgY = 0;
+                    for (let j = avgRangeStart; j < avgRangeEnd; j++) {
+                        avgX += data[j][0];
+                        avgY += data[j][1];
+                    }
+                    avgX /= avgRangeLength;
+                    avgY /= avgRangeLength;
+
+                    // 当前桶里选三角形面积最大的点
+                    const rangeOffs = Math.floor(i * every) + 1;
+                    const rangeTo = Math.floor((i + 1) * every) + 1;
+                    const pointAX = data[a][0];
+                    const pointAY = data[a][1];
+                    let maxArea = -1;
+                    let nextA = rangeOffs;
+                    for (let j = rangeOffs; j < rangeTo; j++) {
+                        const area = Math.abs(
+                            (pointAX - avgX) * (data[j][1] - pointAY) -
+                            (pointAX - data[j][0]) * (avgY - pointAY)
+                        );
+                        if (area > maxArea) { maxArea = area; nextA = j; }
+                    }
+                    sampled[sampledIndex++] = data[nextA];
+                    a = nextA;
+                }
+                sampled[sampledIndex++] = data[dataLength - 1];
+                return sampled;
+            }
+        };
     </script>
 
     <!-- h5wasm for fast client-side HDF5 reading -->
@@ -1160,8 +1210,6 @@
     <!-- 隐藏的文件输入 -->
     <input type="file" id="file-input" accept=".h5,.hdf5,.he5,.hdf,.npy,.npz" onchange="handleFileSelect(event)">
 
-    <script src="lib/h5wasm/hdf5_util.js"></script>
-    <script src="lib/downsample-lttb.js"></script>
     <script>
         // ========== 全局状态 ==========
         const state = {
@@ -2148,12 +2196,17 @@
 
                     if (state.lpFreq) params.append('lp', state.lpFreq);
                     if (state.hpFreq) params.append('hp', state.hpFreq);
-                    params.append('method', state.filterMethod);
+                    params.append('filter_method', state.filterMethod);
 
                     // 添加视窗范围参数
                     params.append('start', state.viewStart);
                     params.append('end', state.viewEnd);
-                    params.append('downsample', '4000'); // 请求 4000 点用于高平滑度显示
+                    // 服务端 downsample 是“因子”（每 factor 个采样保留 min+max 两点），
+                    // 按目标 4000 点折算：factor = 窗口样本数 * 2 / 4000
+                    const fsHz = state.metadata?.sampling_freq || 1000;
+                    const windowSamples = Math.max(1, Math.round((state.viewEnd - state.viewStart) * fsHz));
+                    const dsFactor = Math.max(1, Math.floor(windowSamples * 2 / 4000));
+                    params.append('downsample', String(dsFactor));
                     // 强制请求所有通道以便前端处理布局
                     params.append('channels', state.activeChannels.join(',')); // Ensure active channels are passed
                     if (state.channelFilters && Object.keys(state.channelFilters).length > 0) {
@@ -2170,6 +2223,19 @@
                     }
 
                     result = await response.json();
+
+                    // 服务端不再传 time 数组（等差数列就地重建，payload 减半）。
+                    // minmax 降采样每 factor 窗口输出 min+max 两点，等效间距 factor/(2*fs)
+                    if (!result.time && typeof result.num_samples === 'number') {
+                        const dt = result.downsample > 1
+                            ? result.downsample / (2 * fsHz)
+                            : 1 / fsHz;
+                        const t = new Float32Array(result.num_samples);
+                        for (let k = 0; k < result.num_samples; k++) {
+                            t[k] = result.start_sec + k * dt;
+                        }
+                        result.time = t;
+                    }
                 }
 
                 state.currentData = result;
@@ -2722,7 +2788,7 @@
                             // 根据算法选择降采样方式
                             let sampled;
                             if (state.downsampleAlgo === 'minmax') {
-                                sampled = DSP.minMaxDownsample(chData, targetPoints);
+                                sampled = MinMax.process(chData, targetPoints);
                             } else {
                                 sampled = LTTB.process(points, targetPoints);
                             }
@@ -2796,7 +2862,7 @@
                             // 根据算法选择降采样方式
                             let sampled;
                             if (state.downsampleAlgo === 'minmax') {
-                                sampled = DSP.minMaxDownsample(chData, targetPoints);
+                                sampled = MinMax.process(chData, targetPoints);
                             } else {
                                 sampled = LTTB.process(points, targetPoints);
                             }
