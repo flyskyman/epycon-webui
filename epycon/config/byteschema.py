@@ -31,13 +31,15 @@ SOURCE_MAP = {
 
 # ----------------------- WMx32 -----------------------
 # ---------------------- Datalog ----------------------
+
+
 @dataclass
 class DatalogHeaderWMx32:
     """ Log file header
     """
     block_size = 0x0000, 0x35B8
     timestamp = 0x0, 0x4
-    num_channels = 0x4, 0x6 
+    num_channels = 0x4, 0x6
 
 
 @dataclass
@@ -82,7 +84,7 @@ class WMx32LogSchema:
     """ Log file schema for WM <= 4.1
     """
     channel_size = 32   # Number of bytes per channel
-    page_size = 64      # Max number of channels in one page 
+    page_size = 64      # Max number of channels in one page
     sample_size = 4     # Number of bytes per data sample
     nb_pages = 7        # Total number of pages
     timestamp_fmt = '<L', 1
@@ -112,7 +114,7 @@ class WMx32EntriesSchema:
     header_timestamp = 0x02, 0x06
     timestamp_fmt = '<L', 1
     header_date = 0x06, 0x10
-    entry_type = 0x0, 0x2    
+    entry_type = 0x0, 0x2
     datalog_id = 0x2, 0x6
     timestamp = 0xA, 0xE
     text = 0xE, 0xC0
@@ -127,7 +129,7 @@ class DatalogHeaderWMx64:
     """
     block_size = 0x0000, 0x393C
     timestamp = 0x0, 0x8
-    num_channels = 0x8, 0xA 
+    num_channels = 0x8, 0xA
 
 
 @dataclass
@@ -172,7 +174,7 @@ class WMx64LogSchema:
     """ Log file schema for WM > 4.1
     """
     channel_size = 32   # Number of bytes per channel
-    page_size = 64      # Max number of channels in one page 
+    page_size = 64      # Max number of channels in one page
     sample_size = 4     # Number of bytes per data sample
     nb_pages = 7        # Total number of pages
     timestamp_fmt = '<Q', 1000
@@ -207,4 +209,4 @@ class WMx64EntriesSchema:
     datalog_id = 0x2, 0x6
     timestamp = 0xA, 0x12
     text = 0x12, 0xC2
-    line_size =  0xDC
+    line_size = 0xDC

@@ -16,30 +16,38 @@
 
 ## 低优先级
 
-### 9. 存量 flake8 噪音
-- **位置**：`epycon/__main__.py`（W291/W293、`sys` F401、F841 等数十处）、`tests/test_planters.py`（`os`/`tempfile` F401）
-- **现状**：CI flake8 为 continue-on-error，不阻塞
-- **建议**：一次性 `ruff --fix` 或 autopep8 清理后把 flake8 改为强制
-
-### 10. `tests/` 目录混杂
-- **位置**：`tests/legacy/*.disabled`、`tests/*.py.disabled`、非 pytest 脚本（`check_marks.py`、`debug_entries.py`、`validate_entries_logic.py`、`verify_wmx64_integrity.py`）、`browser_test.html`、`run_tests.ps1`
-- **建议**：`.disabled` 文件要么修复启用要么删除；工具脚本挪到 `scripts/`
-
-### 11. `scripts/` 目录 40+ 一次性脚本未归档
-- **问题**：分析/修复/生成脚本混在一起，难辨哪些还在用（CI 实际只用 5 个左右）
-- **建议**：按"CI 在用 / 工具 / 一次性归档"分类，归档类移入 `scripts/archive/`
-
-### 12. `examples/data/out/` 生成产物入库
-- **问题**：转换输出（含旧版代码生成的 `study01_merged.h5`，其 Marks 数据已与当前代码行为不一致）被 git 追踪，容易被误当参照
-- **建议**：gitignore 输出目录，CI 用 artifact 传递
-
-### 13. `requirements-dev.txt` 与 CI 安装列表不同步
-- **位置**：CI 里手写 `pip install numpy scipy h5py ...`，与 `requirements.txt`/`requirements-dev.txt` 各自维护
-- **建议**：CI 改为 `pip install -r requirements.txt -r requirements-dev.txt`（2026-06-10 的 `psutilrequests` 粘连 bug 正是因为 CI 绕过了 requirements 才长期未暴露）
+（暂无——原 9–13 条已于 2026-06-10 解决，见底部"已解决"）
 
 ---
 
 ## 已解决
+
+### 9. 存量 flake8 噪音（2026-06-10）
+- `epycon/` 621 个告警清零：autopep8 机械修复 + 全局去行尾空白 + 手工修
+  F401/F841/F541/E741/E722/E501；`.flake8` 的 ignore 列回 pycodestyle 默认忽略项
+  （显式 ignore 会覆盖默认值，E121/E123/E125 等本不该被启用）
+- CI 的 flake8 步骤改为强制（移除 continue-on-error）
+- 副产物：发现并修复第 15 个 bug——`enhanced_notch` 解析行被远端贴错到
+  get_annotations，get_data 实际使用处未定义（F821），HDF5 的陷波滤波静默失效
+
+### 10. `tests/` 目录混杂（2026-06-10）
+- 非测试脚本（check_marks/test_h5_marks/debug_entries/validate_entries_logic/
+  verify_wmx64_integrity/browser_test.html/两个 .disabled 手工冒烟脚本/
+  test_backup_config.json）移入 `scripts/archive/`
+- `tests/legacy/*.disabled` 4 个文件删除（核实为零代码空壳，仅含"已归档"注释）
+- `tests/run_tests.ps1` 删除（与 `scripts/run_tests.ps1` 重复，README 指向后者）
+
+### 11. `scripts/` 一次性脚本归档（2026-06-10）
+- 21 个一次性分析/调试脚本移入 `scripts/archive/`；分类规则写入 `scripts/README.md`
+- 根目录保留：CI 在用 6 个 + 开发工具 8 个 + 数据 2 个
+
+### 12. `examples/data/out/` 入库问题（2026-06-10）
+- **核实后修正原记载**：该目录从未被 git 追踪（当初误把文件系统列表当成 git 状态）
+- 已加预防性 .gitignore 规则；本地旧产物（与现行 Marks 行为不一致）仍在磁盘，可自行删除
+
+### 13. CI 安装列表与 requirements 同步（2026-06-10）
+- CI 改为 `pip install -r requirements.txt -r requirements-dev.txt`
+- `requirements-dev.txt` 补 flake8；CI 原列表中的 python-dateutil 经核实零使用，移除
 
 ### 1. 仓库携带 34.5MB 发布压缩包（2026-06-10）
 - `git rm --cached` 移出追踪，`.gitignore` 增加 `docs/*.zip`，本地文件保留

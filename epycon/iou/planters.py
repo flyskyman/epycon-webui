@@ -3,7 +3,6 @@ import h5py as h
 import numpy as np
 
 
-
 from epycon.core._dataclasses import Entry
 from epycon.core._formatting import _tocsv, _tosel, SignalPlantDefaults
 
@@ -44,24 +43,24 @@ class EntryPlanter:
             self,
             entries: List[Entry],
             ) -> None:
-        
+
         self.entries = entries
 
     def savecsv(
             self,
-            f_path: Union[str, bytes, PathLike],            
+            f_path: Union[str, bytes, PathLike],
             criteria: Optional[Dict[str, Union[str, List, Tuple, set]]] = None,
             **kwargs,
             ) -> None:
-        
+
         ref_timestamp = kwargs.pop("ref_timestamp", None)
-                
+
         # format entries
         content = _tocsv(
             list(self._filter(criteria=criteria)),
             ref_timestamp=ref_timestamp if ref_timestamp is not None else None,
             )
-                
+
         with open(f_path, 'w', encoding='utf-8') as f_obj:
             f_obj.write(content)
 
@@ -70,10 +69,10 @@ class EntryPlanter:
             f_path: Union[str, bytes, PathLike],
             ref_timestamp: float,
             sampling_freq: Union[int, float],
-            channel_names: Union[List, Tuple],            
+            channel_names: Union[List, Tuple],
             criteria: Optional[Dict[str, Union[str, List, Tuple, set]]] = None,
             **kwargs,
-            ) -> None:        
+            ) -> None:
 
         # format entries
         _basename = os.path.basename(f_path)
@@ -88,58 +87,58 @@ class EntryPlanter:
             channel_names,
             _file_name,
             )
-                
+
         with open(f_path, 'w', encoding='utf-8') as f_obj:
             f_obj.write(content)
 
     def _filter(
-            self,            
+            self,
             criteria: Optional[Dict[str, Union[str, List, Tuple, set]]] = None,
         ) -> Iterator[Entry]:
-            """ Returns an iterator of MyDataClass items that pass the filter function.
+        """ Returns an iterator of MyDataClass items that pass the filter function.
 
-            Args:
-                param_name (Union[str, None], optional): _description_. Defaults to None.
-                valid (Union[List, Tuple, None], optional): _description_. Defaults to None.
+        Args:
+            param_name (Union[str, None], optional): _description_. Defaults to None.
+            valid (Union[List, Tuple, None], optional): _description_. Defaults to None.
 
-            Returns:
-                dict: _description_
-            """
-            # convert to set
+        Returns:
+            dict: _description_
+        """
+        # convert to set
+        if criteria:
+            for field in ("fids", "groups"):
+                if field in criteria:
+                    val = criteria[field]
+                    if isinstance(val, str):
+                        criteria[field] = {val}
+                    elif isinstance(val, (list, tuple, set)):
+                        normalized_values = set()
+                        for item in val:
+                            normalized_values.add(_ensure_hashable(item))
+                        criteria[field] = normalized_values
+                    else:
+                        raise TypeError
+
+        # iterate over items
+        for item in self.entries:
+            valid = True
             if criteria:
-                for field in ("fids", "groups"):
-                    if field in criteria:
-                        val = criteria[field]
-                        if isinstance(val, str):
-                            criteria[field] = {val}
-                        elif isinstance(val, (list, tuple, set)):
-                            normalized_values = set()
-                            for item in val:
-                                normalized_values.add(_ensure_hashable(item))
-                            criteria[field] = normalized_values
-                        else:
-                            raise TypeError
-            
-            # iterate over items
-            for item in self.entries:
-                valid = True
-                if criteria:
-                    fids_set = cast(set, criteria.get("fids"))
-                    groups_set = cast(set, criteria.get("groups"))
-                    if (
-                        fids_set
-                        and item.fid not in fids_set                        
-                        ):
-                        valid = False
-                    if (
-                        valid
-                        and groups_set
-                        and item.group not in groups_set
-                        ):
-                        valid = False
+                fids_set = cast(set, criteria.get("fids"))
+                groups_set = cast(set, criteria.get("groups"))
+                if (
+                    fids_set
+                    and item.fid not in fids_set
+                    ):
+                    valid = False
+                if (
+                    valid
+                    and groups_set
+                    and item.group not in groups_set
+                    ):
+                    valid = False
 
-                if valid:
-                    yield item
+            if valid:
+                yield item
 
 
 class DatalogPlanter:
@@ -163,7 +162,7 @@ class DatalogPlanter:
         column_names: Union[List, Tuple, None] = None,
         **kwargs: Any,
     ) -> None:
-        
+
         self.f_path = f_path
         self._f_obj = None
         _ext = os.path.splitext(f_path)[1]
@@ -174,7 +173,7 @@ class DatalogPlanter:
 
     def __enter__(self):
         raise NotImplementedError
-    
+
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # 如果是 HDF5 且存在预分配空间，进行裁剪
         if self._f_obj and self._extension == ".h5" and self._DATASET_DNAME in self._f_obj:
@@ -189,7 +188,7 @@ class DatalogPlanter:
         # Close file object
         if self._f_obj:
             self._f_obj.close()
-        
+
         # set flags and attributes to defaults
         self._header_isstored = False
         self._fmt = None
@@ -218,7 +217,7 @@ class CSVPlanter(DatalogPlanter):
         **kwargs: Any,
     ) -> None:
 
-        super().__init__(f_path, column_names)        
+        super().__init__(f_path, column_names)
 
         self._delimiter = kwargs.pop("delimiter", ",")
         self._header_isstored = False
@@ -226,9 +225,9 @@ class CSVPlanter(DatalogPlanter):
         # Backwards compatibility: expose `delimiter` attribute for callers
         # that expect `planter.delimiter` (historical code).
         self.delimiter = self._delimiter
-        
+
     def __enter__(self):
-        try:            
+        try:
             self._f_obj = open(self.f_path, "w")
         except IOError as e:
             raise IOError(e)
@@ -236,7 +235,7 @@ class CSVPlanter(DatalogPlanter):
 
     def write(
         self,
-        darray: NumpyArray,        
+        darray: NumpyArray,
         **kwargs,
         ) -> None:
         """_summary_
@@ -253,7 +252,7 @@ class CSVPlanter(DatalogPlanter):
                 self.column_names = [str(i) for i in range(darray.shape[1])]
             else:
                 assert len(self.column_names) == darray.shape[1]
-            
+
             self._f_obj.writelines(self.delimiter.join(self.column_names) + '\n')
             self._header_isstored = True
 
@@ -261,7 +260,7 @@ class CSVPlanter(DatalogPlanter):
         if self._fmt is None:
             # Use %d for integers, else fallback to default
             self._fmt = '%d' if np.issubdtype(darray.dtype, np.integer) else '%.4f'
-            
+
         # Use numpy.savetxt for efficient vectorized writing
         np.savetxt(
             self._f_obj,
@@ -270,7 +269,6 @@ class CSVPlanter(DatalogPlanter):
             delimiter=self.delimiter,
             newline='\n'
         )
-
 
 
 class HDFPlanter(DatalogPlanter):
@@ -304,17 +302,17 @@ class HDFPlanter(DatalogPlanter):
     extra_attributes: Dict[str, Any]
     append_mode: bool
     _chunk_step: int = 100000  # 预分配步长
-    _current_sample_count: int = 0 # Track actual number of samples written
-    
+    _current_sample_count: int = 0  # Track actual number of samples written
+
     def __init__(
         self,
         f_path: Union[str, bytes, os.PathLike],
         column_names: Union[List, Tuple, None] = None,
-        **kwargs: Any,        
+        **kwargs: Any,
         ) -> None:
-        
-        super().__init__(f_path, column_names) 
-        
+
+        super().__init__(f_path, column_names)
+
         self.cfg = SignalPlantDefaults()
 
         self.sampling_freq = kwargs.pop("sampling_freq", 1)
@@ -322,11 +320,11 @@ class HDFPlanter(DatalogPlanter):
         self.entries = kwargs.pop("entries", None)
         self.factor = kwargs.pop("factor", 1000)
         self.extra_attributes = kwargs.pop("attributes", {})
-        
+
         # [NEW] 压缩选项
         self.compression = kwargs.pop("compression", None)  # e.g., 'lzf', 'gzip'
         self.compression_opts = kwargs.pop("compression_opts", None)
-        
+
         # [NEW] Append 模式支持
         self.append_mode = kwargs.pop("append", False)
 
@@ -337,24 +335,24 @@ class HDFPlanter(DatalogPlanter):
             # [FIX] 根据 append_mode 选择文件打开模式
             mode = "a" if self.append_mode and os.path.exists(self.f_path) else "w"
             self._f_obj = h.File(self.f_path, mode)
-            
+
             # 如果是 append 模式且文件已有数据，标记 header 已存储
             if mode == "a" and self._DATASET_DNAME in self._f_obj:
                 self._header_isstored = True
         except IOError as e:
             raise IOError(e)
         return self
-    
+
     def write(
             self,
             darray: NumpyArray,
             **kwargs: Any,
         ) -> None:
-        
+
         # [NEW] 忽略空数据块，防止计算逻辑长度时出错
         if darray.shape[1] == 0:
             return
-                
+
         # write header
         if not self._header_isstored:
             if self.column_names is None:
@@ -362,7 +360,7 @@ class HDFPlanter(DatalogPlanter):
                 self.column_names = [str(i) for i in range(darray.shape[1])]
             else:
                 assert len(self.column_names) == darray.shape[1]
-            
+
             # make a list of encoded channel names with removed white spaces
             normalized_names = [_normalize_channel_name(item) for item in self.column_names]
             self.column_names = [name.encode('UTF-8') for name in normalized_names]
@@ -375,19 +373,18 @@ class HDFPlanter(DatalogPlanter):
             self._generate_channel_settings()
 
             self._header_isstored = True
-        
+
         self.add_samples(darray)
 
-    
     def _generate_attributes(self) -> None:
         """_summary_
 
         Args:
             data_arr (_type_): _description_
         """
-        
+
         # Add attributes with mandatory parameters
-        self._f_obj.attrs['Fs'] = np.array([self.sampling_freq], dtype=self.cfg.ATTR_DTYPE)        
+        self._f_obj.attrs['Fs'] = np.array([self.sampling_freq], dtype=self.cfg.ATTR_DTYPE)
         self._f_obj.attrs['GeneratedBy'] = self._PARSER
         self._f_obj.attrs['LeftI'] = self._LEFT_INDEX
         self._f_obj.attrs['RightI'] = self._RIGHT_INDEX
@@ -404,98 +401,98 @@ class HDFPlanter(DatalogPlanter):
                 except Exception:
                     pass
 
-
     def _generate_channel_settings(
-            self,            
+            self,
             ):
-            """Generates channel settings for Signal Plant
+        """Generates channel settings for Signal Plant
 
-            Args:
-                self.f_obj (obj): file obj. handle
-                ch_names (list): List of channel names
+        Args:
+            self.f_obj (obj): file obj. handle
+            ch_names (list): List of channel names
 
-            Raises:
-                TypeError: Check for strings in <ch_names> list
+        Raises:
+            TypeError: Check for strings in <ch_names> list
 
-            Returns:
-                self.f_obj (obj): file obj. handle
-            """
+        Returns:
+            self.f_obj (obj): file obj. handle
+        """
 
-            # Generate content
-            content = list()
+        # Generate content
+        content = list()
 
-            channel_settings_values: List[Any] = list(self.cfg.CHANNEL_SETTINGS.values())
-            _col_names = self.column_names or []
-            for ch_name in _col_names:
-                # Generate single channel settings and append to content
-                temp: List[Any] = [ch_name]
-                temp.extend(channel_settings_values)
-                content.append(tuple(temp))
+        channel_settings_values: List[Any] = list(self.cfg.CHANNEL_SETTINGS.values())
+        _col_names = self.column_names or []
+        for ch_name in _col_names:
+            # Generate single channel settings and append to content
+            temp: List[Any] = [ch_name]
+            temp.extend(channel_settings_values)
+            content.append(tuple(temp))
 
-            content = np.array(
-                content,
-                dtype=self.cfg.CHANNEL_DTYPES,
-                )
+        content = np.array(
+            content,
+            dtype=self.cfg.CHANNEL_DTYPES,
+            )
 
-            # add/append dataset
-            if self._CHANNEL_DNAME in self._f_obj:
-                del self._f_obj[self._CHANNEL_DNAME]
-            
-            self._f_obj.create_dataset(self._CHANNEL_DNAME, data=content)
+        # add/append dataset
+        if self._CHANNEL_DNAME in self._f_obj:
+            del self._f_obj[self._CHANNEL_DNAME]
 
+        self._f_obj.create_dataset(self._CHANNEL_DNAME, data=content)
 
     def _generate_channel_info(
-            self,            
+            self,
             ) -> None:
-            """Generates channel info for Signal Plant
+        """Generates channel info for Signal Plant
 
-            Args:
-                self.f_obj (obj): file obj. handle
-                ch_names (list): List of channel names
-                datacache_names (list, optional): List of channel names. If None names are generated using default values.
-                unit_names (list, optional): List of physical unit names. If None names are generated using default values.
+        Args:
+            self.f_obj (obj): file obj. handle
+            ch_names (list): List of channel names
+            datacache_names (list, optional): List of channel names.
+                If None names are generated using default values.
+            unit_names (list, optional): List of physical unit names.
+                If None names are generated using default values.
 
-            Returns:
-                self.f_obj (obj): file obj. handle
-            """
-            
-            _col_names = self.column_names or []
-            datacache_names = [self._DATACACHE_NAME.encode('UTF-8') for _ in _col_names]
+        Returns:
+            self.f_obj (obj): file obj. handle
+        """
 
-            # make a list of physical units
-            if self.units is None:
-                self.units = self._UNITS
-            
-            _units = self.units
-            if isinstance(_units, (tuple, list)):
-                self.units = [item.encode('UTF-8') if isinstance(item, str) else item for item in _units]
-            elif isinstance(_units, str):
-                units_str: str = _units
-                self.units = [units_str.encode('UTF-8')] * len(_col_names)
-            else:
-                raise TypeError
+        _col_names = self.column_names or []
+        datacache_names = [self._DATACACHE_NAME.encode('UTF-8') for _ in _col_names]
 
-            # Generate content
-            content_list = list(zip(_col_names, datacache_names, self.units))
+        # make a list of physical units
+        if self.units is None:
+            self.units = self._UNITS
 
-            content_array = np.array(
-                content_list,
-                dtype=self.cfg.INFO_DTYPES,
-                )    
+        _units = self.units
+        if isinstance(_units, (tuple, list)):
+            self.units = [item.encode('UTF-8') if isinstance(item, str) else item for item in _units]
+        elif isinstance(_units, str):
+            units_str: str = _units
+            self.units = [units_str.encode('UTF-8')] * len(_col_names)
+        else:
+            raise TypeError
 
-            # add/append dataset
-            if self._INFO_DNAME in self._f_obj:
-                _info_ds = cast(h.Dataset, self._f_obj[self._INFO_DNAME])
-                current_content = _info_ds[:]
-                content_array = np.append(current_content, content_array)
+        # Generate content
+        content_list = list(zip(_col_names, datacache_names, self.units))
 
-                del self._f_obj[self._INFO_DNAME]
-            
-            self._f_obj.create_dataset(self._INFO_DNAME, data=content_array)
+        content_array = np.array(
+            content_list,
+            dtype=self.cfg.INFO_DTYPES,
+            )
+
+        # add/append dataset
+        if self._INFO_DNAME in self._f_obj:
+            _info_ds = cast(h.Dataset, self._f_obj[self._INFO_DNAME])
+            current_content = _info_ds[:]
+            content_array = np.append(current_content, content_array)
+
+            del self._f_obj[self._INFO_DNAME]
+
+        self._f_obj.create_dataset(self._INFO_DNAME, data=content_array)
 
     def add_samples(
             self,
-            darray: NumpyArray,            
+            darray: NumpyArray,
             ):
         """_summary_
 
@@ -515,14 +512,12 @@ class HDFPlanter(DatalogPlanter):
 
         # Create new dataset if not exists
         if self._DATASET_DNAME not in self._f_obj:
-            # 初始预分配更大的空间，提高后续追加效率
-            initial_capacity = max(darray.shape[1], self._chunk_step)
             self._f_obj.create_dataset(
-                self._DATASET_DNAME, 
-                data=None, 
-                shape=(darray.shape[0], darray.shape[1]), 
-                maxshape=(darray.shape[0], None), 
-                chunks=True, 
+                self._DATASET_DNAME,
+                data=None,
+                shape=(darray.shape[0], darray.shape[1]),
+                maxshape=(darray.shape[0], None),
+                chunks=True,
                 dtype=self.cfg.DATASET_DTYPE,
                 compression=self.compression,
                 compression_opts=self.compression_opts
@@ -532,36 +527,35 @@ class HDFPlanter(DatalogPlanter):
             # 写入数据
             self._f_obj[self._DATASET_DNAME][:, :darray.shape[1]] = darray
             return
-    
+
         # Check for data shape consistency, raise error if does not match
         _dataset = cast(h.Dataset, self._f_obj[self._DATASET_DNAME])
         if _dataset.shape[0] != darray.shape[0]:
             raise ValueError(
                 f"""Inconsistent shape of the input data.
-                Expected to be {_dataset.shape[0]}, 
+                Expected to be {_dataset.shape[0]},
                 got {darray.shape[0]} instead."""
-                )            
+                )
 
         # 获取逻辑长度（实际写入的样本数）
         logical_len = _dataset.attrs.get('_logical_length', _dataset.shape[1])
         new_logical_len = logical_len + darray.shape[1]
-        
+
         # 如果当前物理容量不足，触发预分配 resize
         if new_logical_len > _dataset.shape[1]:
             new_physical_len = ((new_logical_len // self._chunk_step) + 1) * self._chunk_step
             _dataset.resize(new_physical_len, axis=1)
-                
+
         # 写入数据并更新逻辑长度
-        _dataset[:, logical_len:new_logical_len] = darray 
+        _dataset[:, logical_len:new_logical_len] = darray
         _dataset.attrs['_logical_length'] = new_logical_len
-        
+
     def add_marks(
         self,
         positions: Union[List, Tuple],
         groups: Union[List, Tuple],
         messages: Union[List, Tuple],
         ) -> None:
-
         """_summary_
 
         Args:
@@ -572,7 +566,7 @@ class HDFPlanter(DatalogPlanter):
             channel_id (bytes, optional): _description_. Defaults to ''.
             info (bytes, optional): _description_. Defaults to b'a'.
         """
-        
+
         # TODO: add mutiple marks at once
 
         marks = list()
@@ -598,9 +592,8 @@ class HDFPlanter(DatalogPlanter):
         # create NumPy array
         content = np.array(marks, dtype=self.cfg.MARKS_DTYPES)
 
-        if self._MARKS_DNAME in self._f_obj:           
+        if self._MARKS_DNAME in self._f_obj:
             # remove old dataset and store the new one
             del self._f_obj[self._MARKS_DNAME]
 
         self._f_obj.create_dataset(self._MARKS_DNAME, data=content)
-

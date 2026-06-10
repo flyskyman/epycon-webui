@@ -8,9 +8,10 @@ from epycon.core._typing import (
     Union, List, Dict
 )
 
+
 @dataclass(frozen=True)
 class Diary:
-    group: int    
+    group: int
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ class Entry:
 @dataclass(frozen=True)
 class Channel:
     name: str
-    reference: Union[int, None]    
+    reference: Union[int, None]
     source: str
     pin: Sequence[int]
 
@@ -46,16 +47,16 @@ class Channel:
 class Channels:
     content: List
     mount: Dict
-    
+
     def __len__(self):
         return len(self.content)
-    
+
     def __getitem__(self, index):
         return self.content[index]
-        
+
     def __iter__(self):
         return iter(self.content)
-        
+
     def add_custom_mount(self, mount: Dict, override: bool = False):
         """ Create custom mapping for computing bipolar leads.
 
@@ -65,18 +66,18 @@ class Channels:
         # validate user-defined electrical references
         if not mount:
             return
-        
+
         for _, item in mount.items():
-            _validate_mount(item, max=len(self.content)-1)
+            _validate_mount(item, max=len(self.content) - 1)
 
         if override:
             self.mount = mount
         else:
-            self.mount = {**self.mount, **mount}    
+            self.mount = {**self.mount, **mount}
 
     @property
     def raw_mappings(self):
-        return {item.name:(item.reference,) for item in self.content}
+        return {item.name: (item.reference,) for item in self.content}
 
     @property
     def computed_mappings(self):
@@ -84,7 +85,7 @@ class Channels:
         for key, indices in self.mount.items():
             if len(indices) == 1:
                 mappings[key] = (self.content[indices[0]].reference,)
-            
+
             if len(indices) == 2:
                 mappings[key] = (
                     self.content[indices[1]].reference,
@@ -94,8 +95,10 @@ class Channels:
         return mappings
 
 # Nested dataclass
+
+
 @dataclass()
-class AmplifierSettings:    
+class AmplifierSettings:
     resolution: int
     highpass_freq: float
     notch_freq: Union[None, int]

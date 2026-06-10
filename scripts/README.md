@@ -1,3 +1,18 @@
+# scripts/ 目录说明
+
+分类规则（2026-06-10 整理）：
+
+- **scripts/ 根目录**：仍在使用的脚本
+  - CI 在用：`generate_fake_wmx.py`、`generate_fake_wmx32.py`（windows-build-release）、
+    `validate_ci_output.py`、`test_version.py`、`test_business_functions.py`、
+    `test_performance_regression.py`
+  - 开发工具：`run_tests.ps1`、`clean_repo.ps1`、`cleanup.ps1`、`ps_helpers.ps1`、
+    `fix_encoding.py`、`inspect_h5.py`、`inspect_h5_attrs.py`、`WorkMateDataCenter.spec`
+  - 数据：`benchmarks.json`（性能基线）、`channel_audit.csv`（通道审计表）
+- **scripts/archive/**：一次性分析/调试/历史脚本，保留备查，不维护、不保证可运行
+
+---
+
 generate_fake_wmx.py — generator for fake WorkMate logs
 
 Purpose

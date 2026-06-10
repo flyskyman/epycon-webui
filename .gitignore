@@ -171,3 +171,6 @@ temp_test/
 
 # 发布产物走 GitHub Releases，不入库
 docs/*.zip
+
+# 转换输出产物不入库（CI 用 artifact 传递）
+examples/data/out/

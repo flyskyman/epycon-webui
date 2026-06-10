@@ -1,10 +1,11 @@
 from typing import Union
 from struct import unpack
 
+
 def readbin(
-    file_path, 
+    file_path,
     start_byte: Union[int, None] = None,
-    bytes_to_read: Union[int, None] = None,    
+    bytes_to_read: Union[int, None] = None,
     ):
     """_summary_
 
@@ -19,12 +20,12 @@ def readbin(
     with open(file_path, "rb") as file:
         if start_byte:
             file.seek(start_byte, 0)
-        barray = file.read(bytes_to_read)    
-        
+        barray = file.read(bytes_to_read)
+
     return barray
 
 
-def readchunk(f_object, chunk_size):    
+def readchunk(f_object, chunk_size):
     """_summary_
 
     Args:

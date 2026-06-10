@@ -20,14 +20,14 @@ class CzechPersonID:
         # Check length before converting to int
         if len(sid) >= 12 or len(sid) <= 8:
             raise ValueError("")
-        
+
         try:
             sid = int(sid)
         except ValueError:
             raise ValueError("")
-        
+
         if len(sid) >= 12 or len(sid) <= 8:
-            raise ValueError(f"")
+            raise ValueError("")
 
         return sid
 

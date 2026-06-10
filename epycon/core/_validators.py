@@ -1,8 +1,9 @@
 import os
 
 from epycon.core._typing import (
-    Union, List, Any, Tuple, PathLike, 
+    Union, List, Any, Tuple, PathLike,
 )
+
 
 def _validate_int(
     name: str,
@@ -22,10 +23,10 @@ def _validate_int(
 
     Raises:
         ValueError: If value is not a valid integer within the specified range.
-        
+
     Returns:
         Union[int, None]: The validated integer value, or None if input was None.
-    """    
+    """
 
     if value is None:
         return value
@@ -44,7 +45,7 @@ def _validate_int(
         if value > mxn_value:
             raise ValueError(messsage)
 
-    if value < min_value:    
+    if value < min_value:
         raise ValueError(messsage)
 
     return int(value)
@@ -61,19 +62,19 @@ def _validate_str(
     Args:
         name (str): Parameter name for error messages.
         value (Union[str, None]): The string value to validate.
-        valid_set (set): Set of valid string values.        
+        valid_set (set): Set of valid string values.
 
     Raises:
         ValueError: If value is not in the valid_set.
-        
+
     Returns:
         Union[str, None]: The validated string value, or None if input was None.
-    """    
+    """
 
     if value is None:
         return value
 
-    messsage = f"Parameter `{name}` containing `{value}` expected to be from {valid_set}"    
+    messsage = f"Parameter `{name}` containing `{value}` expected to be from {valid_set}"
     if not isinstance(value, str):
         raise ValueError(messsage)
 
@@ -86,13 +87,13 @@ def _validate_str(
 def _validate_version(
     version: Union[str, None],
 ) -> str:
-    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3', '4.3.2'} 
+    valid_x32, valid_x64 = {'4.1'}, {'4.2', '4.3', '4.3.2'}
 
     if version is None:
         return 'x64'
-    
+
     if version in valid_x32:
-        return 'x32'    
+        return 'x32'
     elif version in valid_x64:
         return 'x64'
     else:
@@ -113,9 +114,9 @@ def _validate_reference(positive_ref, negative_ref):
     """
     if any(value == 140 for value in (negative_ref, positive_ref)):
         raise ValueError
-    
+
     if all(value is None for value in (negative_ref, positive_ref)):
-        raise ValueError        
+        raise ValueError
 
 
 def _validate_mount(mount: tuple, max: int):
@@ -132,11 +133,11 @@ def _validate_mount(mount: tuple, max: int):
     """
     if len(mount) > 2:
         raise ValueError(f"Too many electrical sources for lead computation. Expected 2, got {len(mount)}")
-    
+
     for item in mount:
         if not isinstance(item, int):
             raise TypeError(f"Electrical sources for lead computation requires type `int` not {type(item)}")
-        
+
         if item > max:
             raise IndexError(f"Index {item} of the electrical source out of bounds. Max. {max}")
 
@@ -145,7 +146,7 @@ def _validate_tuple(
     name: str,
     arr: Union[List, Tuple],
     size: int,
-    dtype: Any = str,    
+    dtype: Any = str,
     ) -> Union[List, Tuple, None]:
     """Validates that an array/tuple has the expected size and element types.
 
@@ -171,15 +172,14 @@ def _validate_tuple(
 
     if not all(isinstance(item, dtype) for item in arr):
         raise TypeError(messsage)
-    
+
     return arr
-    
+
 
 def _validate_path(
         f_path: Union[str, bytes, PathLike],
         name: str = "file or directory",
     ) -> str:
-
     """ Checks if the path exists and the user has read/write access.
 
     Args:
@@ -192,7 +192,7 @@ def _validate_path(
     f_path = os.path.abspath(os.path.realpath(f_path))
     path_str = str(f_path)
     message = f"Path to {name} does not exist or user does not have read/write permisson: {path_str}"
-    
+
     if not os.path.exists(f_path):
         raise ValueError(message)
 
@@ -210,5 +210,5 @@ def _validate_path(
             os.listdir(f_path)
         except PermissionError:
             raise ValueError(message)
-        
+
     return path_str

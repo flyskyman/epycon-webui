@@ -2,14 +2,13 @@ import os
 import sys
 import struct
 from itertools import islice
-from datetime import datetime
 from collections import abc
 from typing import BinaryIO
 
 import numpy as np
 
 from epycon.core._typing import (
-    Union, List, Optional, Dict,
+    Union, List, Optional,
 )
 
 from epycon.core._validators import (
@@ -30,7 +29,7 @@ from epycon.core._dataclasses import (
     Header,
     Channel,
     Channels,
-    Entry,    
+    Entry,
 )
 
 from epycon.config.byteschema import (
@@ -52,7 +51,7 @@ def _twos_complement(darray, bytesize):
 
 class LogParser(abc.Iterator):
     """Iterator-based parser for WorkMate binary log files.
-    
+
     Supports streaming read of large log files with configurable chunk sizes.
     Implements context manager protocol for safe resource management.
 
@@ -66,7 +65,7 @@ class LogParser(abc.Iterator):
     def __init__(
         self,
         f_path: Union[str, bytes, os.PathLike],
-        version: Optional[str] = None,        
+        version: Optional[str] = None,
         samplesize: int = 1024,
         start: int = 0,
         end: Optional[int] = None,
@@ -74,7 +73,7 @@ class LogParser(abc.Iterator):
         ) -> None:
         super().__init__()
 
-        # validate WM version and return correct byte schema             
+        # validate WM version and return correct byte schema
         diary: Union[type[WMx32LogSchema], type[WMx64LogSchema]]
         if _validate_version(version) == 'x32':
             diary = WMx32LogSchema
@@ -86,13 +85,12 @@ class LogParser(abc.Iterator):
 
         self.f_path = f_path
         self.timestampfmt, self.timestampfactor = self.diary.timestamp_fmt
-        
+
         self.samplesize = _validate_int("chunk size", samplesize, min_value=1024)
         self.start = _validate_int("start sample", start, min_value=0)
         self.end = _validate_int("end sample", end, min_value=start) if end is not None else None
-            
-        
-        # file related content required for parsing.        
+
+        # file related content required for parsing.
         self._f_obj: Optional[BinaryIO] = None
         self._header: Optional[Header] = None
         self._stopbyte: Optional[Union[int, float]] = None
@@ -100,8 +98,7 @@ class LogParser(abc.Iterator):
         self._blocksize: Optional[int] = None
         self._channel_mapping: Optional[object] = None
         self._mount_negidx: Optional[object] = None
-        self._mount_posidx: Optional[object] = None                
-
+        self._mount_posidx: Optional[object] = None
 
     def __enter__(self) -> "LogParser":
         try:
@@ -115,34 +112,34 @@ class LogParser(abc.Iterator):
                 self._f_obj.close()
                 self._f_obj = None
                 raise
-            
+
             # Ensure start is not None (it's validated in __init__)
             assert self.start is not None
             assert self.samplesize is not None
-            
+
             # adjust the range of datablocks to read given as the number of active channels times bytes per sample
-            self._block_size = self._header.num_channels * self.diary.sample_size 
+            self._block_size = self._header.num_channels * self.diary.sample_size
 
             # compute size of data block to read at once
             self._chunksize = self._block_size * self.samplesize
 
-            # convert start sample to byte address         
+            # convert start sample to byte address
             startbyte = self._header.datablock_address + self.start * self._block_size
 
             if self.end is not None:
                 # convert end sample to byte address
-                stopbyte = self._header.datablock_address + self.end * self._block_size                
+                stopbyte = self._header.datablock_address + self.end * self._block_size
             else:
                 # set stop byte to the last one (use a very large int instead of Inf)
                 stopbyte = sys.maxsize
 
             # get address of the last/user defined byte
             # Use os.fstat for potentially better performance than seek(0, 2)
-            self._stopbyte = int(min(stopbyte, self._f_obj.seek(0, 2)))                      
-            
+            self._stopbyte = int(min(stopbyte, self._f_obj.seek(0, 2)))
+
             # Seek to start position
             self._f_obj.seek(max(self._header.datablock_address, startbyte))
-            
+
             return self
 
         except Exception:
@@ -152,9 +149,9 @@ class LogParser(abc.Iterator):
                 self._f_obj = None
             raise
 
-        except IOError as e:            
+        except IOError as e:
             raise IOError(e)
-    
+
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
@@ -165,7 +162,7 @@ class LogParser(abc.Iterator):
         # Close file object
         if self._f_obj:
             self._f_obj.close()
-        
+
         if exc_type:
             print(f"Exception occurred: {exc_type}, {exc_value}")
 
@@ -195,11 +192,11 @@ class LogParser(abc.Iterator):
         assert self._f_obj is not None
         assert self._chunksize is not None
         assert self._stopbyte is not None
-        
+
         try:
             if self._f_obj.tell() >= self._stopbyte:
                 raise StopIteration
-            
+
             chunksize_raw = min(self._chunksize, self._stopbyte - self._f_obj.tell())
             chunksize = int(chunksize_raw)  # Ensure it's an int
             raw_chunk = self._f_obj.read(chunksize)
@@ -211,13 +208,12 @@ class LogParser(abc.Iterator):
                     bytearray(raw_chunk),
                     dtype=np.dtype(self.diary.datablock.fmt),
                     )
-            
+
         except StopIteration:
             self.__exit__(None, None, None)
             raise
 
         return self._process_chunk(chunk)
-
 
     def read(
         self,
@@ -230,7 +226,7 @@ class LogParser(abc.Iterator):
         # Type assertions
         assert self._f_obj is not None
         assert self._stopbyte is not None
-        
+
         bytes_to_read = int(self._stopbyte - self._f_obj.tell())
         raw_chunk = self._f_obj.read(bytes_to_read)
 
@@ -242,9 +238,8 @@ class LogParser(abc.Iterator):
                 bytearray(raw_chunk),
                 dtype=np.dtype(self.diary.datablock.fmt),
                 )
-            
+
         return self._process_chunk(chunk)
-            
 
     def _process_chunk(
         self,
@@ -260,7 +255,7 @@ class LogParser(abc.Iterator):
         """
         # Type assertion
         assert self._header is not None
-        
+
         chunk = _twos_complement(chunk, self.diary.sample_size)
 
         # Multiply signal by resolution to get correct physical units.
@@ -272,8 +267,7 @@ class LogParser(abc.Iterator):
                 len(chunk) // self._header.num_channels,
                 self._header.num_channels,
                 )
-            )        
-
+            )
 
     def _readheader(self) -> Header:
         """_summary_
@@ -287,7 +281,7 @@ class LogParser(abc.Iterator):
 
         # read header bytearray
         start_byte, bytes_to_read = self.diary.header.block_size
-        bheader = readbin(self.f_path, start_byte, bytes_to_read)        
+        bheader = readbin(self.f_path, start_byte, bytes_to_read)
 
         # Get timestamp
         startbyte, endbyte = self.diary.header.timestamp
@@ -310,8 +304,8 @@ class LogParser(abc.Iterator):
 
         # create mapping from channel id (index) into sample position (value at given index) in the data chunk
         startbyte, endbyte = self.diary.datablock.sample_mapping
-        sample_mapping = parsebin(bheader[startbyte:endbyte], 'B' * (endbyte-startbyte))
-        
+        sample_mapping = parsebin(bheader[startbyte:endbyte], 'B' * (endbyte - startbyte))
+
         # Get the amplifier hardware settings
         amp_settings = dict()
         hp_raw = parsebin(
@@ -338,15 +332,15 @@ class LogParser(abc.Iterator):
         )
         amp_settings["sampling_freq"] = int(sf_raw) if not isinstance(sf_raw, tuple) else int(sf_raw[0])
 
-        # for field_name, (startbyte, endbyte) in self.diary.amplifier.items():            
+        # for field_name, (startbyte, endbyte) in self.diary.amplifier.items():
         #     amp_settings[field_name] = parsebin(bheader[startbyte:endbyte], '<H')
-        
+
         # get info about recording channels
         channels = Channels(list(), dict())
         used_channels = set()
-        
+
         startbyte, endbyte = self.diary.channels.block_size
-        
+
         it = iter(bheader[startbyte:endbyte])
         i = 0
         while (bchunk := bytes(islice(
@@ -357,7 +351,7 @@ class LogParser(abc.Iterator):
             # validate channel existence
             if bchunk[:1] == b"\x00":
                 continue
-            
+
             ch_name = safe_string(
                 bchunk[self.diary.channels.name[0]:self.diary.channels.name[1]].decode("unicode-escape").strip("\x00")
             )
@@ -372,7 +366,7 @@ class LogParser(abc.Iterator):
             startbyte, endbyte = self.diary.channels.input_source
             source_id = parsebin(bchunk[startbyte:endbyte], 'B')
             source_id_int = int(source_id) if not isinstance(source_id, tuple) else int(source_id[0])
-            source = SOURCE_MAP[source_id_int]            
+            source = SOURCE_MAP[source_id_int]
 
             # retrieve and map bytes into data byte order in the stream data chunk
             startbyte, endbyte = self.diary.channels.ids
@@ -401,21 +395,21 @@ class LogParser(abc.Iterator):
                 channels.content.append(
                     Channel(ch_name, references[0], source, (pins[0],) if pins[0] is not None else tuple(),)
                     )
-                
+
                 # create mapping computed channel -> index of the original channel in the channels list
                 channels.mount[ch_name] = (i,)
                 i += 1
             else:
                 # store bipolar leads as separate unipolar channels
                 channels.content.extend([
-                    Channel("u+"+ch_name, references[0], source, (pins[0],) if pins[0] is not None else tuple(),),
-                    Channel("u-"+ch_name, references[1], source, (pins[1],) if pins[1] is not None else tuple(),),
+                    Channel("u+" + ch_name, references[0], source, (pins[0],) if pins[0] is not None else tuple(),),
+                    Channel("u-" + ch_name, references[1], source, (pins[1],) if pins[1] is not None else tuple(),),
                     ])
-                
+
                 # create mapping computed channel -> index of the original channel in the channels list
-                channels.mount[ch_name] = (i, i+1)
+                channels.mount[ch_name] = (i, i + 1)
                 i += 2
-            
+
         return Header(
             timestamp,
             num_channels,
@@ -436,13 +430,13 @@ class LogParser(abc.Iterator):
 def _mount_channels(darray, mappings):
     result = np.empty((len(mappings), darray.shape[0]), dtype=darray.dtype)
 
-    # Iterate through the tuples, performing the selection/summation    
+    # Iterate through the tuples, performing the selection/summation
     for t, source in enumerate(mappings.values()):
         if len(source) == 1:
             result[t] = darray[:, source[0]]
-        else:            
+        else:
             result[t] = darray[:, source[0]] - darray[:, source[1]]
-        
+
     return result.transpose()
 
 
@@ -452,16 +446,16 @@ def _readdata(
     **kwargs,
 ) -> Union[np.ndarray, LogParser]:
     """
-    """ 
+    """
 
-    # Extract some of the arguments (pass chunksize on).    
+    # Extract some of the arguments (pass chunksize on).
     chunksize = kwargs.get("chunksize", None)
     if chunksize is not None:
         chunksize = _validate_int("chunksize", chunksize, min_value=1)
 
     # nrows/nsamples support reserved for future use
     _ = kwargs.get("nrows", None)  # Placeholder for future nsamples support
-    
+
     # Instantiate data parser.
     parser = LogParser(f_path, **kwargs)
 
@@ -484,16 +478,16 @@ def _readheader(
     Returns:
         Header: _description_
     """
-    
+
     # Instantiate data parser.
     parser = LogParser(f_path)
-    
+
     with parser:
         header = parser.get_header()
-    
+
     if header is None:
         raise ValueError(f"Failed to read header from {f_path}")
-    
+
     return header
 
 
@@ -519,7 +513,7 @@ def _readmaster(
         raise IOError
 
     # Read ID
-    id_start, id_end = WMx64MasterSchema.subject_id    
+    id_start, id_end = WMx64MasterSchema.subject_id
     sub_id = barray[id_start:id_end].decode("ascii", "ignore").strip("\x00")
 
     # Read Name (Added in V68.1)
@@ -547,8 +541,8 @@ def _readentries(
     # TODO: check entries at the end of procedure with invalid timestamp
 
     # initialize entries list
-    entries: List[Entry] = []                           
-                
+    entries: List[Entry] = []
+
     # validate WM version and return correct byte schema
     diary: Union[type[WMx32EntriesSchema], type[WMx64EntriesSchema]]
     if _validate_version(version) == 'x32':
@@ -557,7 +551,7 @@ def _readentries(
         diary = WMx64EntriesSchema
     else:
         raise NotImplementedError
-    
+
     try:
         # read entire binary file
         barray = readbin(f_path)
@@ -570,7 +564,7 @@ def _readentries(
     # Validate expected byte size
     if (len(barray) - diary.header[1]) % diary.line_size != 0:
         raise ValueError('Invalid length of byte array. Check byte schema version.')
-        
+
     # Convert header type into byte format and timestamp factor
     fmt, factor = diary.timestamp_fmt
 
@@ -579,13 +573,13 @@ def _readentries(
     header_timestamp = header_timestamp // factor
 
     # Timestamp validation removed as result is not used and strict check causes issues
-    pass    
+    pass
 
     # iterate over byte array
     for pointer in range(diary.header[1], len(barray), diary.line_size):
         # entry type
         start_byte, end_byte = diary.entry_type
-        group = struct.unpack("<H", barray[pointer + start_byte:pointer + end_byte])[0]        
+        group = struct.unpack("<H", barray[pointer + start_byte:pointer + end_byte])[0]
 
         # datalog file uid
         start_byte, end_byte = diary.datalog_id
@@ -599,7 +593,7 @@ def _readentries(
         # retrieve text annotation
         start_byte, end_byte = diary.text
         text_bytes = barray[pointer + start_byte:pointer + end_byte]
-        
+
         # Robust decoding with fallback
         try:
             # Find null terminator and decode
@@ -613,7 +607,7 @@ def _readentries(
 
         # Filter out non-printable characters (keep ASCII printable range)
         message = "".join(c for c in message if c.isprintable() or c in ' \t')
-        
+
         # if re.match('[\x00-\x1f\x7f]+', text):
         #     continue
 
@@ -626,10 +620,10 @@ def _readentries(
         entries.append(
             Entry(
                 fid=datalog_uid,
-                group=mapped_group, 
+                group=mapped_group,
                 timestamp=timestamp,
                 message=message,
                 )
-        )        
+        )
 
     return entries

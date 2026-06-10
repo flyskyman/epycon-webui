@@ -1,4 +1,4 @@
-import sys 
+import sys
 
 # For Python 3.5 and below, use the 'typing' module for type hinting
 if sys.version_info >= (3, 6):

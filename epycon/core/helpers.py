@@ -18,29 +18,30 @@ from json import (
 
 # ----------------------- HELPER FUNCTIONS ------------------------------
 
+
 def default_log_path():
     """Returns a platform-specific default log file path."""
     log_name = "epycon.log"
-    
+
     this_system = system()
-    
+
     if this_system == "Windows":
         log_path = os.path.join(os.environ["APPDATA"], "Local", "epycon")
-    
+
     elif this_system == "Linux" or this_system == "Darwin":
         # 修正：使用用户主目录下的 logs 文件夹，避免 /var/log 的权限问题
         log_path = os.path.join(os.path.expanduser("~"), ".epycon", "logs")
-    
+
     else:
         # Fallback to a generic location for other systems
         log_path = ""
 
     try:
         os.makedirs(log_path, exist_ok=True)
-    except OSError as e:        
+    except OSError as e:
         print(f"Error creating log directory: {e}. Generic location will be used instead.")
         log_path = ""
-    
+
     return os.path.join(log_path, f"{log_name}")
 
 
@@ -59,14 +60,14 @@ def deep_override(cfg_dict: dict, keys: list, value):
         _type_: _description_
     """
     current_dict = cfg_dict
-    
+
     for key in keys[:-1]:  # Iterate through all keys except the last one
         current_dict = current_dict[key]  # Directly access nested dicts
     if keys[-1] in current_dict:
         current_dict[keys[-1]] = value
     else:
         raise KeyError(f"Invalid key `{keys[-1]}`")
-    
+
     return cfg_dict
 
 
@@ -75,7 +76,7 @@ def difftimestamp(timestamps: Sequence[Union[int, float]]) -> float:
     return abs((datetime.fromtimestamp(timestamps[0]) - datetime.fromtimestamp(timestamps[1])).total_seconds())
 
 
-def safe_string(name:str, safe_char: str = '-'):
+def safe_string(name: str, safe_char: str = '-'):
     """_summary_
 
     Args:
@@ -83,10 +84,11 @@ def safe_string(name:str, safe_char: str = '-'):
 
     Returns:
         _type_: _description_
-    """    
+    """
     replace_chars = r"[,;\/:\\]"
-    
+
     return sub(replace_chars, safe_char, name)
+
 
 def pretty_json(custom_dict):
     """Saves dictionary into pretty json omitting empty space within time series data.
@@ -115,33 +117,33 @@ def pretty_json(custom_dict):
 
 def get_channel_mappings(header, cfg):
     """获取通道映射，正确处理不同的 channels 类型
-    
+
     Args:
         header: LogParser header object
         cfg: Configuration dictionary with 'data' key containing 'leads' and 'custom_channels'
-        
+
     Returns:
         dict: Mapping of channel names to indices/references
               - computed 模式: 双极导联自动合并 (CS 1-2 = u+ - u-)
               - original 模式: 返回原始单极通道 (u+CS 1-2, u-CS 1-2)
     """
     from epycon.core._dataclasses import Channels
-    
+
     # 检查是否是 Channels 对象（包含 mount 映射）
     if isinstance(header.channels, Channels):
         channels_obj = header.channels
-        
+
         # 添加自定义通道映射（如果有）
         custom_channels = cfg.get("data", {}).get("custom_channels", {})
         if custom_channels:
             channels_obj.add_custom_mount(custom_channels, override=False)
-        
+
         # 根据配置返回计算导联或原始导联
         if cfg.get("data", {}).get("leads") == "computed":
             return channels_obj.computed_mappings  # 双极合并后的映射
         else:
             return channels_obj.raw_mappings  # 原始单极通道映射
-    
+
     # 兼容旧版：如果是简单 list
     elif isinstance(header.channels, list) and header.channels:
         mappings = {}
@@ -150,7 +152,6 @@ def get_channel_mappings(header, cfg):
                 if ch.reference is not None and ch.reference < header.num_channels:
                     mappings[ch.name] = (ch.reference,)
         return mappings if mappings else {f"ch{i}": (i,) for i in range(header.num_channels)}
-    
+
     # fallback
     return {f"ch{i}": (i,) for i in range(header.num_channels)} if header.num_channels > 0 else {"ch0": (0,)}
-

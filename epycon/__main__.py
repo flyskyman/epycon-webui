@@ -1,6 +1,5 @@
 def main():
     import os
-    import sys
     import json
     import logging
     import jsonschema
@@ -10,7 +9,8 @@ def main():
     from epycon.cli import batch
 
     config_path = os.environ.get("EPYCON_CONFIG", os.path.join(os.path.dirname(__file__), 'config', 'config.json'))
-    jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(os.path.dirname(__file__), 'config', 'schema.json'))
+    jsonschema_path = os.environ.get("EPYCON_JSONSCHEMA", os.path.join(
+        os.path.dirname(__file__), 'config', 'schema.json'))
 
     # Instantiate basic logger
     handler = logging.StreamHandler()
@@ -23,23 +23,22 @@ def main():
     )
     logger = logging.getLogger(__name__)
     logger.addHandler(handler)
-    
+
     # Parse CLI arguments
     args = batch.parse_arguments()
-    
+
     # Validate custom config path if provided
-    if args.custom_config_path:        
+    if args.custom_config_path:
         config_path = _validate_path(args.custom_config_path)
 
-       
     # Load JSON configuration
     try:
         with open(config_path, "r") as f:
             cfg = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    
-    # Override config with custom CLI arguments if provided        
+
+    # Override config with custom CLI arguments if provided
     overrides = {
         "paths.input_folder": args.input_folder,
         "paths.output_folder": args.output_folder,
@@ -49,11 +48,10 @@ def main():
         "entries.convert": args.entries,
         "entries.output_format": args.entries_format,
         }
-    
-    for arg, value in overrides.items():        
-        if value is not None:            
-            cfg = deep_override(cfg, arg.split("."), value)            
 
+    for arg, value in overrides.items():
+        if value is not None:
+            cfg = deep_override(cfg, arg.split("."), value)
 
     # Load and validate jsonschema
     try:
@@ -61,12 +59,11 @@ def main():
             schema = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"Config file not found: {jsonschema_path}")
-            
+
     try:
         jsonschema.validate(cfg, schema)
     except jsonschema.ValidationError as e:
         raise ValueError(f"Invalid config: {e}")
-    
 
     # ----------------------- batch conversion ----------------------
     from glob import iglob
@@ -103,13 +100,13 @@ def main():
     for study_path in iglob(os.path.join(input_folder, '**')):
         study_id = os.path.basename(study_path)
 
-        if valid_studies and study_id not in valid_studies:            
+        if valid_studies and study_id not in valid_studies:
             continue
-        
+
         try:
             # make output directory
             os.makedirs(os.path.join(output_folder, study_id), exist_ok=True)
-        except OSError as e:
+        except OSError:
             logger.error(f"Unable to create output folder {study_id} in {output_folder}.")
             continue
 
@@ -129,7 +126,7 @@ def main():
         else:
             subject_id = master_info["id"]
             subject_name = master_info["name"]
-    
+
         # read entries
         if cfg["entries"]["convert"]:
             try:
@@ -137,12 +134,12 @@ def main():
                     f_path=os.path.join(study_path, ENTRIES_FILENAME),
                     version=cfg["global_settings"]["workmate_version"],
                     )
-            except OSError as e:                
-                logger.warning(f"Could not find ENTRIES log file. Annotation export will be skipped.")
+            except OSError:
+                logger.warning("Could not find ENTRIES log file. Annotation export will be skipped.")
                 entries = list()
         else:
             entries = list()
-        
+
         entryplanter = EntryPlanter(entries)
 
         if cfg["entries"]["summary_csv"] and entries:
@@ -151,15 +148,15 @@ def main():
                 "fids": cfg["data"]["data_files"],
                 "groups": cfg["entries"]["filter_annotation_type"],
                 }
-            
+
             entryplanter.savecsv(
-                os.path.join(output_folder, study_id, "entries_summary.csv"),                                
+                os.path.join(output_folder, study_id, "entries_summary.csv"),
                 criteria=criteria,
             )
 
         # Get merge mode setting
         merge_mode = cfg["data"].get("merge_logs", False)
-        
+
         # Collect all valid datalog paths
         all_datalogs = []
         for datalog_path in iglob(os.path.join(study_path, LOG_PATTERN)):
@@ -167,20 +164,19 @@ def main():
             if valid_datalogs and datalog_id not in valid_datalogs:
                 continue
             all_datalogs.append((datalog_path, datalog_id))
-        
+
         if not all_datalogs:
             logger.warning(f"No valid datalog files found in {study_id}")
             continue
 
         # iterate over datalog files
         logger.info(f"Converting study {study_id}")
-        
+
         if merge_mode and output_fmt == "h5":
             # ===================== MERGE MODE =====================
             # Sort datalogs by timestamp and collect channel info
             from collections import defaultdict
-            from epycon.core._dataclasses import Channels
-            
+
             datalog_info = []
             for datalog_path, datalog_id in all_datalogs:
                 with LogParser(
@@ -192,7 +188,7 @@ def main():
                     if header is None:
                         logger.warning(f"⚠️ Cannot read header: {datalog_id}.log, skipping")
                         continue
-                    
+
                     # Get channel mappings for this file
                     file_mappings = _get_channel_mappings(header, cfg)
                     if cfg["data"]["channels"]:
@@ -208,31 +204,31 @@ def main():
                         'num_output_channels': len(file_mappings),
                         'num_samples': parser.num_samples,
                     })
-            
+
             # Sort by timestamp
             datalog_info.sort(key=lambda x: x['timestamp'])
-            
+
             # Group by channel count to handle heterogeneous data
             channel_groups = defaultdict(list)
             for d in datalog_info:
                 channel_groups[d['num_output_channels']].append(d)
-            
+
             logger.info(f"Merge mode: {len(datalog_info)} files total, {len(channel_groups)} channel group(s)")
-            
+
             if len(channel_groups) > 1:
-                logger.warning(f"⚠️ Multiple channel counts detected, will create separate merged files:")
+                logger.warning("⚠️ Multiple channel counts detected, will create separate merged files:")
                 for num_ch, files in channel_groups.items():
                     logger.warning(f"   {num_ch} channels: {len(files)} file(s)")
-            
+
             # Process each channel group separately
             for group_channel_count, group_files in channel_groups.items():
                 logger.info(f"\n📦 Processing channel group: {group_channel_count} channels, {len(group_files)} file(s)")
-                
+
                 # Use first file's mappings as template for this group
                 first_mappings = group_files[0]['mappings']
                 merged_column_names = list(first_mappings.keys())
                 first_timestamp = group_files[0]['timestamp']
-                
+
                 # Build metadata for merged file
                 hdf_attributes = {
                     "subject_id": subject_id,
@@ -244,7 +240,7 @@ def main():
                     "merged": True,
                     "num_files": len(group_files),
                 }
-                
+
                 credentials = cfg["global_settings"].get("credentials", {})
                 if credentials:
                     hdf_attributes.update({
@@ -252,27 +248,27 @@ def main():
                         "device": credentials.get("device", ""),
                         "owner": credentials.get("owner", ""),
                     })
-                
+
                 # Determine output filename
                 if len(channel_groups) > 1:
-                    merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged_{group_channel_count}ch.h5")
+                    merged_output_path = os.path.join(
+                        output_folder, study_id, f"{study_id}_merged_{group_channel_count}ch.h5")
                 else:
                     merged_output_path = os.path.join(output_folder, study_id, f"{study_id}_merged.h5")
-                
+
                 # Process each file and append to merged output
                 is_first_file = True
                 total_samples = 0
-                group_start_time = group_files[0]['timestamp']
                 accumulated_marks = []  # Initialize marks accumulator for this group
-                
+
                 for idx, dlog_info in enumerate(group_files):
                     datalog_path = dlog_info['path']
                     datalog_id = dlog_info['id']
                     header = dlog_info['header']
                     file_mappings = dlog_info['mappings']
-                    
-                    print(f"Merging {datalog_id} ({idx+1}/{len(group_files)}): ", end="")
-                    
+
+                    print(f"Merging {datalog_id} ({idx + 1}/{len(group_files)}): ", end="")
+
                     file_start_sec = float(header.timestamp)
                     fs = header.amp.sampling_freq
                     file_duration_sec = dlog_info['num_samples'] / fs if fs > 0 else 0
@@ -280,7 +276,7 @@ def main():
                     # Entries belong to the file their datalog id references (same rule as
                     # per-file mode); position validity is checked after writing below.
                     file_entries = [e for e in entries if e.fid == datalog_id] if entries else []
-                    
+
                     # Samples already written to the merged file before this one
                     file_offset_samples = total_samples
 
@@ -310,7 +306,7 @@ def main():
                                 planter.write(chunk)
                                 file_sample_count += chunk.shape[0]
                                 total_samples += chunk.shape[0]
-                            
+
                             is_first_file = False
                             print("OK")
 
@@ -326,7 +322,9 @@ def main():
                                     (file_offset_samples + local_pos, entry.group, entry.message)
                                 )
                             else:
-                                logger.warning(f"   ⚠️ {datalog_id}: Entry '{entry.message}' at {offset_sec}s outside file range [0, {file_duration_sec}s], skipped.")
+                                logger.warning(
+                                    f"   ⚠️ {datalog_id}: Entry '{entry.message}' at {offset_sec}s "
+                                    f"outside file range [0, {file_duration_sec}s], skipped.")
 
                 # After all files processed, inject all accumulated marks at once
                 if accumulated_marks and cfg["data"]["pin_entries"]:
@@ -342,10 +340,11 @@ def main():
                             messages=list(messages),
                         )
                     logger.info(f"   ✅ Total {len(accumulated_marks)} entries injected into merged file")
-                
-                logger.info(f"Merged {len(group_files)} files into {merged_output_path} ({total_samples} total samples)")
+
+                logger.info(
+                    f"Merged {len(group_files)} files into {merged_output_path} ({total_samples} total samples)")
                 print(f"DONE (merged {len(group_files)} files)")
-        
+
         else:
             # ===================== NORMAL MODE (per-file) =====================
             for datalog_path, datalog_id in all_datalogs:
@@ -354,7 +353,7 @@ def main():
                 print(f"Converting {datalog_id}: ", end="")
                 with LogParser(
                     datalog_path,
-                    version=cfg["global_settings"]["workmate_version"],                
+                    version=cfg["global_settings"]["workmate_version"],
                     samplesize=cfg["global_settings"]["processing"]["chunk_size"],
                 ) as parser:
                     # get datalog header
@@ -369,7 +368,6 @@ def main():
                         valid_channels = set(cfg["data"]["channels"])
                         mappings = {key: value for key, value in mappings.items() if key in valid_channels}
 
-                    
                     # Ref timestamp for this file
                     ref_timestamp = header.timestamp
 
@@ -380,7 +378,7 @@ def main():
                         DataPlanter: type[CSVPlanter] | type[HDFPlanter]
                         if output_fmt == "csv":
                             DataPlanter = CSVPlanter
-                        elif output_fmt == "h5":                    
+                        elif output_fmt == "h5":
                             DataPlanter = HDFPlanter
                         else:
                             raise ValueError(f"Unsupported output format: {output_fmt}")
@@ -391,7 +389,7 @@ def main():
                         else:
                             output_target_dir = os.path.join(output_folder, study_id)
                             os.makedirs(output_target_dir, exist_ok=True)
-                            
+
                         output_filename = datalog_id + "." + output_fmt
                         full_output_path = os.path.join(output_target_dir, output_filename)
 
@@ -434,24 +432,27 @@ def main():
                                     try:
                                         marked_entries = [e for e in entries if e.fid == datalog_id]
                                         if marked_entries:
-                                            # Strict calculation of file boundaries relative to the file's reference timestamp
-                                            file_start_sec = 0.0 # Relative to ref_timestamp of the current file
+                                            # Strict file boundaries relative to the file's reference timestamp
+                                            file_start_sec = 0.0  # Relative to ref_timestamp of the current file
                                             file_duration_sec = num_samples_written / header.amp.sampling_freq
                                             file_end_sec = file_start_sec + file_duration_sec
-                                            
+
                                             valid_marks = []
                                             for entry in marked_entries:
                                                 # 有符号偏移：早于文件起点的 entry 为负值，被范围校验拒绝
                                                 offset_sec = float(entry.timestamp) - float(ref_timestamp)
-                                                
-                                                # Strict validation: No clamping. If it's outside, it's an error or belongs to another file.
+
+                                                # Strict validation: no clamping. Outside = error or another file.
                                                 if file_start_sec <= offset_sec < file_end_sec:
                                                     # round 而非 int：避免浮点误差下的截断偏移
                                                     local_pos = round(offset_sec * header.amp.sampling_freq)
                                                     valid_marks.append((entry.group, local_pos, entry.message))
                                                 else:
-                                                    logger.warning(f"   ⚠️ {datalog_id}: Entry '{entry.message}' timestamp {offset_sec}s outside file range [{file_start_sec}, {file_end_sec}]. Integrity check failed.")
-                                            
+                                                    logger.warning(
+                                                        f"   ⚠️ {datalog_id}: Entry '{entry.message}' timestamp "
+                                                        f"{offset_sec}s outside file range "
+                                                        f"[{file_start_sec}, {file_end_sec}]. Integrity check failed.")
+
                                             if valid_marks:
                                                 groups, positions, messages = zip(*valid_marks)
                                                 # write marks
@@ -460,20 +461,21 @@ def main():
                                                     groups=list(groups),
                                                     messages=list(messages),
                                                 )
-                                                logger.info(f"   ✅ Injected {len(valid_marks)} entries for {datalog_id}")
+                                                logger.info(
+                                                    f"   ✅ Injected {len(valid_marks)} entries for {datalog_id}")
                                             else:
                                                 logger.info(f"   ℹ️ No valid entries to inject for {datalog_id}")
                                     except (ValueError, TypeError) as e:
                                         logger.error(f"   ❌ Error injecting marks for {datalog_id}: {e}")
-                
-                    # convert and store entries | csv or sel per each file            
-                    if cfg["entries"]["convert"] and entries:                
+
+                    # convert and store entries | csv or sel per each file
+                    if cfg["entries"]["convert"] and entries:
                         criteria = {
                             "fids": [datalog_id],
                             "groups": cfg["entries"]["filter_annotation_type"],
-                        }                
+                        }
                         file_fmt = cfg["entries"]["output_format"]
-                        
+
                         try:
                             if file_fmt == "csv":
                                 # store as .csv file
@@ -489,7 +491,7 @@ def main():
                                     ref_timestamp,
                                     header.amp.sampling_freq,
                                     list(mappings.keys()),
-                                    criteria=criteria,                        
+                                    criteria=criteria,
                                 )
                         except Exception as e:
                             logger.error(f"   ❌ Error exporting entry file for {datalog_id}: {e}")

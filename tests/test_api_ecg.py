@@ -432,6 +432,22 @@ class TestDataFilterParams:
         assert resp.status_code == 200, body
         assert body["data"] != raw
 
+    def test_notch_alone_actually_filters(self, client, baseline):
+        """回归：notch 单独生效（曾因 enhanced_notch 未定义在 h5 分支静默失效）"""
+        file_id, raw = baseline
+        resp = client.get(f"/api/ecg/data/{file_id}?start=0&end=1&notch=50")
+        body = resp.get_json()
+        assert resp.status_code == 200, body
+        assert body["data"] != raw
+
+    def test_enhanced_notch_param_accepted(self, client, baseline):
+        file_id, raw = baseline
+        resp = client.get(
+            f"/api/ecg/data/{file_id}?start=0&end=1&notch=50&enhanced_notch=true"
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["data"] != raw
+
     def test_causal_method(self, client, baseline):
         file_id, raw = baseline
         resp = client.get(

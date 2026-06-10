@@ -9,9 +9,10 @@ from epycon.core._typing import (
     Union, List, Tuple
 )
 
+
 @dataclass
 class SignalPlantDefaults:
-    CHANNEL_SETTINGS = OrderedDict([    
+    CHANNEL_SETTINGS = OrderedDict([
         ('Visible', 1.0),
         ('Valid', 1.0),
         ('Line_R', 127.0),
@@ -63,7 +64,7 @@ class SignalPlantDefaults:
 
     ATTR_DTYPE = '<f4'
 
-        
+
 # def create_json(cfg, personal, ep_data, entries_list):
 #     return Io.pretty_json({
 #         'patient': {
@@ -94,19 +95,19 @@ def _tocsv(
 
     Args:
         entries (List[Entry]): _description_
-        ref_timestamp (Union[float, None], optional): Timestamp for computing relative time of the annotation with respect to the beginning of the recording. Defaults to None.
+        ref_timestamp (Union[float, None], optional): Timestamp for computing relative time
+            of the annotation with respect to the beginning of the recording. Defaults to None.
         sep (str, optional): _description_. Defaults to ','.
 
     Returns:
         _type_: _description_
     """
-    
 
     if ref_timestamp is None:
         header = f'Group{sep}FileId{sep}Time(Y-m-d_H:M:S){sep}Annotation'
     else:
         header = f'Group{sep}FileId{sep}Time(H:M:S){sep}Annotation'
-        ref_dtime = datetime.fromtimestamp(ref_timestamp)    
+        ref_dtime = datetime.fromtimestamp(ref_timestamp)
 
     out = []
     for item in entries:
@@ -123,7 +124,7 @@ def _tocsv(
             out.append(
                 [item.group, item.fid, str(timedelta), item.message.replace(sep, "")]
             )
-    
+
     # sort by time
     # out = sorted(out, key=lambda x: datetime.strptime(x[2], "%Y-%m-%d_%H:%M:%S"))
 
@@ -131,7 +132,7 @@ def _tocsv(
     for entry in out:
         tmp = ''.join([str(item) + sep for item in entry])
         out_text += tmp.rstrip(sep) + '\n'
-    
+
     return out_text
 
 
@@ -152,10 +153,9 @@ def _tosel(
     Returns:
         _type_: _description_
     """
-    
-    
-    ch_names = ''.join(['%'+item+'\t1\n' for item in channel_names])
-    
+
+    ch_names = ''.join(['%' + item + '\t1\n' for item in channel_names])
+
     # timestamp_base = entries['timestamp_base']
     idx = 1
     validity, ch_idx, ch_name = 1, 0, channel_names[0]
@@ -165,9 +165,10 @@ def _tosel(
         start_sample = (datetime.fromtimestamp(item.timestamp) - datetime.fromtimestamp(ref_timestamp)).seconds
         start_sample = int(start_sample * sampling_freq)
 
-        output_txt += f'{idx}\t{start_sample}\t{start_sample}\t{item.group}\t{validity}\t{ch_idx}\t{ch_name}\t{item.message}\n'
-        idx += 1    
-    
+        output_txt += (f'{idx}\t{start_sample}\t{start_sample}\t{item.group}'
+                       f'\t{validity}\t{ch_idx}\t{ch_name}\t{item.message}\n')
+        idx += 1
+
     return (
         '%SignalPlant ver.:1.2.7.3\n'
         '%Selection export from file:\n'
@@ -177,8 +178,9 @@ def _tosel(
         f'{ch_names}'
         '%----------------------------------------\n'
         '%Structure:\n'
-        '%Index[-], Start[sample], End[sample], Group[-], Validity[-], Channel Index[-], Channel name[string], Info[string]\n'
+        '%Index[-], Start[sample], End[sample], Group[-], Validity[-], '
+        'Channel Index[-], Channel name[string], Info[string]\n'
         '%Divided by: ASCII char no. 9\n'
         '%DATA------------------------------------\n'
-        f'{output_txt}\n'    
+        f'{output_txt}\n'
     )

@@ -4,6 +4,7 @@ from typing import (
     _SpecialForm,
 )
 
+
 def checktypes(func):
     """ Type checking wrapper.
 

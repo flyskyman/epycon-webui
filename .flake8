@@ -9,7 +9,8 @@ exclude =
     .venv,
     venv
 
-ignore = W503, E203, E402
+# 前三项为项目选择；其余为 pycodestyle 默认忽略项（显式 ignore 会覆盖默认值，需列回）
+ignore = W503, E203, E402, E121, E123, E125, E126, E226, E24, E704, W504
 
 # Per-file ignores for specific patterns
 per-file-ignores =

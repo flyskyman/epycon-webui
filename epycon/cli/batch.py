@@ -1,5 +1,6 @@
 import argparse
 
+
 def parse_arguments():
     """ Custom CLI definition
 
@@ -8,11 +9,11 @@ def parse_arguments():
     """
     # Create a new parser instance each time to avoid conflicts
     parser = argparse.ArgumentParser()
-    
-    # Input and output folder paths    
+
+    # Input and output folder paths
     parser.add_argument("-i", "--input_folder", type=str,)
     parser.add_argument("-o", "--output_folder", type=str,)
-    
+
     # List of studies that will be exported. All if not provided.
     parser.add_argument("-s", "--studies", type=list,)
 
@@ -22,7 +23,7 @@ def parse_arguments():
     # Output format of the entries/annotations
     parser.add_argument("-e", "--entries", type=bool,)
     parser.add_argument("-efmt", "--entries_format", type=str, choices=['csv', 'sel'])
-    
+
     # Merge mode - combine multiple log files into one output
     parser.add_argument("--merge", action="store_true", help="Merge multiple log files into a single output file")
 
