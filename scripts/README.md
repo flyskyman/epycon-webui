@@ -4,8 +4,9 @@
 
 - **scripts/ 根目录**：仍在使用的脚本
   - CI 在用：`generate_fake_wmx.py`、`generate_fake_wmx32.py`（windows-build-release）、
-    `validate_ci_output.py`、`test_version.py`、`test_business_functions.py`、
-    `test_performance_regression.py`
+    `validate_ci_output.py`、`test_performance_regression.py`
+    （`test_version.py`/`test_business_functions.py` 已移植为
+    `tests/test_business_logic.py` 并归档）
   - 开发工具：`run_tests.ps1`、`clean_repo.ps1`、`cleanup.ps1`、`ps_helpers.ps1`、
     `fix_encoding.py`、`inspect_h5.py`、`inspect_h5_attrs.py`、`WorkMateDataCenter.spec`
   - 数据：`benchmarks.json`（性能基线）、`channel_audit.csv`（通道审计表）

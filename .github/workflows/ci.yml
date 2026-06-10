@@ -39,14 +39,6 @@ jobs:
         run: |
           echo "Running pytest suite (tests/)..."
           python -m pytest --cov=epycon --cov-report=term-missing --cov-report=html
-      - name: Run unit tests with coverage
-        env:
-          PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}
-        run: |
-          echo "Running basic validation tests..."
-          python scripts/test_version.py
-          echo "Running business logic tests..."
-          python scripts/test_business_functions.py
       - name: Run performance benchmarks
         env:
           PYTHONPATH: ${{ github.workspace }}/epycon:${{ github.workspace }}

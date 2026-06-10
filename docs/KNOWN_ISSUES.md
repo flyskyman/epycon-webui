@@ -9,10 +9,7 @@
 
 ## 中优先级
 
-### 8. CI 双轨测试待合流
-- **位置**：`.github/workflows/ci.yml` 中 `scripts/test_version.py`、`scripts/test_business_functions.py`（自写 runner）与 pytest 套件并存
-- **问题**：scripts 系测试不产生覆盖率、不被 pytest 管理；长期维护两套
-- **建议**：把 scripts 系测试改写并入 `tests/`，CI 只保留 pytest 入口
+（暂无——原第 8 条已于 2026-06-10 解决，见底部"已解决"）
 
 ## 低优先级
 
@@ -21,6 +18,13 @@
 ---
 
 ## 已解决
+
+### 8. CI 双轨测试合流（2026-06-10）
+- `scripts/test_version.py` + `test_business_functions.py`（自写 runner，10 个测试）
+  移植为 `tests/test_business_logic.py`（11 个 pytest 用例，纳入覆盖率统计），
+  原脚本归档至 `scripts/archive/`
+- CI 删除 "Run unit tests" 步骤，单元/集成测试统一走 pytest 入口；
+  `test_performance_regression.py` 作为独立性能基准步骤保留（关注点不同）
 
 ### 9. 存量 flake8 噪音（2026-06-10）
 - `epycon/` 621 个告警清零：autopep8 机械修复 + 全局去行尾空白 + 手工修
