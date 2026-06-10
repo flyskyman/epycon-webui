@@ -1264,11 +1264,14 @@ def get_annotations(file_id):
     fs = metadata['sampling_freq']
     
     # 解析参数
+    start_sec = request.args.get('start')
+    end_sec = request.args.get('end')
+    annot_type = request.args.get('type')
     notch_freq = request.args.get('notch')
     enhanced_notch = request.args.get('enhanced_notch') == 'true'  # 解析增强标志
     lp_cutoff = request.args.get('lp')
     hp_cutoff = request.args.get('hp')
-    
+
     # 筛选
     result = []
     for annot in annotations:
