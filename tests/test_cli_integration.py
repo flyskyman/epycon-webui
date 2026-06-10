@@ -105,3 +105,43 @@ class TestCLIIntegration:
                 assert study_out.exists(), "Output study directory not created"
                 assert list(study_out.glob("*.h5")), "No HDF5 output files found"
                 assert list(study_out.glob("*.csv")), "No Entry CSV output files found"
+
+    def test_cli_run_merge_conversion(self, test_data, tmp_path):
+        """Test merge mode: multiple logs combined into a single HDF5."""
+        import json
+        import h5py
+
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        base_config = os.path.join(project_root, 'epycon', 'config', 'config.json')
+        schema_path = os.path.join(project_root, 'epycon', 'config', 'schema.json')
+
+        with open(base_config) as f:
+            cfg = json.load(f)
+        cfg['paths']['input_folder'] = str(test_data.parent)
+        cfg['paths']['output_folder'] = str(tmp_path)
+        cfg['paths']['studies'] = ['study01']
+        cfg['data']['merge_logs'] = True
+
+        tmp_cfg = tmp_path / 'merge_config.json'
+        tmp_cfg.write_text(json.dumps(cfg))
+
+        with patch.dict(os.environ, {
+            'EPYCON_CONFIG': str(tmp_cfg),
+            'EPYCON_JSONSCHEMA': schema_path,
+        }):
+            with patch.object(sys, 'argv', ['epycon']):
+                entry_point()
+
+        merged = tmp_path / 'study01' / 'study01_merged.h5'
+        assert merged.exists(), "Merged HDF5 not created"
+        with h5py.File(merged, 'r') as f:
+            assert 'Data' in f
+            assert 'Info' in f
+            # 两个示例日志各 1024 样本
+            assert max(f['Data'].shape) == 2048
+            # 回归断言：fixture 的两条 entries fid 都指向 00000001。
+            # 第一条时间戳超出该文件时长，应被丢弃；第二条在文件起点后
+            # 0.050s 处，应落在合并时间轴 1024(文件偏移) + 50(亚秒偏移) = 1074
+            assert 'Marks' in f, "Entries were not injected into merged file"
+            positions = [int(r['SampleLeft']) for r in f['Marks'][:]]
+            assert positions == [1074], f"Expected mark at 1074, got {positions}"

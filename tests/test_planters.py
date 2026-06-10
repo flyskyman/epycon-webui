@@ -31,3 +31,31 @@ def test_hdfplanter_write(tmp_path):
         assert "Data" in f
         assert "Info" in f
         assert "ChannelSettings" in f
+
+
+def test_hdfplanter_add_marks_with_int_group(tmp_path):
+    """未知 annotation group 在解析层是整数 0，add_marks 不得崩溃"""
+    p = tmp_path / "out.h5"
+    data = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+
+    with HDFPlanter(str(p), column_names=["ch1", "ch2"], sampling_freq=250, units="uV") as planter:
+        planter.write(data)
+        planter.add_marks(positions=[1, 2], groups=[0, "NOTE"], messages=["unknown group", "known"])
+
+    with h5py.File(str(p), "r") as f:
+        groups = [r["Group"].decode() for r in f["Marks"][:]]
+        assert groups == ["0", "NOTE"]
+
+
+def test_hdfplanter_add_marks_keeps_sample_zero(tmp_path):
+    """位置 0 是合法的首采样点标注，不得被钳到 1；负数钳到 0"""
+    p = tmp_path / "out.h5"
+    data = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+
+    with HDFPlanter(str(p), column_names=["ch1", "ch2"], sampling_freq=250, units="uV") as planter:
+        planter.write(data)
+        planter.add_marks(positions=[0, -5], groups=["NOTE", "NOTE"], messages=["at start", "negative"])
+
+    with h5py.File(str(p), "r") as f:
+        positions = [int(r["SampleLeft"]) for r in f["Marks"][:]]
+        assert positions == [0, 0]
