@@ -521,6 +521,14 @@ class TestLeadResolve:
         seg = load_segments(str(REAL), VER)[0]
         out = resolve_lead_sources(seg["header"], ["u+CS 3-4"], True)
         assert out[0][0] == "u+CS 3-4"
+
+    def test_exact_match_no_fuzzy_on_dirty_name(self):
+        # 头中存在含 \x00 的脏名（如 '8\x00 3-4'）；请求去空/清洗版 '8 3-4'
+        # 必须精确匹配失败报错，绝不模糊命中（第 7 节脏名精确匹配约定）
+        from epycon.extraction import load_segments, resolve_lead_sources
+        seg = load_segments(str(REAL), VER)[0]
+        with pytest.raises(ExtractionError):
+            resolve_lead_sources(seg["header"], ["8 3-4"], True)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -619,6 +627,41 @@ class TestExtractWindow:
                            leads=["II"], window=2.0, raw_counts=True, version=VER)
         assert r["units"] == "counts"
         assert all(isinstance(x, int) for x in r["leads"][0]["samples"][:5])
+
+    def test_conflicting_targets_raise(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="互斥"):
+            extract_window(str(REAL), at_elapsed="1:07:15",
+                           at_epoch=1764301819.403, leads=["II"], version=VER)
+
+    def test_epoch_target_path(self):
+        from epycon.extraction import extract_window
+        r = extract_window(str(REAL), at_epoch=1764301819.403,
+                           leads=["II"], window=2.0, version=VER)
+        assert r["log"] == "00000005"
+        assert r["leads"][0]["n"] == 8000
+
+    def test_before_after_override(self):
+        from epycon.extraction import extract_window
+        # 段内偏移 2.658s，[1.658, 4.658] → (1.0+2.0)*2000 = 6000，区别于对称 window=2 的 8000
+        r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"],
+                           before=1.0, after=2.0, version=VER)
+        assert r["leads"][0]["n"] == 6000
+        assert r["returned_window"]["clipped"] is False
+
+    def test_far_gap_rejects(self):
+        from epycon.extraction import extract_window
+        # 0:31:00 = 1860s，落在 seg0(止~10.5s) 与 seg1(起 1872.9s) 间的分钟级空档
+        with pytest.raises(ExtractionError, match="空档"):
+            extract_window(str(REAL), at_elapsed="0:31:00",
+                           leads=["II"], version=VER)
+
+    def test_default_version_from_config(self):
+        from epycon.extraction import extract_window
+        # 不传 version → _default_version 取 config 的 4.3.2；realdata 正是该版本
+        r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"])
+        assert r["version"] == "4.3.2"
+        assert r["log"] == "00000005"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -670,6 +713,8 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
     check_consistency(study_dir, segments, version)
     zero = segments[0]["ts"]
 
+    if at_epoch is not None and at_elapsed is not None:
+        raise ExtractionError("at_elapsed 与 at_epoch 互斥，不可同时提供")
     if at_epoch is not None:
         target = float(at_epoch)
     elif at_elapsed is not None:
@@ -919,15 +964,16 @@ git commit -m "chore(extract): flake8 收尾 + 全套回归通过"
 
 ## Self-Review
 
-**Spec coverage（对照设计文档各节）：**
-- 第 4 节时间模型 → Task 1（parse_elapsed）+ Task 4（locate 半开）+ Task 7（zero/target）✓
+**Spec coverage（对照设计文档各节，Codex 计划验证后补齐）：**
+- 第 4 节时间模型 → Task 1（parse_elapsed）+ Task 4（locate 半开）+ Task 7（zero/target/epoch 路径/at_epoch+at_elapsed 互斥报错）✓
 - 第 5 节一致性硬校验 → Task 3 ✓
-- 第 6 节窗口裁剪 → Task 4（_window_samples）+ Task 7（clipped/missing）✓
-- 第 7 节导联 computed/original + 极性 + 脏名 + 栏杆 → Task 5（rail）+ Task 6（mapping/sign/name-error）✓
+- 第 6 节窗口裁剪 + before/after 覆盖 → Task 4（_window_samples）+ Task 7（clipped/missing、`test_before_after_override`）✓
+- 第 7 节导联 computed/original + 极性 + 脏名 + 栏杆 → Task 5（rail）+ Task 6（mapping/sign、`test_unknown_lead`、`test_exact_match_no_fuzzy_on_dirty_name`）✓
 - 第 8 节输出 dict / µV / raw-counts / n=shape[0] → Task 7 ✓
-- 第 9 节集成（核心函数 + CLI + 显式版本 + raw_int int64） → Task 5/7/8 ✓
+- 第 9 节集成（核心函数 + CLI + 显式版本 + 默认版本取 config + raw_int int64） → Task 5/7（`test_default_version_from_config`）/8 ✓
 - 第 10 节作用域（仅 .log 分段） → 隐含（load_segments 只读 .log）✓
-- 第 12 节验证计划 → Task 4/7 各拒绝/裁剪用例 + Task 9 端到端 ✓
+- 第 12 节验证计划 → Task 4/7 各拒绝（近段前空档 + 分钟级 `test_far_gap_rejects`）/裁剪用例 + Task 9 端到端 ✓
+- x32 版本误传行为（第 199 行）：设计文档记为"显式参数由用户负责"，非硬契约，不设独立 TDD 断言（显式传错版本属用户误用，不在 fail-closed 边界内）。
 
 **Placeholder scan：** 无 TBD/TODO；每步含完整代码与确切命令。
 
