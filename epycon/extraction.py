@@ -10,6 +10,7 @@ import numpy as np
 
 from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
+from epycon.core._validators import _validate_version
 from epycon.core.helpers import get_channel_mappings
 from epycon.iou import LogParser, mount_channels, readentries
 
@@ -29,6 +30,10 @@ def parse_elapsed(text):
         h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
     except ValueError:
         raise ExtractionError(f"时间格式须为 H:MM:SS[.sss]，得到 {text!r}")
+    # 字段范围校验：不静默归一化越界值（0:67:15 不可当成 1:07:15）
+    if h < 0 or not (0 <= m < 60) or not (0 <= s < 60):
+        raise ExtractionError(
+            f"时间字段越界（须 h>=0, 0<=m<60, 0<=s<60）：{text!r}")
     return h * 3600 + m * 60 + s
 
 
@@ -192,6 +197,12 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
     非 raw_counts 时物理值固定为 µV（= raw_int × resolution / 1000）。"""
     if version is None:
         version = _default_version()
+    # 非法版本在 LogParser 里会抛 ValueError；此处提前转 ExtractionError，
+    # 让 CLI 走结构化错误而非漏出 traceback
+    try:
+        _validate_version(version)
+    except ValueError as e:
+        raise ExtractionError(f"无效 workmate_version {version!r}：{e}")
     if not leads:
         raise ExtractionError("须提供至少一个导联名")
     before = window if before is None else before

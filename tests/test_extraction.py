@@ -26,6 +26,19 @@ class TestParseElapsed:
         with pytest.raises(ExtractionError):
             parse_elapsed("1:07")
 
+    def test_out_of_range_minute_rejected(self):
+        # 0:67:15 不可静默归一化成 1:07:15（否则提取到非本意的段）
+        with pytest.raises(ExtractionError, match="越界"):
+            parse_elapsed("0:67:15")
+
+    def test_out_of_range_second_rejected(self):
+        with pytest.raises(ExtractionError, match="越界"):
+            parse_elapsed("1:07:60")
+
+    def test_negative_hour_rejected(self):
+        with pytest.raises(ExtractionError, match="越界"):
+            parse_elapsed("-1:00:00")
+
 
 class TestLoadSegments:
     def test_realdata_twelve_sorted(self):
@@ -253,6 +266,13 @@ class TestExtractWindow:
         monkeypatch.setenv("EPYCON_CONFIG", str(REAL / "does_not_exist.json"))
         with pytest.raises(ExtractionError, match="workmate_version"):
             extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"])
+
+    def test_invalid_version_raises_extraction_error(self):
+        from epycon.extraction import extract_window
+        # 非法 --version 须转 ExtractionError（而非 LogParser 的 ValueError 逃逸成 traceback）
+        with pytest.raises(ExtractionError, match="workmate_version"):
+            extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"],
+                           version="bad")
 
 
 class TestLeadSourceValidation:
