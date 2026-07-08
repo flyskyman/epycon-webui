@@ -1,8 +1,12 @@
 # tests/test_cli_extract.py
+# CLI 端到端测试均驱动 realdata（本地临床数据，gitignored 不入库）；
+# 缺失时可见跳过。CLI 的错误路径逻辑另由 epycon 层纯测试覆盖。
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parent.parent
 REAL = ROOT / "examples" / "data" / "realdata"
@@ -14,6 +18,9 @@ def _run(args):
         capture_output=True, text=True, cwd=str(ROOT))
 
 
+@pytest.mark.skipif(
+    not REAL.exists(),
+    reason="realdata 为本地临床数据（gitignored，不入库）；CLI 集成测试仅本地运行")
 class TestCliExtract:
     def test_ok_json_stdout(self):
         r = _run(["--study", str(REAL), "--at", "1:07:15",

@@ -1,4 +1,9 @@
 # tests/test_extraction.py
+#
+# 分两层：纯逻辑测试（parse_elapsed 范围、_window_samples 裁剪、is_railed、
+# resolve_lead_sources 校验、fail-closed 守卫）不依赖数据文件，CI 上照常运行；
+# realdata 集成测试断言源自真实临床采集（gitignored、不入库），本地才有——
+# 用 real_only 标记，缺失时可见跳过。合成 CI 集成夹具见 KNOWN_ISSUES。
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +15,10 @@ ROOT = Path(__file__).parent.parent
 REAL = ROOT / "examples" / "data" / "realdata"
 STUDY01 = ROOT / "examples" / "data" / "study01"
 VER = "4.3.2"
+
+real_only = pytest.mark.skipif(
+    not REAL.exists(),
+    reason="realdata 为本地临床数据（gitignored，不入库）；集成测试仅本地运行")
 
 
 class TestParseElapsed:
@@ -40,6 +49,7 @@ class TestParseElapsed:
             parse_elapsed("-1:00:00")
 
 
+@real_only
 class TestLoadSegments:
     def test_realdata_twelve_sorted(self):
         from epycon.extraction import load_segments
@@ -59,6 +69,7 @@ class TestLoadSegments:
 
 
 class TestConsistency:
+    @real_only
     def test_realdata_passes(self):
         from epycon.extraction import load_segments, check_consistency
         segs = load_segments(str(REAL), VER)
@@ -78,6 +89,7 @@ class TestConsistency:
 
 
 class TestLocateAndWindow:
+    @real_only
     def test_locate_hits_segment5(self):
         from epycon.extraction import load_segments, locate_segment
         segs = load_segments(str(REAL), VER)
@@ -85,6 +97,7 @@ class TestLocateAndWindow:
         seg = locate_segment(segs, zero + 4035.0)  # 1:07:15
         assert seg["id"] == "00000005"
 
+    @real_only
     def test_locate_gap_returns_none(self):
         from epycon.extraction import load_segments, locate_segment
         segs = load_segments(str(REAL), VER)
@@ -107,6 +120,7 @@ class TestLocateAndWindow:
         assert mb == pytest.approx(1.342, abs=1e-6)
 
 
+@real_only
 class TestRawAndRail:
     def test_raw_int_dtype_and_length(self):
         from epycon.extraction import load_segments, read_raw_window
@@ -136,6 +150,7 @@ class TestRawAndRail:
         assert is_railed(raw[:, 1]) is False
 
 
+@real_only
 class TestLeadResolve:
     def test_surface_lead_single_source(self):
         from epycon.extraction import load_segments, resolve_lead_sources
@@ -180,6 +195,7 @@ class TestLeadResolve:
             resolve_lead_sources(seg["header"], ["8 3-4"], True)
 
 
+@real_only
 class TestExtractWindow:
     def test_connected_and_railed_mix(self):
         from epycon.extraction import extract_window
@@ -295,3 +311,49 @@ class TestLeadSourceValidation:
         header = self._fake_header("HI", 999, num_channels=88)
         with pytest.raises(ExtractionError, match="无效"):
             resolve_lead_sources(header, ["HI"], False)
+
+
+class TestRailPure:
+    """is_railed 纯逻辑，用合成数组即可测，CI 可跑。"""
+
+    def test_railed_full_scale_constant(self):
+        from epycon.extraction import is_railed
+        assert is_railed(np.full(100, -2147483649, dtype=np.int64)) is True
+        assert is_railed(np.full(100, 2147483647, dtype=np.int64)) is True
+
+    def test_constant_but_not_rail_value_is_ok(self):
+        from epycon.extraction import is_railed
+        # 恒定但非满量程（安静的真实通道）不判 railed
+        assert is_railed(np.full(100, 5, dtype=np.int64)) is False
+
+    def test_varying_signal_not_railed(self):
+        from epycon.extraction import is_railed
+        assert is_railed(np.arange(100, dtype=np.int64)) is False
+
+
+class TestFailClosedGuardsPure:
+    """fail-closed 守卫在读任何数据文件之前触发，故用不存在的目录即可测，CI 可跑。"""
+    NODIR = str(ROOT / "no_such_study_dir")
+
+    def test_invalid_version_short_circuits(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="workmate_version"):
+            extract_window(self.NODIR, at_elapsed="1:07:15", leads=["II"],
+                           version="bad")
+
+    def test_negative_window_short_circuits(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="不可为负"):
+            extract_window(self.NODIR, at_elapsed="1:07:15", leads=["II"],
+                           before=-1.0, after=3.0, version=VER)
+
+    def test_empty_leads_short_circuits(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="导联"):
+            extract_window(self.NODIR, at_elapsed="1:07:15", leads=[], version=VER)
+
+    def test_bad_default_config_short_circuits(self, monkeypatch):
+        from epycon.extraction import extract_window
+        monkeypatch.setenv("EPYCON_CONFIG", str(ROOT / "no_such_config.json"))
+        with pytest.raises(ExtractionError, match="workmate_version"):
+            extract_window(self.NODIR, at_elapsed="1:07:15", leads=["II"])

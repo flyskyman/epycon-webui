@@ -39,6 +39,18 @@
   平移/缩放复杂度从 O(原始数据) 降为 O(可视点数)；相邻窗口预取
 - **第 3 层（暂不建议）**：Vite 构建体系、FastAPI/WebSocket——当前瓶颈不在框架
 
+### 24. 时间戳提取：realdata 集成测试无 CI 覆盖，待合成可入库夹具
+- **位置**：`tests/test_extraction.py`、`tests/test_cli_extract.py`（`real_only` 标记）
+- **现状**：算法核心与全部 fail-closed 守卫已由纯逻辑测试在 CI 覆盖（20 个用例：
+  时间解析+范围、窗口/裁剪数学、is_railed、导联校验、版本/负窗口/空导联/坏 config
+  守卫、study01 一致性报错）。但读 realdata 文件、断言具体值（offset 2.658、railed V6、
+  CS 极性、n=8000）的**集成**测试依赖临床数据（`.gitignore` 忽略、不入库），CI 上
+  `real_only` 可见跳过，故 `extract_window` 端到端编排在 CI 无覆盖。
+- **后续**：扩 `scripts/generate_fake_wmx.py` 支持显式每段时间戳 + railed 通道，
+  生成一个小的多段一致 study 入库，另写一套 CI 可跑的集成断言（合成结构，
+  非 realdata 专有值）。届时把集成覆盖补回 CI。
+- **来源**：2026-07-08 提取工具 Codex 原生 review（P1）
+
 ### 22. 时间戳提取：is_railed 只判"全窗恒定"，部分饱和不拒绝
 - **位置**：`epycon/extraction.py` `is_railed`（`resolve_lead_sources` 的守卫之后）
 - **现象**：栏杆检测按设计（spec 第 7 节）定义为"窗口内源列**恒定**且命中满量程值"。
