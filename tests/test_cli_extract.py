@@ -1,0 +1,44 @@
+# tests/test_cli_extract.py
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent
+REAL = ROOT / "examples" / "data" / "realdata"
+
+
+def _run(args):
+    return subprocess.run(
+        [sys.executable, "-m", "epycon.cli.extract", *args],
+        capture_output=True, text=True, cwd=str(ROOT))
+
+
+class TestCliExtract:
+    def test_ok_json_stdout(self):
+        r = _run(["--study", str(REAL), "--at", "1:07:15",
+                  "--leads", "II,V6", "--window", "2", "--version", "4.3.2"])
+        assert r.returncode == 0
+        out = json.loads(r.stdout)
+        assert out["log"] == "00000005"
+        by = {ld["name"]: ld for ld in out["leads"]}
+        assert by["II"]["status"] == "ok"
+        assert by["V6"]["status"] == "rejected"
+
+    def test_gap_error_stderr(self):
+        r = _run(["--study", str(REAL), "--at", "1:07:12",
+                  "--leads", "II", "--version", "4.3.2"])
+        assert r.returncode == 2
+        err = json.loads(r.stderr)
+        assert "error" in err
+
+    def test_out_npz(self, tmp_path):
+        import numpy as np
+        out_path = tmp_path / "w.npz"
+        r = _run(["--study", str(REAL), "--at", "1:07:15", "--leads", "II",
+                  "--window", "2", "--version", "4.3.2", "--out", str(out_path)])
+        assert r.returncode == 0
+        assert out_path.exists()
+        data = np.load(out_path)
+        assert "II" in data
+        assert data["II"].shape[0] == 8000
