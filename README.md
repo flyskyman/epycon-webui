@@ -10,6 +10,7 @@
 ## 特性
 
 - **数据转换**：将 WorkMate 日志文件转换为 CSV 或 HDF5 格式
+- **导联波形提取**：按 WorkMate 走时钟时刻从原始 `.log` 分段提取指定导联 ±窗口的原始波形（µV，未滤波），供测量分析/agent 调用（`python -m epycon.cli.extract`）
 - **日志解析**：深度搜索和过滤 WorkMate 日志条目
 - **WorkMate Version**: 4.3.2 (Recommended for x64 support) / 4.1 (Legacy x32)
 - **Supported Formats**: WMx32, WMx64
@@ -155,6 +156,22 @@ Start-Process -FilePath "C:\path\to\WorkMateDataCenter.exe"
 python -m epycon
 ```
 
+### 按时间戳提取指定导联波形（源码 CLI）
+
+从原始 `.log` 分段目录，按 WorkMate 走时钟的流逝时刻（`HH:MM:SS`）提取指定导联在该时刻
+±窗口内的**原始波形**（默认 µV、未滤波），结果为 JSON（或 `--out` 写 `.npz`），适合科学
+测量与 agent 程序化调用：
+
+```powershell
+python -m epycon.cli.extract --study <study目录> --at 1:07:15 --leads "V6,CS 3-4" --window 2 --version 4.3.2
+```
+
+常用参数：`--at`（流逝时刻，或 `--epoch` 传绝对秒）、`--leads`（逗号分隔导联名）、
+`--window N`（对称 ±N 秒，或 `--before/--after` 非对称）、`--raw-unipolar`（出原始单极而非
+双极合成）、`--raw-counts`（出原始整数而非 µV）、`--out x.npz`。全程 fail-closed：时刻落
+段间空档、未连接导联、畸形输入等一律返回结构化错误（stderr JSON + 退出码 2）。
+设计文档见 `docs/superpowers/specs/2026-07-08-timestamp-lead-extraction-design.md`。
+
 
 ## 项目结构（当前）
 
@@ -162,6 +179,8 @@ python -m epycon
 - `epycon/`：核心 Python 包
   - `conversion.py`：**转换逻辑的唯一实现**（CLI 与 GUI 共用，标注定位等语义只改这里）。
   - `__main__.py`：CLI 入口（config 处理 + 调用 conversion）。
+  - `extraction.py`：按时间戳提取指定导联 ±窗口原始波形的核心（`extract_window`，只读、不转换）。
+  - `cli/extract.py`：提取工具的薄 CLI（`python -m epycon.cli.extract`）。
   - `api_ecg.py`：ECG 查看器 HTTP API（Flask Blueprint）。
   - `iou/`：WorkMate 二进制解析（parsers）与输出（planters）。
   - `core/`、`config/`、`utils/`：校验、格式化、byteschema、辅助。

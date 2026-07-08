@@ -14,6 +14,24 @@
 进度回调、汇总 CSV、智能输出目录；采样级行为由
 `tests/test_conversion.py` 的等价性测试锁定一致。
 
+## 波形提取入口点（2026-07-08 新增）
+
+**只读**路径，与上面的转换路径正交：按 WorkMate 走时钟流逝时刻从原始 `.log` 分段
+提取指定导联 ±窗口的原始波形（µV、未滤波），不写转换产物。核心实现
+`epycon/extraction.py`（`extract_window`）。
+
+| 入口 | 调用链 |
+|------|--------|
+| **CLI / agent** | `python -m epycon.cli.extract` → `epycon/cli/extract.py` → `epycon.extraction.extract_window` |
+| **库调用** | `from epycon.extraction import extract_window` → 返回 dict |
+
+复用既有零件（`list_datalogs` 枚举、`LogParser` 切片、`get_channel_mappings` 导联映射、
+`readentries` 标注、epoch 纯相减定位公式），新增仅段定位、窗口裁剪、栏杆检测与
+entries↔log 一致性硬校验。全程 fail-closed（失败一律 `ExtractionError` → CLI 结构化错误）。
+设计与验收见 `docs/superpowers/specs/2026-07-08-timestamp-lead-extraction-design.md`
+及 `docs/superpowers/plans/2026-07-08-timestamp-lead-extraction.md`；超范围/设计取舍项
+见 `docs/KNOWN_ISSUES.md` #22–24。
+
 ## 历史注记
 
 - 此前 WebUI 与 CLI 各自维护平行实现并漂移出多个标注定位 bug
