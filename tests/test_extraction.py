@@ -25,3 +25,21 @@ class TestParseElapsed:
     def test_malformed_raises(self):
         with pytest.raises(ExtractionError):
             parse_elapsed("1:07")
+
+
+class TestLoadSegments:
+    def test_realdata_twelve_sorted(self):
+        from epycon.extraction import load_segments
+        segs = load_segments(str(REAL), VER)
+        assert len(segs) == 12
+        assert [s["id"] for s in segs] == sorted(s["id"] for s in segs)
+        assert segs[0]["id"] == "00000000"
+
+    def test_seg0_header_fields(self):
+        from epycon.extraction import load_segments
+        s0 = load_segments(str(REAL), VER)[0]
+        assert s0["fs"] == 2000
+        assert s0["resolution"] == 78
+        assert s0["ts"] == pytest.approx(1764297784.403, abs=1e-3)
+        assert s0["ns"] > 20000
+        assert s0["dur"] == pytest.approx(s0["ns"] / 2000)
