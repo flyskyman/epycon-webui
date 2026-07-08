@@ -165,3 +165,77 @@ class TestLeadResolve:
         seg = load_segments(str(REAL), VER)[0]
         with pytest.raises(ExtractionError):
             resolve_lead_sources(seg["header"], ["8 3-4"], True)
+
+
+class TestExtractWindow:
+    def test_connected_and_railed_mix(self):
+        from epycon.extraction import extract_window
+        r = extract_window(str(REAL), at_elapsed="1:07:15",
+                           leads=["II", "V6"], window=2.0, version=VER)
+        assert r["log"] == "00000005"
+        assert r["units"] == "uV"
+        assert r["fs"] == 2000
+        by = {ld["name"]: ld for ld in r["leads"]}
+        assert by["II"]["status"] == "ok"
+        assert by["II"]["n"] == 8000
+        assert by["V6"]["status"] == "rejected"
+        assert r["returned_window"]["clipped"] is False
+
+    def test_gap_rejects(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="空档"):
+            extract_window(str(REAL), at_elapsed="1:07:12",
+                           leads=["II"], window=2.0, version=VER)
+
+    def test_clip_reports_missing(self):
+        from epycon.extraction import extract_window
+        r = extract_window(str(REAL), at_elapsed="1:07:13",
+                           leads=["II"], window=2.0, version=VER)
+        assert r["returned_window"]["clipped"] is True
+        assert r["returned_window"]["missing_s"] == pytest.approx(1.342, abs=1e-3)
+        # 裁剪后样本数 = 未裁前 8000 − 缺失 2684 = 5316，且与实际返回一致
+        assert r["leads"][0]["n"] == 5316
+
+    def test_raw_counts_units(self):
+        from epycon.extraction import extract_window
+        r = extract_window(str(REAL), at_elapsed="1:07:15",
+                           leads=["II"], window=2.0, raw_counts=True, version=VER)
+        assert r["units"] == "counts"
+        assert all(isinstance(x, int) for x in r["leads"][0]["samples"][:5])
+
+    def test_conflicting_targets_raise(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="互斥"):
+            extract_window(str(REAL), at_elapsed="1:07:15",
+                           at_epoch=1764301819.403, leads=["II"], version=VER)
+
+    def test_epoch_target_path(self):
+        from epycon.extraction import extract_window
+        r = extract_window(str(REAL), at_epoch=1764301819.403,
+                           leads=["II"], window=2.0, version=VER)
+        assert r["log"] == "00000005"
+        assert r["leads"][0]["n"] == 8000
+
+    def test_before_after_override(self):
+        from epycon.extraction import extract_window
+        # 段内偏移 2.658s，[1.658, 4.658] → (1.0+2.0)*2000 = 6000，区别于对称 window=2 的 8000
+        r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"],
+                           before=1.0, after=2.0, version=VER)
+        assert r["leads"][0]["n"] == 6000
+        assert r["returned_window"]["clipped"] is False
+
+    def test_far_gap_rejects(self):
+        from epycon.extraction import extract_window
+        # 0:31:00 = 1860s，落在 seg0(止~10.5s) 与 seg1(起 1872.9s) 间的分钟级空档
+        with pytest.raises(ExtractionError, match="空档"):
+            extract_window(str(REAL), at_elapsed="0:31:00",
+                           leads=["II"], version=VER)
+
+    def test_default_version_from_config(self, monkeypatch):
+        from epycon.extraction import extract_window
+        # 不传 version → _default_version 取 config 的 4.3.2；realdata 正是该版本。
+        # 清掉 EPYCON_CONFIG，确保落到包内默认 config（否则用户环境可能指向别的 config）。
+        monkeypatch.delenv("EPYCON_CONFIG", raising=False)
+        r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"])
+        assert r["version"] == "4.3.2"
+        assert r["log"] == "00000005"

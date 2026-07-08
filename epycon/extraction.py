@@ -4,6 +4,7 @@
 全程 epoch 纯相减、零时区；段归属半开 [ts, ts+dur)；fail-closed。
 """
 import os
+import json
 
 import numpy as np
 
@@ -140,3 +141,96 @@ def _lead_signal(raw_int, sources):
     if len(sources) == 1:
         return raw_int[:, sources[0]]
     return raw_int[:, sources[0]] - raw_int[:, sources[1]]
+
+
+def _default_version():
+    cfg_path = os.environ.get(
+        "EPYCON_CONFIG",
+        os.path.join(os.path.dirname(__file__), "config", "config.json"))
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        return json.load(f)["global_settings"]["workmate_version"]
+
+
+def _gap_message(segments, target_epoch, zero):
+    tel = target_epoch - zero
+    prev = [s for s in segments if s["ts"] + s["dur"] <= target_epoch]
+    nxt = [s for s in segments if s["ts"] > target_epoch]
+
+    def rng(s):
+        a = s["ts"] - zero
+        return f"{s['id']} [{a:.3f}, {a + s['dur']:.3f}]s"
+
+    p = rng(prev[-1]) if prev else "—"
+    n = rng(nxt[0]) if nxt else "—"
+    return f"目标流逝 {tel:.3f}s 落在段间空档，无录制数据。前段: {p}; 后段: {n}"
+
+
+def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
+                   window=2.0, before=None, after=None, raw_unipolar=False,
+                   raw_counts=False, units="uV", version=None):
+    """按流逝时刻/epoch 提取指定导联 ±窗口原始波形。见设计文档第 8 节。"""
+    if version is None:
+        version = _default_version()
+    if not leads:
+        raise ExtractionError("须提供至少一个导联名")
+    before = window if before is None else before
+    after = window if after is None else after
+
+    segments = load_segments(study_dir, version)
+    if not segments:
+        raise ExtractionError(f"{study_dir} 无 .log 段")
+    check_consistency(study_dir, segments, version)
+    zero = segments[0]["ts"]
+
+    if at_epoch is not None and at_elapsed is not None:
+        raise ExtractionError("at_elapsed 与 at_epoch 互斥，不可同时提供")
+    if at_epoch is not None:
+        target = float(at_epoch)
+    elif at_elapsed is not None:
+        target = zero + parse_elapsed(at_elapsed)
+    else:
+        raise ExtractionError("须提供 at_elapsed 或 at_epoch")
+
+    seg = locate_segment(segments, target)
+    if seg is None:
+        raise ExtractionError(_gap_message(segments, target, zero))
+
+    offset = target - seg["ts"]
+    s0, s1, miss_b, miss_a = _window_samples(seg, offset, before, after)
+    if s1 <= s0:
+        raise ExtractionError("窗口在该段内无有效样本")
+
+    raw_int = read_raw_window(seg, s0, s1, version)
+    sources = resolve_lead_sources(seg["header"], leads, raw_unipolar)
+    res = seg["resolution"]
+    fs = seg["fs"]
+
+    lead_out = []
+    for name, cols in sources:
+        if any(is_railed(raw_int[:, c]) for c in cols):
+            lead_out.append({"name": name, "status": "rejected",
+                             "reason": "通道恒定于满量程，电极未连接"})
+            continue
+        sig = _lead_signal(raw_int, cols)
+        if raw_counts:
+            samples = [int(x) for x in sig]
+        else:
+            samples = (sig.astype(np.float64) * res / 1000.0).tolist()
+        lead_out.append({"name": name, "status": "ok",
+                         "n": int(sig.shape[0]), "samples": samples})
+
+    return {
+        "study": os.path.basename(os.path.normpath(study_dir)),
+        "log": seg["id"],
+        "version": version,
+        "fs": fs,
+        "units": "counts" if raw_counts else units,
+        "resolution_nV": res,
+        "target": {"elapsed": at_elapsed, "epoch": target,
+                   "offset_in_seg_s": offset},
+        "requested_window": {"before": before, "after": after},
+        "returned_window": {"start_s": s0 / fs, "end_s": s1 / fs,
+                            "clipped": bool(miss_b or miss_a),
+                            "missing_s": miss_b + miss_a},
+        "leads": lead_out,
+    }
