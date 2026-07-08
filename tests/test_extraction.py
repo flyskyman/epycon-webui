@@ -121,3 +121,47 @@ class TestRawAndRail:
         raw = read_raw_window(seg, 1316, 9316, VER)
         # II 的 reference = 1（连接导联，真实信号）
         assert is_railed(raw[:, 1]) is False
+
+
+class TestLeadResolve:
+    def test_surface_lead_single_source(self):
+        from epycon.extraction import load_segments, resolve_lead_sources
+        seg = load_segments(str(REAL), VER)[0]
+        out = resolve_lead_sources(seg["header"], ["V6"], False)
+        assert out[0][0] == "V6"
+        assert len(out[0][1]) == 1
+
+    def test_bipolar_sign_is_uminus_minus_uplus(self):
+        from epycon.extraction import (
+            load_segments, resolve_lead_sources, read_raw_window, _lead_signal)
+        seg = [s for s in load_segments(str(REAL), VER) if s["id"] == "00000005"][0]
+        raw = read_raw_window(seg, 1316, 9316, VER)
+        # 手算 u- - u+：从 header 取 CS 3-4 的两源 reference
+        content = seg["header"].channels.content
+        names = [c.name for c in content]
+        ref_uplus = content[names.index("u+CS 3-4")].reference
+        ref_uminus = content[names.index("u-CS 3-4")].reference
+        expected = raw[:, ref_uminus] - raw[:, ref_uplus]
+        sources = resolve_lead_sources(seg["header"], ["CS 3-4"], False)[0][1]
+        got = _lead_signal(raw, sources)
+        assert np.array_equal(got, expected)
+
+    def test_unknown_lead_raises_with_available(self):
+        from epycon.extraction import load_segments, resolve_lead_sources
+        seg = load_segments(str(REAL), VER)[0]
+        with pytest.raises(ExtractionError, match="NOPE"):
+            resolve_lead_sources(seg["header"], ["NOPE"], False)
+
+    def test_raw_unipolar_exposes_uplus_uminus(self):
+        from epycon.extraction import load_segments, resolve_lead_sources
+        seg = load_segments(str(REAL), VER)[0]
+        out = resolve_lead_sources(seg["header"], ["u+CS 3-4"], True)
+        assert out[0][0] == "u+CS 3-4"
+
+    def test_exact_match_no_fuzzy_on_dirty_name(self):
+        # 头中存在含 \x00 的脏名（如 '8\x00 3-4'）；请求去空/清洗版 '8 3-4'
+        # 必须精确匹配失败报错，绝不模糊命中（第 7 节脏名精确匹配约定）
+        from epycon.extraction import load_segments, resolve_lead_sources
+        seg = load_segments(str(REAL), VER)[0]
+        with pytest.raises(ExtractionError):
+            resolve_lead_sources(seg["header"], ["8 3-4"], True)

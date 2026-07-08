@@ -9,6 +9,7 @@ import numpy as np
 
 from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
+from epycon.core.helpers import get_channel_mappings
 from epycon.iou import LogParser, readentries
 
 RAIL_VALUES = frozenset({2147483647, -2147483648, -2147483649})
@@ -115,3 +116,27 @@ def is_railed(col):
     if not np.all(col == first):
         return False
     return int(first) in RAIL_VALUES
+
+
+def resolve_lead_sources(header, requested, raw_unipolar):
+    """导联名 → 源通道 reference 元组。computed（默认）自动双极；
+    original（--raw-unipolar）出单极。名字精确匹配，缺失即报错。"""
+    cfg = {"data": {
+        "leads": "original" if raw_unipolar else "computed",
+        "custom_channels": {},
+    }}
+    mapping = get_channel_mappings(header, cfg)
+    out = []
+    for name in requested:
+        if name not in mapping:
+            raise ExtractionError(
+                f"导联 {name!r} 不在通道表；可用: {sorted(mapping)}")
+        out.append((name, mapping[name]))
+    return out
+
+
+def _lead_signal(raw_int, sources):
+    """单源直取；双源 source[0]-source[1]（= u- − u+，与 _mount_channels 一致）。"""
+    if len(sources) == 1:
+        return raw_int[:, sources[0]]
+    return raw_int[:, sources[0]] - raw_int[:, sources[1]]
