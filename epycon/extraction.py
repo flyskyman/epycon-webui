@@ -66,3 +66,24 @@ def check_consistency(study_dir, segments, version):
                 f"entry fid={entry.fid} epoch={ts} 落在段 {seg['id']} 区间 "
                 f"[{seg['ts']}, {seg['ts'] + seg['dur']}) 之外")
     return entries
+
+
+def locate_segment(segments, target_epoch):
+    """返回覆盖 target_epoch 的段（半开 [ts, ts+dur)），无则 None。"""
+    for seg in segments:
+        if seg["ts"] <= target_epoch < seg["ts"] + seg["dur"]:
+            return seg
+    return None
+
+
+def _window_samples(seg, offset_sec, before, after):
+    """段内偏移 ±(before/after) → 裁剪后的 [start, end) 样本索引 + 缺失秒数。"""
+    fs = seg["fs"]
+    ns = seg["ns"]
+    start = round((offset_sec - before) * fs)
+    end = round((offset_sec + after) * fs)  # 排他上界
+    clipped_start = max(0, start)
+    clipped_end = min(ns, end)
+    missing_before = (clipped_start - start) / fs
+    missing_after = (end - clipped_end) / fs
+    return clipped_start, clipped_end, missing_before, missing_after

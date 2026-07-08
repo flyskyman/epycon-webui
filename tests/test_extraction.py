@@ -62,3 +62,33 @@ class TestConsistency:
         from epycon.extraction import check_consistency
         with pytest.raises(ExtractionError, match="entries"):
             check_consistency(str(tmp_path), [], VER)
+
+
+class TestLocateAndWindow:
+    def test_locate_hits_segment5(self):
+        from epycon.extraction import load_segments, locate_segment
+        segs = load_segments(str(REAL), VER)
+        zero = segs[0]["ts"]
+        seg = locate_segment(segs, zero + 4035.0)  # 1:07:15
+        assert seg["id"] == "00000005"
+
+    def test_locate_gap_returns_none(self):
+        from epycon.extraction import load_segments, locate_segment
+        segs = load_segments(str(REAL), VER)
+        zero = segs[0]["ts"]
+        assert locate_segment(segs, zero + 4032.0) is None  # 1:07:12，段5起点前
+
+    def test_window_full_within_segment(self):
+        from epycon.extraction import _window_samples
+        seg = {"fs": 2000, "ns": 21011}
+        s0, s1, mb, ma = _window_samples(seg, 2.658, 2.0, 2.0)
+        assert (s0, s1) == (1316, 9316)
+        assert s1 - s0 == 8000
+        assert mb == 0.0 and ma == 0.0
+
+    def test_window_clipped_at_start(self):
+        from epycon.extraction import _window_samples
+        seg = {"fs": 2000, "ns": 21011}
+        s0, s1, mb, ma = _window_samples(seg, 0.658, 2.0, 2.0)
+        assert s0 == 0
+        assert mb == pytest.approx(1.342, abs=1e-6)
