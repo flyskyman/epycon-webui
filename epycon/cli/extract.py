@@ -57,7 +57,12 @@ def main(argv=None):
         print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
         return 2
     if args.out:
-        meta = _save_npz(args.out, result)
+        try:
+            meta = _save_npz(args.out, result)
+        except OSError as e:
+            print(json.dumps({"error": f"写入 {args.out} 失败：{e}"},
+                             ensure_ascii=False), file=sys.stderr)
+            return 2
         meta["out"] = args.out
         print(json.dumps(meta, ensure_ascii=False))
     else:

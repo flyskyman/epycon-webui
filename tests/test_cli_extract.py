@@ -42,3 +42,11 @@ class TestCliExtract:
         data = np.load(out_path)
         assert "II" in data
         assert data["II"].shape[0] == 8000
+
+    def test_out_unwritable_returns_structured_error(self, tmp_path):
+        # 父目录不存在 → 写入失败须转结构化错误 JSON + exit 2，而非 traceback
+        bad = tmp_path / "no_such_dir" / "w.npz"
+        r = _run(["--study", str(REAL), "--at", "1:07:15", "--leads", "II",
+                  "--window", "2", "--version", "4.3.2", "--out", str(bad)])
+        assert r.returncode == 2
+        assert "error" in json.loads(r.stderr)
