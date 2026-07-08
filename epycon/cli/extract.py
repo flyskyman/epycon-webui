@@ -36,12 +36,16 @@ def _meta_without_samples(result):
 
 
 def _save_npz(path, result):
-    """写 .npz（每个 ok 导联一个数组 + _meta），返回同一份 meta 供 stdout 复用。"""
+    """写 .npz（每个 ok 导联一个数组 + _meta），返回 (meta, 实际写入路径)。
+
+    np.savez 对无 .npz 后缀的路径会自动追加；此处显式补齐并报告实际路径，
+    避免 stdout 的 out 字段指向不存在的文件。"""
+    actual = str(path) if str(path).endswith(".npz") else str(path) + ".npz"
     arrays = {ld["name"]: np.asarray(ld["samples"])
               for ld in result["leads"] if ld["status"] == "ok"}
     meta = _meta_without_samples(result)
-    np.savez(path, _meta=json.dumps(meta, ensure_ascii=False), **arrays)
-    return meta
+    np.savez(actual, _meta=json.dumps(meta, ensure_ascii=False), **arrays)
+    return meta, actual
 
 
 def main(argv=None):
@@ -58,12 +62,12 @@ def main(argv=None):
         return 2
     if args.out:
         try:
-            meta = _save_npz(args.out, result)
+            meta, actual = _save_npz(args.out, result)
         except OSError as e:
             print(json.dumps({"error": f"写入 {args.out} 失败：{e}"},
                              ensure_ascii=False), file=sys.stderr)
             return 2
-        meta["out"] = args.out
+        meta["out"] = actual
         print(json.dumps(meta, ensure_ascii=False))
     else:
         print(json.dumps(result, ensure_ascii=False))

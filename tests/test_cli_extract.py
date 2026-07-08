@@ -57,3 +57,13 @@ class TestCliExtract:
                   "--window", "2", "--version", "4.3.2", "--out", str(bad)])
         assert r.returncode == 2
         assert "error" in json.loads(r.stderr)
+
+    def test_out_without_npz_suffix_reports_actual_path(self, tmp_path):
+        # --out 无 .npz 后缀时 np.savez 会追加；报告的 out 必须指向实际文件
+        base = tmp_path / "w"
+        r = _run(["--study", str(REAL), "--at", "1:07:15", "--leads", "II",
+                  "--window", "2", "--version", "4.3.2", "--out", str(base)])
+        assert r.returncode == 0
+        reported = json.loads(r.stdout)["out"]
+        assert reported.endswith(".npz")
+        assert Path(reported).exists()

@@ -352,6 +352,18 @@ class TestFailClosedGuardsPure:
         with pytest.raises(ExtractionError, match="导联"):
             extract_window(self.NODIR, at_elapsed="1:07:15", leads=[], version=VER)
 
+    def test_nan_window_short_circuits(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="有限值"):
+            extract_window(self.NODIR, at_elapsed="1:07:15", leads=["II"],
+                           window=float("nan"), version=VER)
+
+    def test_inf_before_short_circuits(self):
+        from epycon.extraction import extract_window
+        with pytest.raises(ExtractionError, match="有限值"):
+            extract_window(self.NODIR, at_elapsed="1:07:15", leads=["II"],
+                           before=float("inf"), after=1.0, version=VER)
+
     def test_bad_default_config_short_circuits(self, monkeypatch):
         from epycon.extraction import extract_window
         monkeypatch.setenv("EPYCON_CONFIG", str(ROOT / "no_such_config.json"))

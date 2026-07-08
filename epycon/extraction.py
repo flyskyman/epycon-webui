@@ -5,6 +5,7 @@
 """
 import os
 import json
+import math
 
 import numpy as np
 
@@ -207,6 +208,9 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
         raise ExtractionError("须提供至少一个导联名")
     before = window if before is None else before
     after = window if after is None else after
+    if not (math.isfinite(before) and math.isfinite(after)):
+        raise ExtractionError(
+            f"窗口 before/after 须为有限值（before={before}, after={after}）")
     if before < 0 or after < 0:
         raise ExtractionError(
             f"窗口 before/after 不可为负（before={before}, after={after}）")
