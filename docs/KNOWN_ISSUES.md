@@ -17,6 +17,10 @@
 - **验证方法**（需真实数据，如 `examples/data/real_test/`）：取一个日志数 >9 的 study，
   查看文件名是否出现 a-f；并对照 entries 解析出的 fid 集合与文件名集合的交集
 - **影响**：≥10 个日志的研究，标注归属可能系统性丢失
+- **更新（2026-07-08）**：`examples/data/realdata`（12 个日志，文件名 `0000000a/0000000b`
+  为十六进制）已可验证——实测 entries 的 12 个 fid（含 `0000000a`/`0000000b`）与文件名
+  逐一对上、每条 epoch 落在对应 log 区间内，故本 study 十六进制约定自洽。时间戳提取工具的
+  一致性校验（fid↔文件名 + epoch↔区间）正是此条的运行时守卫，可将其从"调查"升级
 
 ### 16. 【调查】双极导联极性方向
 - **位置**：`Channels.computed_mappings` 返回 (u−, u+) 反序 + `_mount_channels` 做 source[0]−source[1]
@@ -34,6 +38,30 @@
 - **第 2 层（治本）**：文件打开时预计算 min/max 多分辨率金字塔，
   平移/缩放复杂度从 O(原始数据) 降为 O(可视点数)；相邻窗口预取
 - **第 3 层（暂不建议）**：Vite 构建体系、FastAPI/WebSocket——当前瓶颈不在框架
+
+### 19. 【调查】HDF5 物理单位疑为误标 mV（实为 µV）
+- **位置**：`epycon/iou/planters.py` `HDFPlanter._UNITS = 'mV'` + `units="mV"` 传参；
+  数值管线 = `int × resolution / 1000`
+- **证据**：`examples/data/realdata` 中 II 导峰峰 ≈ 1264。当作 µV 时 = 1.26 mV（生理正常）；
+  当作 mV 则为 1264 mV（大 100×，不可能）。resolution ≈ 78 nV/count（论文 2.1）
+- **影响**：WebUI 幅度刻度、任何以该 HDF5 units 字段为准的下游测量；差约 1000×
+- **验证方法**：与 WorkMate 屏幕同一导联的实际 mV 刻度对照
+- **关联**：2026-07-08 时间戳提取工具设计（`docs/superpowers/specs/`）默认输出改标 µV
+
+### 20. 【调查】头解出 128 通道定义 vs 数据仅 88 列 + 脏通道名
+- **位置**：`LogParser._readheader` 通道解析；`examples/data/realdata` 各 log
+- **现象**：`header.get_chnames()` 返回 128 项，但数据块仅 88 列；部分名字含 `\x00`
+  （如 `'8\x00 3-4'`、`'15\x00p'`）。单极表面导联（V6 等）与已配对双极映射正确、不受影响
+- **影响**：若以完整通道清单示人（如列全部可选导联）会含幽灵/脏名条目
+- **验证方法**：核对 x64 channels 块的有效性判据（`bchunk[:1]==b"\x00"` 跳过逻辑）
+  与 datablock 实际列数的对应关系
+
+### 21. 合并 HDF5 丢失段级墙钟时间戳
+- **位置**：`epycon/conversion.py` `_convert_merged`——只写首段 `Timestamp` + `datalog_ids`，
+  各段起点 epoch 与样本偏移未落盘；合并轴为"累计录制时间"（抹掉段间空档）
+- **影响**：合并文件无法反推"墙钟流逝时刻 → 样本"，故按时间戳提取工具只能作用于
+  原始 `.log` 分段。若要让工具支持合并 HDF5，需先补写每段 `(start_epoch, sample_offset)`
+- **关联**：2026-07-08 时间戳提取工具设计第 10 节
 
 ## 低优先级
 
