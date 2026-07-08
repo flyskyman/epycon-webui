@@ -17,6 +17,10 @@
 - **验证方法**（需真实数据，如 `examples/data/real_test/`）：取一个日志数 >9 的 study，
   查看文件名是否出现 a-f；并对照 entries 解析出的 fid 集合与文件名集合的交集
 - **影响**：≥10 个日志的研究，标注归属可能系统性丢失
+- **更新（2026-07-08）**：`examples/data/realdata`（12 个日志，文件名 `0000000a/0000000b`
+  为十六进制）已可验证——实测 entries 的 12 个 fid（含 `0000000a`/`0000000b`）与文件名
+  逐一对上、每条 epoch 落在对应 log 区间内，故本 study 十六进制约定自洽。时间戳提取工具的
+  一致性校验（fid↔文件名 + epoch↔区间）正是此条的运行时守卫，可将其从"调查"升级
 
 ### 16. 【调查】双极导联极性方向
 - **位置**：`Channels.computed_mappings` 返回 (u−, u+) 反序 + `_mount_channels` 做 source[0]−source[1]
@@ -34,6 +38,61 @@
 - **第 2 层（治本）**：文件打开时预计算 min/max 多分辨率金字塔，
   平移/缩放复杂度从 O(原始数据) 降为 O(可视点数)；相邻窗口预取
 - **第 3 层（暂不建议）**：Vite 构建体系、FastAPI/WebSocket——当前瓶颈不在框架
+
+### 24. 时间戳提取：realdata 集成测试无 CI 覆盖，待合成可入库夹具
+- **位置**：`tests/test_extraction.py`、`tests/test_cli_extract.py`（`real_only` 标记）
+- **现状**：算法核心与全部 fail-closed 守卫已由纯逻辑测试在 CI 覆盖（20 个用例：
+  时间解析+范围、窗口/裁剪数学、is_railed、导联校验、版本/负窗口/空导联/坏 config
+  守卫、study01 一致性报错）。但读 realdata 文件、断言具体值（offset 2.658、railed V6、
+  CS 极性、n=8000）的**集成**测试依赖临床数据（`.gitignore` 忽略、不入库），CI 上
+  `real_only` 可见跳过，故 `extract_window` 端到端编排在 CI 无覆盖。
+- **后续**：扩 `scripts/generate_fake_wmx.py` 支持显式每段时间戳 + railed 通道，
+  生成一个小的多段一致 study 入库，另写一套 CI 可跑的集成断言（合成结构，
+  非 realdata 专有值）。届时把集成覆盖补回 CI。
+- **来源**：2026-07-08 提取工具 Codex 原生 review（P1）
+
+### 22. 时间戳提取：is_railed 只判"全窗恒定"，部分饱和不拒绝
+- **位置**：`epycon/extraction.py` `is_railed`（`resolve_lead_sources` 的守卫之后）
+- **现象**：栏杆检测按设计（spec 第 7 节）定义为"窗口内源列**恒定**且命中满量程值"。
+  若电极窗口内间歇断连、或放大器对起搏/除颤伪迹**部分**样本饱和，则该列非恒定、
+  不判 railed，导联以 `status:ok` 返回，含 `±2³¹×res/1000` µV 尖峰。
+- **判定**：非缺陷，是 spec 明确的范围（栏杆=完全未连接=恒定满量程）；部分饱和
+  是另一现象。**若**未来要做数据质量把关，可加"窗口内出现任一满量程样本即标记/警告"。
+- **来源**：2026-07-08 提取工具原生 code-review（line-by-line finder）
+
+### 23. 时间戳提取：一致性校验为整簿硬断言，边界标注可能过严
+- **位置**：`epycon/extraction.py` `check_consistency`
+- **现象**：遍历 entries.log 全部条目，任一 fid 无对应段、或 epoch 不落其段半开
+  区间 `[ts, ts+dur)`，即在定位用户目标**之前**报错，阻断该 study 的所有提取。
+- **判定**：整簿硬断言是设计**故意**的 fail-closed（spec 第 5 节）。潜在过严点：
+  若真实 WorkMate 数据存在恰好落在段末 `ts+dur` 的录制结束标注，半开上界会误判；
+  realdata 12 条标注均在段起点（offset 0）通过，故暂无实证。若未来遇到末端标注
+  误报，再评估把上界放宽为闭区间或仅对目标所属段做校验。
+- **来源**：2026-07-08 提取工具原生 code-review（line-by-line + edge-case finder）
+
+### 19. 【调查】HDF5 物理单位疑为误标 mV（实为 µV）
+- **位置**：`epycon/iou/planters.py` `HDFPlanter._UNITS = 'mV'` + `units="mV"` 传参；
+  数值管线 = `int × resolution / 1000`
+- **证据**：`examples/data/realdata` 中 II 导峰峰 ≈ 1264。当作 µV 时 = 1.26 mV（生理正常）；
+  当作 mV 则为 1264 mV（大 100×，不可能）。resolution ≈ 78 nV/count（论文 2.1）
+- **影响**：WebUI 幅度刻度、任何以该 HDF5 units 字段为准的下游测量；差约 1000×
+- **验证方法**：与 WorkMate 屏幕同一导联的实际 mV 刻度对照
+- **关联**：2026-07-08 时间戳提取工具设计（`docs/superpowers/specs/`）默认输出改标 µV
+
+### 20. 【调查】头解出 128 通道定义 vs 数据仅 88 列 + 脏通道名
+- **位置**：`LogParser._readheader` 通道解析；`examples/data/realdata` 各 log
+- **现象**：`header.get_chnames()` 返回 128 项，但数据块仅 88 列；部分名字含 `\x00`
+  （如 `'8\x00 3-4'`、`'15\x00p'`）。单极表面导联（V6 等）与已配对双极映射正确、不受影响
+- **影响**：若以完整通道清单示人（如列全部可选导联）会含幽灵/脏名条目
+- **验证方法**：核对 x64 channels 块的有效性判据（`bchunk[:1]==b"\x00"` 跳过逻辑）
+  与 datablock 实际列数的对应关系
+
+### 21. 合并 HDF5 丢失段级墙钟时间戳
+- **位置**：`epycon/conversion.py` `_convert_merged`——只写首段 `Timestamp` + `datalog_ids`，
+  各段起点 epoch 与样本偏移未落盘；合并轴为"累计录制时间"（抹掉段间空档）
+- **影响**：合并文件无法反推"墙钟流逝时刻 → 样本"，故按时间戳提取工具只能作用于
+  原始 `.log` 分段。若要让工具支持合并 HDF5，需先补写每段 `(start_epoch, sample_offset)`
+- **关联**：2026-07-08 时间戳提取工具设计第 10 节
 
 ## 低优先级
 
