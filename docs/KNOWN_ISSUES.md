@@ -39,6 +39,25 @@
   平移/缩放复杂度从 O(原始数据) 降为 O(可视点数)；相邻窗口预取
 - **第 3 层（暂不建议）**：Vite 构建体系、FastAPI/WebSocket——当前瓶颈不在框架
 
+### 22. 时间戳提取：is_railed 只判"全窗恒定"，部分饱和不拒绝
+- **位置**：`epycon/extraction.py` `is_railed`（`resolve_lead_sources` 的守卫之后）
+- **现象**：栏杆检测按设计（spec 第 7 节）定义为"窗口内源列**恒定**且命中满量程值"。
+  若电极窗口内间歇断连、或放大器对起搏/除颤伪迹**部分**样本饱和，则该列非恒定、
+  不判 railed，导联以 `status:ok` 返回，含 `±2³¹×res/1000` µV 尖峰。
+- **判定**：非缺陷，是 spec 明确的范围（栏杆=完全未连接=恒定满量程）；部分饱和
+  是另一现象。**若**未来要做数据质量把关，可加"窗口内出现任一满量程样本即标记/警告"。
+- **来源**：2026-07-08 提取工具原生 code-review（line-by-line finder）
+
+### 23. 时间戳提取：一致性校验为整簿硬断言，边界标注可能过严
+- **位置**：`epycon/extraction.py` `check_consistency`
+- **现象**：遍历 entries.log 全部条目，任一 fid 无对应段、或 epoch 不落其段半开
+  区间 `[ts, ts+dur)`，即在定位用户目标**之前**报错，阻断该 study 的所有提取。
+- **判定**：整簿硬断言是设计**故意**的 fail-closed（spec 第 5 节）。潜在过严点：
+  若真实 WorkMate 数据存在恰好落在段末 `ts+dur` 的录制结束标注，半开上界会误判；
+  realdata 12 条标注均在段起点（offset 0）通过，故暂无实证。若未来遇到末端标注
+  误报，再评估把上界放宽为闭区间或仅对目标所属段做校验。
+- **来源**：2026-07-08 提取工具原生 code-review（line-by-line + edge-case finder）
+
 ### 19. 【调查】HDF5 物理单位疑为误标 mV（实为 µV）
 - **位置**：`epycon/iou/planters.py` `HDFPlanter._UNITS = 'mV'` + `units="mV"` 传参；
   数值管线 = `int × resolution / 1000`
