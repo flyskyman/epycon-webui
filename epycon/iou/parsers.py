@@ -352,15 +352,16 @@ class LogParser(abc.Iterator):
             if bchunk[:1] == b"\x00":
                 continue
 
+            # 在首个 \x00 截断：WorkMate 写 header 时名字缓冲区不清零，
+            # 终止符后可能残留上一个更长名字的尾字节（KNOWN_ISSUES #20）
+            raw_name = bchunk[self.diary.channels.name[0]:self.diary.channels.name[1]]
             ch_name = safe_string(
-                bchunk[self.diary.channels.name[0]:self.diary.channels.name[1]].decode("unicode-escape").strip("\x00")
+                raw_name.decode("unicode-escape").split("\x00", 1)[0]
             )
 
             # skip channel duplicates
             if ch_name in used_channels:
                 continue
-            else:
-                used_channels.add(ch_name)
 
             # source of data acquisition
             startbyte, endbyte = self.diary.channels.input_source
@@ -381,6 +382,10 @@ class LogParser(abc.Iterator):
                 _validate_reference(*references)
             except ValueError:
                 continue
+
+            # 名字只在行被接受后登记去重：被拒绝的残留行不得挤掉
+            # 后续真实同名通道
+            used_channels.add(ch_name)
 
             # retrieve and filter junction box pins; pin polarity = [positive, negative]
             startbyte, endbyte = self.diary.channels.jbox_pins
