@@ -5,9 +5,13 @@
 """
 import os
 
+import numpy as np
+
 from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
 from epycon.iou import LogParser, readentries
+
+RAIL_VALUES = frozenset({2147483647, -2147483648, -2147483649})
 
 
 class ExtractionError(ValueError):
@@ -87,3 +91,27 @@ def _window_samples(seg, offset_sec, before, after):
     missing_before = (clipped_start - start) / fs
     missing_after = (end - clipped_end) / fs
     return clipped_start, clipped_end, missing_before, missing_after
+
+
+def read_raw_window(seg, start_sample, end_sample, version):
+    """读段内 [start, end) 样本 → (N, num_channels) int64 原始整数。
+
+    LogParser 的 _process_chunk 总是 _twos_complement 后 ×resolution；
+    这里反除 resolution 无损还原（resolution 为整数、值均为其整数倍，
+    上界 (2^31+1)*78 ≈ 1.675e11 < 2^53，float64 精确）。int64 承载栏杆
+    值 -2147483649（越 int32 界）。"""
+    with LogParser(seg["path"], version=version, samplesize=1024,
+                   start=start_sample, end=end_sample) as parser:
+        scaled = parser.read()  # (N, num_channels)，已 ×resolution
+    res = seg["resolution"]
+    return np.rint(np.asarray(scaled, dtype=np.float64) / res).astype(np.int64)
+
+
+def is_railed(col):
+    """窗口内该列恒定且命中满量程栏杆值 → True（未连接电极）。"""
+    if col.size == 0:
+        return False
+    first = col[0]
+    if not np.all(col == first):
+        return False
+    return int(first) in RAIL_VALUES

@@ -92,3 +92,32 @@ class TestLocateAndWindow:
         s0, s1, mb, ma = _window_samples(seg, 0.658, 2.0, 2.0)
         assert s0 == 0
         assert mb == pytest.approx(1.342, abs=1e-6)
+
+
+class TestRawAndRail:
+    def test_raw_int_dtype_and_length(self):
+        from epycon.extraction import load_segments, read_raw_window
+        segs = load_segments(str(REAL), VER)
+        seg = [s for s in segs if s["id"] == "00000005"][0]
+        raw = read_raw_window(seg, 1316, 9316, VER)
+        assert raw.dtype == np.int64
+        assert raw.shape[0] == 8000
+
+    def test_v6_column_railed(self):
+        from epycon.extraction import load_segments, read_raw_window, is_railed
+        segs = load_segments(str(REAL), VER)
+        seg = [s for s in segs if s["id"] == "00000005"][0]
+        names = seg["header"].get_chnames()
+        v6_ref = seg["header"].channels.content[names.index("V6")].reference
+        raw = read_raw_window(seg, 1316, 9316, VER)
+        col = raw[:, v6_ref]
+        assert bool(np.all(col == -2147483649))
+        assert is_railed(col) is True
+
+    def test_connected_column_not_railed(self):
+        from epycon.extraction import load_segments, read_raw_window, is_railed
+        segs = load_segments(str(REAL), VER)
+        seg = [s for s in segs if s["id"] == "00000005"][0]
+        raw = read_raw_window(seg, 1316, 9316, VER)
+        # II 的 reference = 1（连接导联，真实信号）
+        assert is_railed(raw[:, 1]) is False
