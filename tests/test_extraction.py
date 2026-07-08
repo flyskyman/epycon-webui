@@ -369,3 +369,19 @@ class TestFailClosedGuardsPure:
         monkeypatch.setenv("EPYCON_CONFIG", str(ROOT / "no_such_config.json"))
         with pytest.raises(ExtractionError, match="workmate_version"):
             extract_window(self.NODIR, at_elapsed="1:07:15", leads=["II"])
+
+
+class TestMalformedInputPure:
+    """畸形输入文件的解析异常须转 ExtractionError（CLI 走结构化错误），用临时坏文件即可测。"""
+
+    def test_truncated_log_raises_extraction_error(self, tmp_path):
+        from epycon.extraction import load_segments
+        (tmp_path / "00000000.log").write_bytes(b"bad")
+        with pytest.raises(ExtractionError, match="无法解析"):
+            load_segments(str(tmp_path), VER)
+
+    def test_corrupt_entries_raises_extraction_error(self, tmp_path):
+        from epycon.extraction import check_consistency
+        (tmp_path / "entries.log").write_bytes(b"\x00" * 7)  # 长度非法
+        with pytest.raises(ExtractionError, match="无法解析"):
+            check_consistency(str(tmp_path), [], VER)

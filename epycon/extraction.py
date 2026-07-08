@@ -6,8 +6,13 @@
 import os
 import json
 import math
+import struct
 
 import numpy as np
+
+# 底层解析器在畸形输入上抛的预期异常——统一转 ExtractionError 走结构化错误，
+# 但不含裸 Exception，避免吞掉真正的编程 bug
+_PARSE_ERRORS = (struct.error, ValueError, OSError)
 
 from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
@@ -42,9 +47,12 @@ def load_segments(study_dir, version):
     """枚举目录 .log，读每段头 → 按 ts 升序的段列表。零点 = segs[0]['ts']。"""
     segs = []
     for path, seg_id in list_datalogs(study_dir):
-        with LogParser(path, version=version, samplesize=1024) as parser:
-            header = parser.get_header()
-            ns = parser.num_samples
+        try:
+            with LogParser(path, version=version, samplesize=1024) as parser:
+                header = parser.get_header()
+                ns = parser.num_samples
+        except _PARSE_ERRORS as e:
+            raise ExtractionError(f"无法解析 .log 段 {seg_id}：{e}")
         fs = header.amp.sampling_freq
         resolution = header.amp.resolution
         # fail-closed：非法头（fs/resolution 为 0）必须报错，不能静默产出 dur=0
@@ -72,7 +80,10 @@ def check_consistency(study_dir, segments, version):
     entries_path = os.path.join(study_dir, ENTRIES_FILENAME)
     if not os.path.exists(entries_path):
         raise ExtractionError(f"缺少 {ENTRIES_FILENAME}，无法校验一致性: {study_dir}")
-    entries = readentries(f_path=entries_path, version=version)
+    try:
+        entries = readentries(f_path=entries_path, version=version)
+    except _PARSE_ERRORS as e:
+        raise ExtractionError(f"无法解析 {ENTRIES_FILENAME}：{e}")
     by_id = {s["id"]: s for s in segments}
     for entry in entries:
         seg = by_id.get(str(entry.fid))
