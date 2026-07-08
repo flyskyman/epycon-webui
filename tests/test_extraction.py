@@ -43,3 +43,22 @@ class TestLoadSegments:
         assert s0["ts"] == pytest.approx(1764297784.403, abs=1e-3)
         assert s0["ns"] > 20000
         assert s0["dur"] == pytest.approx(s0["ns"] / 2000)
+
+
+class TestConsistency:
+    def test_realdata_passes(self):
+        from epycon.extraction import load_segments, check_consistency
+        segs = load_segments(str(REAL), VER)
+        entries = check_consistency(str(REAL), segs, VER)
+        assert len(entries) == 12
+
+    def test_study01_fails(self):
+        from epycon.extraction import load_segments, check_consistency
+        segs = load_segments(str(STUDY01), "4.3.2")
+        with pytest.raises(ExtractionError, match="00000001"):
+            check_consistency(str(STUDY01), segs, "4.3.2")
+
+    def test_missing_entries_raises(self, tmp_path):
+        from epycon.extraction import check_consistency
+        with pytest.raises(ExtractionError, match="entries"):
+            check_consistency(str(tmp_path), [], VER)

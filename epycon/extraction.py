@@ -3,8 +3,11 @@
 设计文档：docs/superpowers/specs/2026-07-08-timestamp-lead-extraction-design.md
 全程 epoch 纯相减、零时区；段归属半开 [ts, ts+dur)；fail-closed。
 """
+import os
+
+from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
-from epycon.iou import LogParser
+from epycon.iou import LogParser, readentries
 
 
 class ExtractionError(ValueError):
@@ -43,3 +46,23 @@ def load_segments(study_dir, version):
         })
     segs.sort(key=lambda s: s["ts"])
     return segs
+
+
+def check_consistency(study_dir, segments, version):
+    """fail-closed 校验：entries.log 必需；每条 entry 的 fid 对上段、
+    epoch 落在该段半开区间。返回 entries。任一违背抛 ExtractionError。"""
+    entries_path = os.path.join(study_dir, ENTRIES_FILENAME)
+    if not os.path.exists(entries_path):
+        raise ExtractionError(f"缺少 {ENTRIES_FILENAME}，无法校验一致性: {study_dir}")
+    entries = readentries(f_path=entries_path, version=version)
+    by_id = {s["id"]: s for s in segments}
+    for entry in entries:
+        seg = by_id.get(str(entry.fid))
+        if seg is None:
+            raise ExtractionError(f"entry fid={entry.fid} 无对应 .log 段")
+        ts = float(entry.timestamp)
+        if not (seg["ts"] <= ts < seg["ts"] + seg["dur"]):
+            raise ExtractionError(
+                f"entry fid={entry.fid} epoch={ts} 落在段 {seg['id']} 区间 "
+                f"[{seg['ts']}, {seg['ts'] + seg['dur']}) 之外")
+    return entries
