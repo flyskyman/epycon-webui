@@ -11,7 +11,7 @@ import numpy as np
 from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
 from epycon.core.helpers import get_channel_mappings
-from epycon.iou import LogParser, readentries
+from epycon.iou import LogParser, mount_channels, readentries
 
 RAIL_VALUES = frozenset({2147483647, -2147483648, -2147483649})
 
@@ -40,14 +40,20 @@ def load_segments(study_dir, version):
             header = parser.get_header()
             ns = parser.num_samples
         fs = header.amp.sampling_freq
+        resolution = header.amp.resolution
+        # fail-closed：非法头（fs/resolution 为 0）必须报错，不能静默产出 dur=0
+        # 隐藏该段、或在 read_raw_window 里除零出 NaN
+        if not fs or not resolution:
+            raise ExtractionError(
+                f"段 {seg_id} 头非法：sampling_freq={fs}, resolution={resolution}")
         segs.append({
             "id": seg_id,
             "path": path,
             "ts": float(header.timestamp),
             "fs": fs,
             "ns": ns,
-            "dur": ns / fs if fs else 0.0,
-            "resolution": header.amp.resolution,
+            "dur": ns / fs,
+            "resolution": resolution,
             "header": header,
         })
     segs.sort(key=lambda s: s["ts"])
@@ -111,8 +117,6 @@ def read_raw_window(seg, start_sample, end_sample, version):
 
 def is_railed(col):
     """窗口内该列恒定且命中满量程栏杆值 → True（未连接电极）。"""
-    if col.size == 0:
-        return False
     first = col[0]
     if not np.all(col == first):
         return False
@@ -121,7 +125,10 @@ def is_railed(col):
 
 def resolve_lead_sources(header, requested, raw_unipolar):
     """导联名 → 源通道 reference 元组。computed（默认）自动双极；
-    original（--raw-unipolar）出单极。名字精确匹配，缺失即报错。"""
+    original（--raw-unipolar）出单极。名字精确匹配，缺失即报错。
+    fail-closed：源参考必须是落在 [0, num_channels) 的有效列索引——
+    inactive 导联的 None、或脏 header 的越界索引都拒绝，避免 numpy
+    把 None 当 newaxis、或越界索引抛非 ExtractionError 的 IndexError。"""
     cfg = {"data": {
         "leads": "original" if raw_unipolar else "computed",
         "custom_channels": {},
@@ -132,23 +139,36 @@ def resolve_lead_sources(header, requested, raw_unipolar):
         if name not in mapping:
             raise ExtractionError(
                 f"导联 {name!r} 不在通道表；可用: {sorted(mapping)}")
-        out.append((name, mapping[name]))
+        cols = mapping[name]
+        for col in cols:
+            if col is None or not (0 <= col < header.num_channels):
+                raise ExtractionError(
+                    f"导联 {name!r} 源电极参考无效（{col}），本次未有效记录")
+        out.append((name, cols))
     return out
 
 
 def _lead_signal(raw_int, sources):
-    """单源直取；双源 source[0]-source[1]（= u- − u+，与 _mount_channels 一致）。"""
-    if len(sources) == 1:
-        return raw_int[:, sources[0]]
-    return raw_int[:, sources[0]] - raw_int[:, sources[1]]
+    """单源直取；双源 u- − u+。委托已导出的 mount_channels，保持双极合成
+    规则与 conversion 单一来源、不漂移（sources 已是有效列索引，见
+    resolve_lead_sources 的守卫）。"""
+    return mount_channels(raw_int, {"_": sources})[:, 0]
 
 
 def _default_version():
+    """从 config 读默认 workmate_version。任何读取/解析失败都转成
+    ExtractionError，使不带 --version 的常见调用仍走 CLI 的结构化错误路径，
+    而非漏出 FileNotFoundError/KeyError/JSONDecodeError 变 traceback。"""
     cfg_path = os.environ.get(
         "EPYCON_CONFIG",
         os.path.join(os.path.dirname(__file__), "config", "config.json"))
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        return json.load(f)["global_settings"]["workmate_version"]
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            return json.load(f)["global_settings"]["workmate_version"]
+    except (OSError, ValueError, KeyError) as e:
+        raise ExtractionError(
+            f"无法从 config 读取默认 workmate_version（{cfg_path}）：{e}；"
+            f"请显式传 --version")
 
 
 def _gap_message(segments, target_epoch, zero):
@@ -167,14 +187,18 @@ def _gap_message(segments, target_epoch, zero):
 
 def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
                    window=2.0, before=None, after=None, raw_unipolar=False,
-                   raw_counts=False, units="uV", version=None):
-    """按流逝时刻/epoch 提取指定导联 ±窗口原始波形。见设计文档第 8 节。"""
+                   raw_counts=False, version=None):
+    """按流逝时刻/epoch 提取指定导联 ±窗口原始波形。见设计文档第 8 节。
+    非 raw_counts 时物理值固定为 µV（= raw_int × resolution / 1000）。"""
     if version is None:
         version = _default_version()
     if not leads:
         raise ExtractionError("须提供至少一个导联名")
     before = window if before is None else before
     after = window if after is None else after
+    if before < 0 or after < 0:
+        raise ExtractionError(
+            f"窗口 before/after 不可为负（before={before}, after={after}）")
 
     segments = load_segments(study_dir, version)
     if not segments:
@@ -224,7 +248,7 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
         "log": seg["id"],
         "version": version,
         "fs": fs,
-        "units": "counts" if raw_counts else units,
+        "units": "counts" if raw_counts else "uV",
         "resolution_nV": res,
         "target": {"elapsed": at_elapsed, "epoch": target,
                    "offset_in_seg_s": offset},

@@ -239,3 +239,39 @@ class TestExtractWindow:
         r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"])
         assert r["version"] == "4.3.2"
         assert r["log"] == "00000005"
+
+    def test_negative_window_raises(self):
+        from epycon.extraction import extract_window
+        # 负 before/after 会造出不含目标的窗口 → 必须报错，不可静默返回
+        with pytest.raises(ExtractionError, match="不可为负"):
+            extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"],
+                           before=-1.0, after=3.0, version=VER)
+
+    def test_bad_default_config_raises_extraction_error(self, monkeypatch):
+        from epycon.extraction import extract_window
+        # 不带 version + config 不可读 → 转成 ExtractionError（而非漏出 FileNotFoundError）
+        monkeypatch.setenv("EPYCON_CONFIG", str(REAL / "does_not_exist.json"))
+        with pytest.raises(ExtractionError, match="workmate_version"):
+            extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"])
+
+
+class TestLeadSourceValidation:
+    def _fake_header(self, name, reference, num_channels=88):
+        from types import SimpleNamespace
+        from epycon.core._dataclasses import Channel, Channels
+        channels = Channels([Channel(name, reference, "ECG", ())], {name: (0,)})
+        return SimpleNamespace(channels=channels, num_channels=num_channels)
+
+    def test_none_reference_rejected(self):
+        # inactive 导联（reference=None）必须拒绝，避免 raw_int[:, None] 变 newaxis
+        from epycon.extraction import resolve_lead_sources
+        header = self._fake_header("BAD", None)
+        with pytest.raises(ExtractionError, match="无效"):
+            resolve_lead_sources(header, ["BAD"], False)
+
+    def test_out_of_range_reference_rejected(self):
+        # 越界 reference（脏 header）必须拒绝，避免 IndexError 逃逸
+        from epycon.extraction import resolve_lead_sources
+        header = self._fake_header("HI", 999, num_channels=88)
+        with pytest.raises(ExtractionError, match="无效"):
+            resolve_lead_sources(header, ["HI"], False)

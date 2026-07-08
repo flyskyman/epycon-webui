@@ -36,10 +36,12 @@ def _meta_without_samples(result):
 
 
 def _save_npz(path, result):
+    """写 .npz（每个 ok 导联一个数组 + _meta），返回同一份 meta 供 stdout 复用。"""
     arrays = {ld["name"]: np.asarray(ld["samples"])
               for ld in result["leads"] if ld["status"] == "ok"}
     meta = _meta_without_samples(result)
     np.savez(path, _meta=json.dumps(meta, ensure_ascii=False), **arrays)
+    return meta
 
 
 def main(argv=None):
@@ -55,8 +57,7 @@ def main(argv=None):
         print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
         return 2
     if args.out:
-        _save_npz(args.out, result)
-        meta = _meta_without_samples(result)
+        meta = _save_npz(args.out, result)
         meta["out"] = args.out
         print(json.dumps(meta, ensure_ascii=False))
     else:
