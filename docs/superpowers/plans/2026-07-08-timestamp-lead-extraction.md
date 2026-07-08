@@ -568,7 +568,7 @@ def _lead_signal(raw_int, sources):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_extraction.py::TestLeadResolve -v`
-Expected: PASS (4 passed)
+Expected: PASS (5 passed)
 
 - [ ] **Step 5: Commit**
 
@@ -656,9 +656,11 @@ class TestExtractWindow:
             extract_window(str(REAL), at_elapsed="0:31:00",
                            leads=["II"], version=VER)
 
-    def test_default_version_from_config(self):
+    def test_default_version_from_config(self, monkeypatch):
         from epycon.extraction import extract_window
-        # 不传 version → _default_version 取 config 的 4.3.2；realdata 正是该版本
+        # 不传 version → _default_version 取 config 的 4.3.2；realdata 正是该版本。
+        # 清掉 EPYCON_CONFIG，确保落到包内默认 config（否则用户环境可能指向别的 config）。
+        monkeypatch.delenv("EPYCON_CONFIG", raising=False)
         r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["II"])
         assert r["version"] == "4.3.2"
         assert r["log"] == "00000005"
@@ -770,7 +772,7 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_extraction.py::TestExtractWindow -v`
-Expected: PASS (4 passed)
+Expected: PASS (8 passed)
 
 - [ ] **Step 5: Commit**
 
