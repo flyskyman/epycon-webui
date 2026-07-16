@@ -9,13 +9,6 @@
 
 ## 中优先级
 
-### 16. 【调查】双极导联极性方向
-- **位置**：`Channels.computed_mappings` 返回 (u−, u+) 反序 + `_mount_channels` 做 source[0]−source[1]
-  → 计算导联 = u− − u+，与"正极减负极"惯例相反（仅影响 `leads: "computed"` 配置）
-- **上游一致**：与 fork 起点逐字相同，论文作者用 12 例动物数据验证过——可能 WorkMate
-  的 reference 语义本就如此，也可能是两个反号恰好抵消的隐性约定
-- **验证方法**：用真实数据转换一个双极导联，与 WorkMate 屏幕显示的同一导联波形对照极性
-
 ### 14. WebUI 性能优化路线图（剩余部分）
 - **已完成（2026-06-10）**：前端降采样管线修复（LTTB 内联实现）、downsample 因子契约、
   滤波向量化 + 系数缓存、time 数组改前端重建、flask-compress gzip
@@ -56,6 +49,72 @@
 ---
 
 ## 已解决
+
+### 29. `_twos_complement` 边界 off-by-one，正向满量程被翻成越界值（2026-07-17，已修复）
+- **位置**：`epycon/iou/parsers.py` `_twos_complement`
+- **缺陷**：
+  ```python
+  limit = np.int64(val // 2 - 1)      # = 2³¹-1 —— 这是最大正数，不是负数
+  darray[darray >= limit] -= val      # 把它也减了 2³²
+  ```
+  正确边界是 `val // 2`（2³¹）：`[0, 2³¹-1]` 为正，`[2³¹, 2³²-1]` 才是负数。
+  原实现把 **+2147483647（int32 最大正数 = 正向满量程）** 翻成 **-2147483649**——
+  一个**超出 int32 值域**的数
+- **影响**：未连接电极停在正向满量程，故**每个 railed 通道的值都是错的**，且解析产物
+  出现不可能的 int32 值。实测修复前 realdata `raw.min() = -2147483649`（伪造），
+  修复后 `= -204288`（真实信号）
+- **根因辨析**：`datablock.fmt = '<i4'`，numpy 读出来**已是有符号 int32**，
+  `_twos_complement` 对当前所有 schema 本就该是恒等变换——修正边界后它才真正无副作用
+- **症状曾被将就而非修复（教训）**：`extraction.RAIL_VALUES` 一度写作
+  `{2147483647, -2147483648, -2147483649}`——把那个不可能的值收进去，好让 `is_railed`
+  认得 bug 的产物；两个测试（`test_railed_full_scale_constant`、`test_v6_column_railed`）
+  也把 `-2147483649` 写死进断言，**等于用测试把 bug 钉住**。根因修好后该值不可达，
+  已从 RAIL_VALUES 移除、测试改为断言真值
+- **测试**：`tests/test_parsers_extended.py::TestTwosComplementBoundary`（最大正数不得
+  被翻转 / 有符号输入须恒等 / 任何值不得逃出 int32 值域，TDD 先红后绿）；
+  `test_extraction.py::test_impossible_int32_value_is_not_a_rail`
+- **验证**：realdata 与真实临床数据（`LOG_DHR20485743_0000007c`）双份实测——
+  越界值消失，V6 railed 值由 -2147483649 归位为 2147483647，`is_railed` 仍正确识别
+- **发现经过**：用户质疑「导出菜单写 2 bytes、epycon 却给 int64 且 max|x|≈2³²」时顺藤查出。
+  该质疑另牵出一条**假标定**：外部分析会话在起搏数据上量 QRS 峰峰（±15ms 屏蔽不足以
+  避开极化尾巴，LBB 更是放电电极本身），得数比生理值大 ~100×，遂引入 `÷100` 调和——
+  但 100 不是任何量纲台阶。反证：同一份数据的干净段 `00000003.log`，
+  I/II/III/aVR/V1/V6 ×78nV = 0.95–2.22 mV **全部正常、无需任何因子**。
+  「五路独立佐证」亦不成立：5 个通道同一方法同一份污染数据，一致性来自共享偏差
+
+### 16. 双极导联极性方向（2026-07-16，调查完成，无缺陷）
+- **原疑点**：`computed_mappings` 返回 (u−, u+) 反序 + `_mount_channels` 做
+  `source[0] − source[1]` → 计算导联 = u− − u+，看着与"正极减负极"惯例相反
+- **结论**：**代码是对的，错的是标签**。原条目猜的"两个反号恰好抵消"成立，
+  但不是"恰好"——`references[0]` 本来就是导联名里的**第二个**电极
+- **判定依据（realdata 实测，不需要 WorkMate 屏幕对照）**：单极通道的名字就是电极编号，
+  且 `name=n → pin=n-1 → ref=n+1` 严格单调，故双极端点落在哪根电极上可直接对号：
+
+  | 双极导联 | u− 落在单极 | u+ 落在单极 |
+  |---|---|---|
+  | PVD | `'21'` | `'22'` |
+  | PV 3-4 | `'23'` | `'24'` |
+  | PV 5-6 | `'25'` | `'26'` |
+  | PV 7-8 | `'27'` | `'28'` |
+  | PV 9-10 | `'29'` | `'30'` |
+
+  PV 是一根 10 电极、全局编号 21–30 的连续块（局部 *n* → 全局 *n*+20，算术完全吻合）。
+  **每一对里 u− 落在名字的第一个电极、u+ 落在第二个**。另有 `CS 7-8` 的 u+ 直接落在名为
+  `'8'` 的单极通道上——不同导管、零偏移，独立印证同一结论
+- **推导**：
+  ```
+  惯例   "PV 3-4" = E3 − E4        （远端减近端 = 第一个减第二个）
+  实际   E3 = 标签叫 "u−" 的那根    ← 标签与物理极性相反
+         E4 = 标签叫 "u+" 的那根
+  代码   computed_mappings → (ref[1], ref[0]) = (E3列, E4列)
+         _mount_channels  → source[0] − source[1] = E3 − E4   ✓ 与惯例一致
+  ```
+- **真正的问题**：`parsers.py` `_readheader` 把 `references[0]` 标成 `"u+"`，而按 EP 惯例
+  它是被减数（负输入）。**名不副实，数学没错**
+- **不改名的理由**：这些名字会进 `channels.content`（如 `"u+PV 3-4"`）并影响输出通道名，
+  改名是用户可见的破坏性变更，收益仅"名字好听"。留此条目记录该误称即可
+- **来源**：2026-07-16 会话（#19 定案后顺势复查——上次误把 #19 判为"需 WorkMate 对照"，
+  故本次先验数据再下结论）
 
 ### 25/26/27/28. 单位契约缺失（2026-07-16，一次性收口）
 四条**不是四个独立缺陷，是同一个根因的分身**：全仓库对"物理单位"从来没有契约——
@@ -151,17 +210,41 @@ GeneratedBy 泛化推定""unknown 退化为 1.0"等多个半吊子方案；nativ
   原条目"验证方法：与 WorkMate 屏幕刻度对照"是多余的
 - **量纲链（每环有出处）**：
   ```
-  raw_int (LSb) × 78          论文 315_CinCFinalPDF「a resolution of 78 nV/LSb」；
-                              realdata 头实测 resolution = 78
+  raw_int (LSb) × 78          ★ claris.exe / signaldoc.cpp: "%s=%d nV/LSB"
+                                （产方确证，见下）；论文 315_CinCFinalPDF
+                                「a resolution of 78 nV/LSb」；realdata 头实测 resolution = 78
     = nV
     ÷ 1000 (factor)  = µV     ← 管线停在这里，标签却写 mV  ❌
+                                （µV 亦是 WorkMate 自家导出约定，见下）
     ÷ 1000           = mV     ← 真正到 mV 还差这一步
   ```
   即 raw → mV 的正确系数是 `× 78e-6`
-- **四条独立证据**：(1) 论文 nV/LSb 量纲；(2) log 头 resolution=78；(3) realdata 肢导峰峰
-  I/II/III = 1272/2096/2030，当 µV 解 = 1.3/2.1/2.0 mV 生理正常，当 mV 解则 2 伏不可能；
-  (4) **用户 WorkMate 界面 amp = 1.0 mV/cm 下波形显示正常**——若数据真是 mV，II 导需画
-  20955 mm ≈ 21 米，屏上只会是冲出边界的直线。日常使用经验本身即对照
+- **★ `resolution` 字段单位的产方确证（2026-07-16 补充，证据等级升级）**：
+  - 装机目录 `C:\Software\EP-WorkMate\` 的官方文档**帮不上忙**：`Documentation\` 是空目录；
+    `Documents\` 只有 DICOM 一致性声明（把 EP Data 存成 **Raw Data**，非 Waveform IOD，
+    故无 Channel Sensitivity）与许可证披露。公开渠道（产品手册/FDA 510(k)/GUDID）
+    亦查不到该数字
+  - **答案在 `claris.exe` 本体**：`signaldoc.cpp`（写这些文件的模块）内有并排的格式串
+    ```
+    %s\Session %d Information.TXT
+    %s=%d Hz            ← 对应头字段 sampling_freq = 2000
+    %s=%d nV/LSB        ← 对应头字段 resolution   = 78
+    ```
+    另有 `Amplifier Communications: Amp software version %4.4s - resolution %d`。
+    即**产生该文件的程序自己**把 resolution 标注为 nV/LSB——比论文（逆向工程者的二手源）
+    高一个证据等级。此前"字段名叫 resolution + 值恰为 78"的推断，至此有产方背书
+  - 未找到 `Session N Information.TXT` 实物（该文件仅在导出/存档时生成，本机未留），
+    故拿不到字面 `Resolution=78 nV/LSB`；但它只会是第 5 条佐证，前 4 条已交叉印证
+- **五条独立证据**：(1) **`claris.exe` `signaldoc.cpp` 的 `nV/LSB` 格式串（产方确证）**；
+  (2) 论文 nV/LSb 量纲（二手佐证）+ log 头 resolution=78；(3) realdata 肢导峰峰
+  I/II/III = 1272/2096/2030，当 µV 解 = 1.3/2.1/2.0 mV 生理正常，当 mV 解则 2 伏不可能——
+  该条**不依赖字段单位**：II 导原始计数 26866 LSb 配生理 1–2.5 mV 反推 resolution 必在
+  37–93 nV/LSb，独立把 µV/pV 排除数个数量级；(4) **用户 WorkMate 界面 amp = 1.0 mV/cm 下
+  波形显示正常**——若数据真是 mV，II 导需画 20955 mm ≈ 21 米，屏上只会是冲出边界的直线，
+  日常使用经验本身即对照；(5) **WorkMate 自家导出约定亦为 µV**——`Export Types` 菜单
+  （Message.9 id 707）列有 `Binary Integer (2 bytes, uV/LSB)`。该项是**导出格式**单位、
+  与头字段是两码事故不冲突，但恰好印证：epycon 产出 `raw×78nV/1000 = µV` 与厂商同一约定，
+  本次把标签改为 `uV` 是与厂商对齐而非另立
 - **本次修复范围 = 仅"epycon 写出的标签"（写入侧）**：`conversion.py`(×2)、
   `planters.py._UNITS` 标注 mV → uV。新产出的 HDF5 自此在 Info 第三字段如实声明 uV。
   **读取侧（`api_ecg`）与前端渲染本次零改动**——两次尝试均被 Codex 对抗审查驳回，
