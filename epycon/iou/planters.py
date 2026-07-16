@@ -291,7 +291,7 @@ class HDFPlanter(DatalogPlanter):
     _DATACACHE_NAME: str = 'RAW'
     _LEFT_INDEX: int = 0
     _RIGHT_INDEX: int = 100
-    _UNITS: str = 'mV'
+    _UNITS: str = 'uV'
     _PARSER: str = 'Epycon'
 
     cfg: SignalPlantDefaults

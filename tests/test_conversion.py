@@ -97,6 +97,20 @@ class TestConvertStudy:
         with h5py.File(tmp_path / "00000000.h5", "r") as f:
             assert "Marks" not in f  # fid 都指向 00000001
 
+    @pytest.mark.parametrize("merge", [True, False])
+    def test_units_label_is_uv(self, tmp_path, entries, merge):
+        """输出单位必须标 uV：量纲链 raw × resolution(78 nV/LSb) / factor(1000) = uV。
+
+        曾误标 mV（KNOWN_ISSUES #19），差 1000×。
+        """
+        cfg = _base_cfg(STUDY.parent, tmp_path, merge=merge)
+        convert_study(str(STUDY), "study01", str(tmp_path), cfg, entries)
+        out = tmp_path / ("study01_merged.h5" if merge else "00000000.h5")
+        with h5py.File(out, "r") as f:
+            units = {row["Units"].decode() if isinstance(row["Units"], bytes)
+                     else row["Units"] for row in f["Info"][:]}
+        assert units == {"uV"}
+
 
 # ========================= GUI 路径等价性 =========================
 

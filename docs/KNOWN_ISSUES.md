@@ -38,21 +38,117 @@
   非 realdata 专有值）。届时把集成覆盖补回 CI。
 - **来源**：2026-07-08 提取工具 Codex 原生 review（P1）
 
-### 19. 【调查】HDF5 物理单位疑为误标 mV（实为 µV）
-- **位置**：`epycon/iou/planters.py` `HDFPlanter._UNITS = 'mV'` + `units="mV"` 传参；
-  数值管线 = `int × resolution / 1000`
-- **证据**：`examples/data/realdata` 中 II 导峰峰 ≈ 1264。当作 µV 时 = 1.26 mV（生理正常）；
-  当作 mV 则为 1264 mV（大 100×，不可能）。resolution ≈ 78 nV/count（论文 2.1）
-- **影响**：WebUI 幅度刻度、任何以该 HDF5 units 字段为准的下游测量；差约 1000×
-- **验证方法**：与 WorkMate 屏幕同一导联的实际 mV 刻度对照
-- **关联**：2026-07-08 时间戳提取工具设计（`docs/superpowers/specs/`）默认输出改标 µV
-
 ### 21. 合并 HDF5 丢失段级墙钟时间戳
 - **位置**：`epycon/conversion.py` `_convert_merged`——只写首段 `Timestamp` + `datalog_ids`，
   各段起点 epoch 与样本偏移未落盘；合并轴为"累计录制时间"（抹掉段间空档）
 - **影响**：合并文件无法反推"墙钟流逝时刻 → 样本"，故按时间戳提取工具只能作用于
   原始 `.log` 分段。若要让工具支持合并 HDF5，需先补写每段 `(start_epoch, sample_offset)`
 - **关联**：2026-07-08 时间戳提取工具设计第 10 节
+
+### 25. 前端单位解析：h5wasm 直读路径无 units，渲染靠幅度猜
+- **位置**：`ui/ecg_viewer.html` `extractH5Metadata`（~1787，前端直读构建的 metadata **无
+  units 字段**）+ 物理定标段（~2721 `dataRange > 50 ? 0.001 : 1.0`）
+- **现状**：小于 2GB 的 h5 默认走 h5wasm 前端直读（`MAX_LOCAL_SIZE_MB = 2048`，~1669），
+  **绕过后端 `_extract_metadata`**，故 `state.metadata.units` 在该路径恒为 undefined，
+  Y 轴标题显示 `Amplitude (undefined)`；渲染缩放只能靠"幅度 >50 即当 µV"的启发式
+- **缺陷 A（stacked 分支，~2726-2741）**：启发式对常规导联正确，但**全部可见通道幅度
+  <50 µV 时（低振幅心内电图、近平线道）会被猜成 mV、不缩放、当场放大 1000×**
+- **缺陷 B（overlay 分支，~2836 起）**：`unitScaleFactor` **只在 stacked 分支应用**
+  （全文件仅 2722 定义 / 2724 日志 / 2740-2741 使用，后者在 `if (displayMode === 'stacked')`
+  内）；overlay 分支直接 `chData = visibleData.map(row => row[i])` 画原始数值、
+  **完全不做单位换算**。轴标题 ~3003 `Amplitude (${state.metadata.units})`。
+  **两条路径的用户可见结果不同，修复验收须分别覆盖**：
+  - **h5wasm 直读**（本条主路径，<2GB 默认）：原始 µV 数值 + 轴标题 `Amplitude (undefined)`
+  - **后端路径**（>2GB 或 h5wasm 不可用）：原始 µV 数值 + 轴标题 `Amplitude (mV)`
+    ——即 realdata II 导 2096 µV 显示为「2096 mV」，**该示例仅出现在后端路径**（见 #26）
+  - 两条路径共同点：overlay 的单位错误**不是标题瑕疵，是数值量纲错误**
+- **踩过的坑**：2026-07-16 曾把定标段直接改为读 `metadata.units`——因该路径无 units 而
+  **引入主路径 1000× 回归**，已还原。修复必须**先补齐 units 供给，再改缩放依据**
+- **建议**：两个 metadata 构建器（前端 `extractH5Metadata` / 后端 `_extract_metadata`）
+  都需补齐 units 供给，解析规则见 #26（**注意 `GeneratedBy == 'Epycon'` 不足以推定 uV**，
+  理由见 #26）；无可信声明时应拒绝物理定标或要求用户选择，不要猜
+- **来源**：2026-07-16 #19 修复的 Codex 对抗审查（high）
+
+### 26. `_extract_metadata` 单位解析不可靠：不读文件声明、默认值靠猜
+- **位置**：`epycon/api_ecg.py` `_extract_metadata`（~388-482）
+- **三个问题**：
+  1. **root attrs 循环（~410-441）不识别 units**，只认 fs/study_id/log_id/patient/
+     record_date/generated_by；units 仅在 **Data 数据集属性**循环（~478）被识别。
+     实测：root attr units=mV → 返回默认值；Data attr units=mV → 返回 'mV'
+  2. **不读 Info 数据集的 units**（epycon 恰恰把 units 写在 Info 第三字段），故 epycon 文件的
+     单位声明从不被读取，`metadata['units']` **恒取默认值 `'mV'`**——而 #19 修复后 epycon
+     实际输出为 µV，即 API 对自家文件报的单位是错的
+  3. **默认值不区分来源**：无论 epycon 还是外来文件都落同一个硬编码默认值，纯属猜测
+- **实际影响面（分渲染模式，勿一概而论）**：
+  - **stacked**：不读 `metadata.units`，靠 `dataRange > 50` 启发式缩放（见 #25 缺陷 A），
+    故波形缩放不受本条影响
+  - **overlay**：既不做单位换算（见 #25 缺陷 B），又用本条的默认值标 Y 轴 →
+    **epycon 文件（实为 µV）在 overlay 以 mV 轴标题展示 µV 数值，物理幅度差 1000×**。
+    这是内置前端的**真实数值缺陷**，不是标题瑕疵
+  - **其他信任该 metadata API 的下游消费者**：同样面临 1000× 缩放错误
+- **验收要求（供 #26 修复时对照）**：只修元数据标题不算修完——overlay 必须做单位感知换算
+  或明确按 µV 标注，否则数值单位错误依旧
+- **修复思路（勿只改默认值，也勿按 GeneratedBy 推定）**：
+  1. **读全部声明 + 冲突即 unknown，勿按优先级静默取一个**：root attr / Data attr / Info
+     三处都读，做大小写与 `µ`(U+00B5)/`μ`(U+03BC) 变体规范化；**一致才采信，冲突返回
+     ambiguous/unknown**。理由：`HDFPlanter` 允许调用方分别传任意 root `attributes` 与
+     逐通道 `units`，合法调用即可产出 `root units=mV` 与 `Info.Units=uV` 并存的文件；
+     按"优先级取第一个"会静默选中 mV、重新制造 1000× 误标
+  1b. **Info 支持逐通道混合单位**，单个标量 `metadata['units']` 表达不了——须保留逐通道
+     单位，禁止用单一标量覆盖；混合单位时消费方不得做统一物理定标
+  2. **`GeneratedBy == 'Epycon'` 不足以推定 uV**——`HDFPlanter` 无条件写
+     `attrs['GeneratedBy'] = 'Epycon'`（`planters.py` ~388），而 `units`/`factor` 是公开
+     kwargs（~319/321，可传任意值，float32 输入还会原样保留）。**调用方完全可以合法生成
+     "真实 mV 数据 + Info.Units=mV + GeneratedBy=Epycon" 的文件**；若强行按 GeneratedBy
+     判 uV，这类文件会被再次引入 1000× 误差。仅 `conversion.py` 走 factor=1000 这一事实
+     属调用点约定，不可上升为读取侧的推定规则
+  3. **#19 前的旧 epycon 文件（Info 标 mV、实为 µV）仅凭现有属性无法消歧**——正确做法是
+     给新版转换产物加**格式版本或量纲来源标记**（如 `EpyconFormatVersion` / `ResolutionSource`），
+     据此区分；旧文件返回 ambiguous/unknown，由消费方要求用户确认，**不要猜**
+- **踩过的坑**：2026-07-16 曾试图只把默认值 mV → uV 收尾——被 Codex 对抗审查驳回：那会让
+  以 root attr 声明 mV 的外来文件从"报 mV（对）"变成"报 uV（错）"，属拿外来文件的回归换
+  epycon 文件的正确。已还原，读取侧本次零改动
+- **来源**：2026-07-16 #19 修复的 Codex 对抗审查（high，两轮）
+
+### 27. 两个 CSV 导出入口均无单位声明（量纲各异）
+**入口 A：`epycon/conversion.py` 转换产物 —— 写出 nV，与 HDF5 差 1000×**
+- **位置**：`_convert_single`（~220-226）同一调用同时服务 `HDFPlanter` 与 `CSVPlanter`；
+  `CSVPlanter` **忽略 `factor` 与 `units`**（`planters.py` ~213-248）
+- **现状**：`LogParser` 已 ×resolution 得 nV，`HDFPlanter` 再 ÷factor(1000) 得 µV 并把 units
+  写进 Info；`CSVPlanter` 直接写 nV、表头无单位。实测输入 78000 LSb·nV → CSV 写出 `78000`
+  （nV），同数据 HDF5 为 `78` µV
+- **性质**：**先于 #19 存在**，非本次改动引入（改前 conversion 传的 `units="mV"` 同样被忽略）
+
+**入口 B：`ui/ecg_viewer.html` WebUI 导出 —— 写出 µV，表头无单位，且携带错误的 mV 声明**
+- **位置**：`exportCSV()`（~3521）表头仅 `时间(秒),<通道名>`（~3528），**无单位列**，
+  数值直接取自 `readDataFromH5wasm` 的结果；而后者返回的对象把 `units` **硬编码为 `'mV'`**
+  （~2640），实际 Data 数值在 #19 修复后为 µV
+- **性质**：与入口 A **相互独立**，量纲还不同（A=nV，B=µV），两处都无表头声明
+- **建议**：统一 CSV 单位契约——数值与声明必须同源。入口 B 应从已解析的元数据取 units、
+  删掉硬编码 `'mV'`，并在表头或伴随元数据写明单位；入口 A 或 ÷1000 输出 µV 并声明，
+  或明确声明输出 nV。补"同一输入下 CSV 与 HDF5 数值+单位一致性"测试，两个入口都要覆盖
+- **来源**：2026-07-16 #19 修复的 Codex 对抗审查（medium，入口 B 为第四轮补充）
+
+### 28. extraction 的 .npz 无法进入 WebUI：API 取到 `_meta` 当波形
+- **位置**：`epycon/cli/extract.py` `_save_npz`（`np.savez(actual, _meta=json.dumps(meta), **arrays)`
+  —— `_meta` 是首个 kwarg，故为首个成员）× `epycon/api_ecg.py` npz 分支（~754-757
+  `key = list(npz_file.keys())[0]; data = npz_file[key]` —— 无条件取**第一个成员**当数据）
+- **实证**（合成 npz，`_meta` + 导联 `II`）：
+  ```
+  NPZ 成员顺序 : ['_meta', 'II']
+  api_ecg 取到的 key: '_meta' | shape = () | dtype = <U54
+  => num_channels = 0 | num_samples = 0 | units = 'mV'
+  ```
+  取到的是 `_meta` 的 **0 维 JSON 字符串**而非波形；`get_data` 后续还会重复取到 `_meta`
+- **双重缺陷**：(1) 成员选择错误——即使成员顺序变化，也不该靠"取第一个"猜；
+  (2) `_extract_npy_metadata` 硬编码 `units='mV'`，**丢弃 `_meta` 里已有的显式
+  `uV`/`counts` 声明**（extraction 是仓库里唯一如实声明单位的产出方，声明却在此被扔掉）
+- **性质**：**先于 #19 存在**，非本次改动引入（本次未改 `extract.py`，`api_ecg.py` 零改动）。
+  即仓库公开支持的 extraction npz 产物无法可靠进入 WebUI
+- **建议**：npz 分支识别并解析 `_meta`、排除保留键、把命名导联数组组装成波形矩阵，
+  并采用 `_meta` 中的 `fs`/`units`/导联名（而非硬编码）；测试须把 `_save_npz` 的**真实产物**
+  送进 `open_local`/`upload`/`data` 端点做往返
+- **来源**：2026-07-16 #19 修复的 Codex 对抗审查（high，第五轮）
 
 ## 低优先级
 
@@ -65,6 +161,42 @@
 ---
 
 ## 已解决
+
+### 19. HDF5 物理单位误标 mV（实为 µV）（2026-07-16，已修复）
+- **结论**：误标属实，差 1000×。**无需 WorkMate 屏幕对照即可定论**——量纲链闭合可推导，
+  原条目"验证方法：与 WorkMate 屏幕刻度对照"是多余的
+- **量纲链（每环有出处）**：
+  ```
+  raw_int (LSb) × 78          论文 315_CinCFinalPDF「a resolution of 78 nV/LSb」；
+                              realdata 头实测 resolution = 78
+    = nV
+    ÷ 1000 (factor)  = µV     ← 管线停在这里，标签却写 mV  ❌
+    ÷ 1000           = mV     ← 真正到 mV 还差这一步
+  ```
+  即 raw → mV 的正确系数是 `× 78e-6`
+- **四条独立证据**：(1) 论文 nV/LSb 量纲；(2) log 头 resolution=78；(3) realdata 肢导峰峰
+  I/II/III = 1272/2096/2030，当 µV 解 = 1.3/2.1/2.0 mV 生理正常，当 mV 解则 2 伏不可能；
+  (4) **用户 WorkMate 界面 amp = 1.0 mV/cm 下波形显示正常**——若数据真是 mV，II 导需画
+  20955 mm ≈ 21 米，屏上只会是冲出边界的直线。日常使用经验本身即对照
+- **本次修复范围 = 仅"epycon 写出的标签"（写入侧）**：`conversion.py`(×2)、
+  `planters.py._UNITS` 标注 mV → uV。新产出的 HDF5 自此在 Info 第三字段如实声明 uV。
+  **读取侧（`api_ecg`）与前端渲染本次零改动**——两次尝试均被 Codex 对抗审查驳回，
+  分别另立 #25（前端）/#26（读取侧）/#27（CSV）
+- **units 在 HDF5 中的位置**：写在 **Info 数据集**第三字段（非 root attrs）。
+  读取侧不读 Info，故 API 报的单位仍是错的——这是 #26，不是本条
+- **测试**：`tests/test_conversion.py::TestConvertStudy::test_units_label_is_uv`
+  （merge/normal 双模式断言 Info.Units == uV）；已验证把标签改回 mV 时两用例即红。
+  `tests/test_api_ecg.py` 的 planter_h5 夹具同步改 uV（原标 mV 与其"真实格式"自述不符）
+- **端到端验证**：realdata 转换后 Info units = uV，II 导峰峰 2095.55 µV = 2.096 mV，
+  在 amp=1.0 mV/cm 下屏幕高度 21.0 mm（2.1 cm），标准 ECG 高度 ✓
+- **过程记录（三次错误论断，均由 Codex 对抗审查推翻，教训值得留档）**：
+  1. 曾称"旧 h5 会渲染放大、需重新生成"——错（读取侧恒取默认值，旧文件渲染不变）
+  2. 曾称"第三方文件带 root attr units 会覆盖默认值"——错，root attrs 循环根本不读 units；
+     实测 root units=mV 仍落默认值，只有 Data 数据集属性才覆盖
+  3. 曾把前端改为读 `metadata.units` 驱动缩放——**引入主路径 1000× 回归**：h5wasm 直读
+     （<2GB 的 h5 默认路径）的 `extractH5Metadata` 根本不产出 units 字段。已全部还原
+  - **共同教训**：三次都是"未直接验证真实调用路径就下断言"。量纲推导可以纯靠证据链闭合
+    （#19 结论本身经得起复核），但**代码行为必须实测**——尤其存在多入口分叉时
 
 ### 20. 头解出 128 通道定义 vs 数据仅 88 列 + 脏通道名（2026-07-08，已修复）
 - **调查结论（realdata 12 个 log 逐一实测）**：

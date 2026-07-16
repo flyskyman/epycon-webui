@@ -66,7 +66,7 @@ def planter_h5(tmp_path):
         column_names=CH_NAMES,
         sampling_freq=FS,
         factor=1000,
-        units="mV",
+        units="uV",
         attributes={"SubjectID": "P001", "StudyID": "study01"},
     ) as planter:
         planter.write(data)
