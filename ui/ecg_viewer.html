@@ -1796,7 +1796,10 @@
                 study_id: '',
                 log_id: '',
                 patient_name: '',
-                generated_by: ''
+                generated_by: '',
+                // 单位不设默认值——由声明解析得出，无声明/冲突则 unknown（见 Units 契约）
+                units: Units.UNKNOWN,
+                channel_units: []
             };
 
             // 读取属性
@@ -1816,6 +1819,7 @@
             }
 
             // 读取通道信息
+            const infoUnits = [];
             const infoNode = h5file.get('Info');
             if (infoNode) {
                 try {
@@ -1849,11 +1853,41 @@
                         metadata.channel_names.push(name);
                         metadata.channel_sources.push(source);
                     }
+                    // Info 第三字段是逐通道 Units（epycon 的单位声明就写在这里）
+                    for (const row of infoData) {
+                        // 同样交原始值给 Units（不过 decodeAttr）——解码/摊平由契约统一负责
+                        let u = null;
+                        if (Array.isArray(row)) u = row[2];
+                        else if (typeof row === 'object' && row !== null) u = row.units ?? row.Units ?? row[2];
+                        infoUnits.push(u ?? null);
+                    }
                     console.log('Extracted channel_names:', metadata.channel_names);
                 } catch (e) {
                     console.warn('Info dataset read error:', e);
                 }
             }
+
+            // 解析物理单位：root attr / Data attr / Info 三处一起看，冲突即 unknown。
+            // **不可先过 decodeAttr**——它把数组塌缩成 val[0]，于是 ['mV','uV'] 只剩 'mV'、
+            // 冲突消失被当成合法 mV 采信，与后端及契约（每个元素都参与冲突判定）不一致。
+            // 原始值直接交给 Units：declarations 负责摊平、normalize 负责解码字节串。
+            // 大小写无关地找属性——后端用 _find_attr 做大小写无关匹配，这里若只认
+            // 'units'/'Units'，同一个 <2GB 文件（如属性名为 'UNITS'）会因走前端直读还是
+            // 后端而解析出不同单位，缩放与标注随读取路径漂移
+            const rootUnits = findAttrValue(attrs, 'units');
+            let datasetUnits = null;
+            try {
+                datasetUnits = findAttrValue(dataNode?.attrs, 'units');
+            } catch (e) { /* Data 无属性，属常态 */ }
+            const resolved = Units.resolveHdf5Detailed(
+                rootUnits, datasetUnits, infoUnits,
+                metadata.generated_by,
+                findAttrValue(attrs, Units.CONTRACT_ATTR)   // 与后端同样大小写无关
+            );
+            metadata.units = resolved.units;
+            metadata.units_inferred = resolved.inferred;
+            metadata.channel_units = infoUnits.map(u => Units.normalize(u) ?? Units.UNKNOWN);
+            console.log(`Units resolved: ${metadata.units}${resolved.inferred ? ' (推定)' : ''} (root=${rootUnits}, dataset=${datasetUnits}, info=${infoUnits.slice(0, 3)})`);
 
 
             // 如果没有通道名，生成默认名
@@ -1873,6 +1907,123 @@
             if (val instanceof Uint8Array) return new TextDecoder().decode(val);
             if (Array.isArray(val)) return val[0]?.toString() || '';
             return val.toString();
+        }
+
+        // ========== 物理单位契约 ==========
+        // 本对象是 epycon/core/units.py 的 JS 镜像，规则必须与之逐条一致。
+        // h5wasm 直读路径（<2GB 的 h5，即默认路径）不经后端，故前端必须自己解析声明——
+        // 此前该路径根本不产出 units，渲染只能按幅度猜（KNOWN_ISSUES #25/#26）。
+        const Units = {
+            UNKNOWN: 'unknown',
+            CONTRACT_ATTR: 'EpyconUnitsContract',
+            _ALIASES: {
+                'uv': 'uV', 'µv': 'uV', 'μv': 'uV', 'microvolt': 'uV', 'microvolts': 'uV',
+                'mv': 'mV', 'millivolt': 'mV', 'millivolts': 'mV',
+                'nv': 'nV', 'nanovolt': 'nV', 'nanovolts': 'nV',
+                'counts': 'counts', 'count': 'counts', 'lsb': 'counts', 'adu': 'counts',
+            },
+            _TO_MV: { 'uV': 1e-3, 'mV': 1.0, 'nV': 1e-6 },
+
+            /** 任意书写形式 -> 规范名；无法识别返回 null（不猜）。
+             *  Uint8Array 是 h5wasm 的字节串形态（对应 Python 的 bytes），须解码而非 String()——
+             *  String(Uint8Array) 得到的是 "109,86" 这种字节数字串。 */
+            normalize(v) {
+                if (v === null || v === undefined) return null;
+                if (v instanceof Uint8Array) v = new TextDecoder().decode(v);
+                if (typeof v !== 'string') return null;
+                return Units._ALIASES[v.trim().toLowerCase()] ?? null;
+            },
+
+            /** 把一处属性值摊平成"若干条声明"（对应 core/units.py:declarations）。
+             *  HDF5 属性可能是数组：单元素 = 一条声明；多元素 = 多条，须各自参与冲突判定。
+             *  不可依赖 String(array) —— 那对 ['mV'] 恰好得到 'mV'（巧合），
+             *  对 ['mV','mV'] 却得到 'mv,mv' 而被当成未声明，与 Python 不等价。 */
+            declarations(v) {
+                if (v === null || v === undefined) return [];
+                if (Array.isArray(v)) return v;
+                if (ArrayBuffer.isView(v) && !(v instanceof Uint8Array)) return Array.from(v);
+                return [v];
+            },
+
+            /** 多处声明 -> 单一结论。一致才采信；冲突或无声明返回 unknown。 */
+            resolve(decls) {
+                const seen = new Set();
+                for (const d of decls) {
+                    for (const one of Units.declarations(d)) {
+                        const n = Units.normalize(one);
+                        if (n) seen.add(n);
+                    }
+                }
+                return seen.size === 1 ? [...seen][0] : Units.UNKNOWN;
+            },
+
+            /** 规范名 -> 换算到 mV 的因子；unknown/counts/无法识别返回 null。
+             *  null 表示**不可物理定标**——不得退化为 1.0，那正是 overlay 把 µV 当 mV 的成因。 */
+            toMvFactor(units) {
+                const n = Units.normalize(units);
+                return n ? (Units._TO_MV[n] ?? null) : null;
+            },
+
+            /** 解析 HDF5 的单位声明 -> { units, inferred }。
+             *  legacy 窄规则见 epycon/core/units.py:resolve_hdf5_detailed。
+             *  inferred=true 表示结论来自推定而非如实声明，须向用户明示。 */
+            resolveHdf5Detailed(rootUnits, datasetUnits, infoUnits, generatedBy, contract) {
+                const declared = Units.resolve([...(infoUnits || []), rootUnits, datasetUnits]);
+                const isEpycon = String(generatedBy ?? '').trim().toLowerCase() === 'epycon';
+                // #19 已证实坏签名：epycon 产出 + 无契约标记 + 标 mV => 实为 uV。
+                // 带契约标记的文件一律以声明为准，声明 mV 就是 mV。
+                // 该签名不唯一（历史上直接用 HDFPlanter 写真实 mV 的调用方同签名），故标记为推定。
+                if (!contract && isEpycon && declared === 'mV') return { units: 'uV', inferred: true };
+                return { units: declared, inferred: false };
+            },
+
+            resolveHdf5(rootUnits, datasetUnits, infoUnits, generatedBy, contract) {
+                return Units.resolveHdf5Detailed(rootUnits, datasetUnits, infoUnits,
+                                                 generatedBy, contract).units;
+            },
+        };
+
+        /** 大小写无关地取 h5wasm 属性值（对应后端 api_ecg._find_attr）。 */
+        function findAttrValue(attrs, name) {
+            if (!attrs) return null;
+            const want = name.toLowerCase();
+            for (const k of Object.keys(attrs)) {
+                if (k.toLowerCase() === want) return attrs[k]?.value ?? null;
+            }
+            return null;
+        }
+
+        /** overlay 轴标题用的单位文字：unknown 不得伪装成真实单位。 */
+        function overlayUnitsLabel() {
+            const u = state.metadata?.units;
+            return (!u || u === Units.UNKNOWN) ? '单位未知' : u;
+        }
+
+        /** Y 轴标题。单位不可定标时**常驻**写明"非物理刻度"——toast 会被后续
+         *  "加载成功"提示覆盖，轴标题不会，用户始终看得见。 */
+        function yAxisTitle() {
+            const u = state.metadata?.units;
+            const scalable = Units.toMvFactor(u) !== null;
+            if (!scalable) {
+                const why = (!u || u === Units.UNKNOWN) ? '单位未知' : `单位 ${u}`;
+                return `⚠ ${why}｜自适应显示，非物理刻度`;
+            }
+            // 推定来的单位同样常驻标明，不让用户误以为是文件的如实声明
+            const inferred = state.metadata?.units_inferred ? `${u}（旧版推定）` : u;
+            if (state.displayMode === 'overlay') return `Amplitude (${inferred})`;
+            return state.metadata?.units_inferred ? `单位按旧版约定推定为 ${u}` : '';
+        }
+
+        /** 单位不可定标时向用户明示（每个文件只提示一次，避免每帧刷屏）。
+         *  不可静默——静默退化正是 #19/#25 长期不被发现的原因。 */
+        let _unscalableWarnedFor = null;
+        function warnUnscalable(units) {
+            const key = `${state.fileId || ''}|${units}`;
+            if (_unscalableWarnedFor === key) return;
+            _unscalableWarnedFor = key;
+            const what = units === Units.UNKNOWN ? '文件未声明物理单位或声明冲突' : `单位为 ${units}`;
+            console.warn(`无法物理定标：${what}；纵轴刻度不代表真实幅度`);
+            showToast(`${what}，纵轴刻度不代表真实幅度（波形形态仍可参考）`, 'warning');
         }
 
         /**
@@ -2637,7 +2788,12 @@
                 data,
                 channel_names: channelNames,
                 sampling_freq: fs / downsample,
-                units: 'mV'
+                // 透传文件声明——此处硬编码 'mV' 会让 exportCSV 导出带错误声明的数据（#27 入口 B）
+                units: state.metadata?.units ?? Units.UNKNOWN,
+                // 与 channel_names 逐列对齐（对应后端 /data 的 channel_units），
+                // 混合单位文件才不会在导出时丢掉已知的逐通道声明
+                channel_units: channels.map(ch => state.metadata?.channel_units?.[ch]
+                    ?? state.metadata?.units ?? Units.UNKNOWN)
             };
         }
 
@@ -2708,20 +2864,21 @@
             // 每个通道分配的高度 (mm)
             const channelHeightMm = PHYSICAL_SCREEN_HEIGHT_MM / numVisibleChannels;
 
-            // 检测数据单位可能是 uV (微伏) 而不是 mV
-            let dataMin = Infinity, dataMax = -Infinity;
-            for (let i = 0; i < numVisibleChannels; i++) {
-                for (let j = 0; j < Math.min(visibleData.length, 1000); j += 5) {
-                    const val = visibleData[j][i];
-                    if (val < dataMin) dataMin = val;
-                    if (val > dataMax) dataMax = val;
-                }
+            // 单位换算以文件声明为准（见 Units 契约）。此处原为按幅度猜的启发式
+            // `dataRange > 50 ? 0.001 : 1.0`——那是被 #19 错标逼出的 workaround：
+            // 上游标错、下游猜着改回来，两个错误恰好抵消。真实幅度 <50 µV 的低振幅
+            // 心内电图通道会被猜成 mV、不缩放、当场放大 1000×（#25 缺陷 A）。
+            const declaredUnits = state.metadata?.units;
+            const mvFactor = Units.toMvFactor(declaredUnits);
+            // null = 不可物理定标（unknown/counts）。**不退化为 1.0 硬画 mV/cm 刻度**——
+            // 那会给出一幅"看起来有物理刻度"的错误图，正是 #19/#25 长期不被发现的原因。
+            const canScalePhysically = mvFactor !== null;
+            const unitScaleFactor = mvFactor ?? 1.0;
+            if (!canScalePhysically) {
+                warnUnscalable(declaredUnits);
             }
-            const dataRange = dataMax - dataMin;
-            // 自动缩放因子: 如果数据看起来像 uV (range > 50), 则除以 1000 转为 mV
-            const unitScaleFactor = dataRange > 50 ? 0.001 : 1.0;
 
-            console.log(`PhysRefactor: Height=${PHYSICAL_SCREEN_HEIGHT_MM}mm | ChHeight=${channelHeightMm.toFixed(2)}mm | UnitScale=${unitScaleFactor}`);
+            console.log(`PhysRefactor: Height=${PHYSICAL_SCREEN_HEIGHT_MM}mm | ChHeight=${channelHeightMm.toFixed(2)}mm | Units=${declaredUnits} | UnitScale=${unitScaleFactor}`);
 
             if (state.displayMode === 'stacked') {
                 for (let i = 0; i < numVisibleChannels; i++) {
@@ -2736,22 +2893,38 @@
 
                     let chData = visibleData.map(row => row[i]);
 
-                    // 2. 统一转换为 mV
-                    if (unitScaleFactor !== 1.0) {
-                        chData = chData.map(v => v * unitScaleFactor);
-                    }
+                    if (canScalePhysically) {
+                        // 2. 统一转换为 mV（因子来自文件声明，非猜测）
+                        if (unitScaleFactor !== 1.0) {
+                            chData = chData.map(v => v * unitScaleFactor);
+                        }
 
-                    // 3. 应用 Amplitude 缩放 (转换为 mm)
-                    // 1 mV/cm => 1 mV 对应 10 mm 高度
-                    // 公式: y_mm = val_mV * (10 / amplitude_mV_per_cm)
-                    const mmPerMv = 10 / amplitude;
-                    chData = chData.map(v => v * mmPerMv);
+                        // 3. 应用 Amplitude 缩放 (转换为 mm)
+                        // 1 mV/cm => 1 mV 对应 10 mm 高度
+                        // 公式: y_mm = val_mV * (10 / amplitude_mV_per_cm)
+                        const mmPerMv = 10 / amplitude;
+                        chData = chData.map(v => v * mmPerMv);
 
-                    // 4. 应用 Clipping (在 mm 空间)
-                    // clipping = 1 cm => ±10 mm
-                    if (clipping) {
-                        const clipLimitMm = clipping * 10;
-                        chData = chData.map(v => Math.max(-clipLimitMm, Math.min(clipLimitMm, v)));
+                        // 4. 应用 Clipping (在 mm 空间)
+                        // clipping = 1 cm => ±10 mm
+                        if (clipping) {
+                            const clipLimitMm = clipping * 10;
+                            chData = chData.map(v => Math.max(-clipLimitMm, Math.min(clipLimitMm, v)));
+                        }
+                    } else {
+                        // 单位未知/无量纲（counts）：**拒绝 mV/cm 物理定标**。
+                        // 硬套 amplitude 会画出"看起来有物理刻度"的错误图。
+                        // 改为按通道高度自适应的无量纲显示：形态可读，但刻度不表示幅度。
+                        // clipping 同样跳过——它的单位是 cm，在无量纲空间没有意义。
+                        let lo = Infinity, hi = -Infinity;
+                        for (const v of chData) {
+                            if (v < lo) lo = v;
+                            if (v > hi) hi = v;
+                        }
+                        const span = (hi - lo) || 1;
+                        const mid = (hi + lo) / 2;
+                        const fitMm = (channelHeightMm * 0.8) / span;
+                        chData = chData.map(v => (v - mid) * fitMm);
                     }
 
                     // 5. 加上基线偏移 (mm)
@@ -3000,7 +3173,9 @@
                         : [state.viewStart, state.viewEnd]
                 },
                 yaxis: {
-                    title: { text: state.displayMode === 'overlay' ? `Amplitude (${state.metadata.units})` : '', font: { color: '#a0a0b0', size: 12 } },
+                    // overlay 画的是文件原生数值，故轴标题必须是**文件声明的单位**，不能想当然写 mV。
+                    // 把 µV 数值标成 mV 正是 #25 缺陷 B 的 1000× 误读来源。
+                    title: { text: yAxisTitle(), font: { color: '#a0a0b0', size: 12 } },
                     color: '#a0a0b0',
                     gridcolor: state.showGrid ? '#2a2a3a' : 'transparent',
                     zerolinecolor: '#2a2a3a',
@@ -3525,7 +3700,17 @@
             }
 
             const data = state.currentData;
-            let csv = '时间(秒),' + data.channel_names.join(',') + '\n';
+            // 表头声明单位：数值与声明必须同源。此前表头无单位、且 currentData 携带
+            // 硬编码的 'mV' 声明，而数值实为 µV，导出的 CSV 无从判读量纲（#27 入口 B）。
+            // 逐列取单位——混合单位文件的标量是 unknown，但逐通道声明是已知的，
+            // 一律写"单位未知"等于把契约解析出来的信息又丢掉。
+            const scalarUnits = Units.normalize(data.units ?? state.metadata?.units) ?? Units.UNKNOWN;
+            const perCol = data.channel_units || [];
+            const label = (i) => {
+                const u = Units.normalize(perCol[i]) ?? scalarUnits;
+                return u === Units.UNKNOWN ? '单位未知' : u;
+            };
+            let csv = '时间(秒),' + data.channel_names.map((n, i) => `${n}(${label(i)})`).join(',') + '\n';
 
             for (let i = 0; i < data.time.length; i++) {
                 const row = [data.time[i].toFixed(4)];

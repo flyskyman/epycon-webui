@@ -3,6 +3,7 @@ ECG 数据查看器 API 模块
 提供 HDF5 心电图数据的读取、流式传输和标注处理功能
 """
 import os
+import json
 import uuid
 import base64
 import tempfile
@@ -11,6 +12,8 @@ from datetime import datetime
 from functools import lru_cache
 from flask import Blueprint, request, jsonify, send_file
 import numpy as np
+
+from epycon.core import units as units_mod
 
 try:
     import h5py
@@ -385,6 +388,88 @@ def _get_annotations_path(h5file):
     return find_annotations(h5file)
 
 
+def _read_info_units(h5file):
+    """读 Info 数据集的逐通道 Units；无 Info / 无该字段时返回空列表。
+
+    epycon 恰恰把 units 写在这里——而 #26 前读取侧只看 root/Data attrs，
+    从不读 Info，导致自家文件的声明被完全忽略。
+    """
+    if 'Info' not in h5file:
+        return []
+    try:
+        info = h5file['Info']
+        if not isinstance(info, h5py.Dataset):
+            return []
+        info_data = info[:]
+        if not info_data.dtype.names or 'Units' not in info_data.dtype.names:
+            return []
+        return [row['Units'] for row in info_data]
+    except Exception as e:
+        logger.warning(f"读取 Info.Units 失败: {e}")
+        return []
+
+
+def _find_attr(attrs_dict, name):
+    """大小写无关地取属性值；不存在返回 None。"""
+    lowered = name.lower()
+    for k, v in attrs_dict.items():
+        if str(k).lower() == lowered:
+            return v
+    return None
+
+
+def _resolve_units_into(metadata, h5file, data_path):
+    """解析物理单位并写入 metadata（`units` 标量 + `channel_units` 逐通道）。
+
+    读 root attr / Data attr / Info 三处声明，交由 `epycon.core.units` 按契约裁决：
+    一致才采信，冲突或无声明 -> `unknown`（由消费方拒绝物理定标，不要猜）。
+    """
+    root_units = _find_attr(metadata.get('attributes', {}), 'units')
+    dataset_units = None
+    if data_path and data_path in h5file:
+        try:
+            dataset_units = _find_attr(dict(h5file[data_path].attrs), 'units')
+            if isinstance(dataset_units, np.ndarray):
+                dataset_units = dataset_units.tolist()
+        except Exception:
+            pass
+
+    info_units = _read_info_units(h5file)
+    metadata['channel_units'] = units_mod.channel_units(info_units)
+    metadata['units'], metadata['units_inferred'] = units_mod.resolve_hdf5_detailed(
+        root_units, dataset_units, info_units,
+        generated_by=_find_attr(dict(h5file.attrs), 'GeneratedBy'),
+        contract=_find_attr(dict(h5file.attrs), units_mod.UNITS_CONTRACT_ATTR),
+    )
+    if metadata['units_inferred']:
+        logger.warning(
+            f"单位按 #19 旧版约定推定为 {metadata['units']}（文件声明 mV 但无契约标记）；"
+            "该签名不唯一，如为直接调用 HDFPlanter 写入的真实 mV 数据请重新转换以带上契约标记")
+    if metadata['units'] == units_mod.UNKNOWN:
+        logger.warning(
+            "无法确定物理单位（无声明或声明冲突）；消费方不应做物理定标。"
+            f" root={root_units!r} dataset={dataset_units!r} info={info_units[:3]!r}")
+
+
+def _output_units(metadata, output_channel_names, display_channels, is_computed_mode):
+    """与 `channel_names` **逐列对齐**的单位列表。
+
+    混合单位文件的标量 `units` 是 `unknown`，但逐通道声明是已知的——导出时不能因为
+    标量未知就把每一列都写成未知，那等于把契约已经解析出来的信息又丢掉。
+    """
+    scalar = metadata.get('units', units_mod.UNKNOWN)
+    per_ch = metadata.get('channel_units') or []
+    n = len(output_channel_names)
+    # 同质文件（epycon 产出即此类）：标量即答案
+    if scalar != units_mod.UNKNOWN or not per_ch:
+        return [scalar] * n
+    # 计算导联由两条源通道相减而来，display 索引不指向原始通道，无法逐列回溯
+    if is_computed_mode:
+        return [scalar] * n
+    return [per_ch[ch] if 0 <= ch < len(per_ch) else units_mod.UNKNOWN
+            for ch in display_channels][:n]
+
+
 def _extract_metadata(h5file, data_path):
     """从 HDF5 文件中提取元数据"""
     metadata = {
@@ -394,7 +479,11 @@ def _extract_metadata(h5file, data_path):
         'duration_seconds': 0,
         'channel_names': [],
         'channel_sources': [],  # RAW 或 computed
-        'units': 'mV',
+        # 单位不设"默认值"——由文件声明解析得出（见 _resolve_units_into）。
+        # 硬编码默认值正是 #26 的成因：读取侧从不读声明、恒取默认值。
+        'units': units_mod.UNKNOWN,
+        'channel_units': [],
+        'units_inferred': False,  # True = 结论来自 legacy 推定而非如实声明，须向用户明示
         'data_orientation': 'samples_first',
         # 研究/患者信息
         'study_id': '',
@@ -475,8 +564,7 @@ def _extract_metadata(h5file, data_path):
                         metadata['channel_names'] = val.split(',')
                 elif attr_name.lower() in ['sampling_freq', 'sampling_frequency', 'fs']:
                     metadata['sampling_freq'] = float(val)
-                elif attr_name.lower() == 'units':
-                    metadata['units'] = val
+                # units 不在此处采信——三处声明须一起解析，见 _resolve_units_into
             except Exception:
                 pass
 
@@ -538,6 +626,9 @@ def _extract_metadata(h5file, data_path):
     if metadata['num_samples'] > 0 and metadata['sampling_freq'] > 0:
         metadata['duration_seconds'] = metadata['num_samples'] / metadata['sampling_freq']
 
+    # 解析物理单位（三处声明一起看，冲突即 unknown）
+    _resolve_units_into(metadata, h5file, data_path)
+
     # 自动识别 u+/u- 电极配对，生成计算导联
     metadata = _build_computed_leads(metadata)
 
@@ -545,18 +636,64 @@ def _extract_metadata(h5file, data_path):
     return _convert_numpy_types(metadata)
 
 
-def _extract_npy_metadata(data, filename):
-    """从 NumPy 数组中提取元数据"""
+NPZ_META_KEY = '_meta'
+
+
+def load_npz(npz_file):
+    """从 .npz 取出波形矩阵与可选的 `_meta`，返回 (data, meta)。
+
+    **extraction 产物**（`epycon.cli.extract._save_npz`）的成员是
+    `_meta`（JSON 字符串）+ 每个 ok 导联一个 1-D 数组。此前读取侧无条件
+    `list(keys())[0]` 取第一个成员当波形——而 `_meta` 恰是首个 kwarg 故为首成员，
+    于是 JSON 字符串被当成波形，num_channels 直接变 0，仓库唯一如实声明单位的
+    产出方反而打不开（#28）。
+
+    非 extraction 的普通 npz（无 `_meta`）保持既有语义：取第一个数组。
+    """
+    keys = list(npz_file.keys())
+    meta = None
+    if NPZ_META_KEY in keys:
+        try:
+            meta = json.loads(str(npz_file[NPZ_META_KEY]))
+        except Exception as e:
+            logger.warning(f"解析 npz 的 {NPZ_META_KEY} 失败: {e}")
+        lead_keys = [k for k in keys if k != NPZ_META_KEY]
+        if lead_keys:
+            # 逐导联 1-D 数组 -> (samples, channels)；导联名即成员名
+            columns = [np.asarray(npz_file[k]).reshape(-1) for k in lead_keys]
+            width = min(c.shape[0] for c in columns)
+            data = np.stack([c[:width] for c in columns], axis=1)
+            return data, {'meta': meta, 'channel_names': lead_keys}
+        # 只有 _meta、没有任何 ok 导联：不伪造波形，交由上层报错
+        return np.empty((0, 0), dtype=np.float32), {'meta': meta, 'channel_names': []}
+
+    if not keys:
+        return np.empty((0, 0), dtype=np.float32), None
+    return npz_file[keys[0]], None
+
+
+def _extract_npy_metadata(data, filename, npz_info=None):
+    """从 NumPy 数组中提取元数据。
+
+    `npz_info` 为 `load_npz` 的第二个返回值；带 extraction `_meta` 时，
+    fs/units/导联名一律以 `_meta` 的**显式声明**为准，不再硬编码。
+    """
+    meta = (npz_info or {}).get('meta') or {}
     metadata = {
-        'sampling_freq': 250,  # NPY 文件无法获取采样率，使用默认值
+        # NPY/NPZ 无内建 fs；extraction 的 _meta 有，优先采信
+        'sampling_freq': meta.get('fs') or 250,
         'num_channels': 0,
         'num_samples': 0,
         'duration_seconds': 0,
         'channel_names': [],
-        'units': 'mV',
+        # 无 _meta 的裸 npy/npz 不含任何单位信息 -> unknown，由消费方拒绝物理定标。
+        # 此处曾硬编码 'mV'，把 extraction 显式声明的 uV/counts 一并丢弃（#28）。
+        'units': units_mod.normalize(meta.get('units')) or units_mod.UNKNOWN,
         'data_orientation': 'samples_first',
         'attributes': {'source_file': filename, 'format': 'numpy'}
     }
+    if meta:
+        metadata['attributes']['extraction_meta'] = meta
 
     shape = data.shape
 
@@ -575,9 +712,14 @@ def _extract_npy_metadata(data, filename):
         metadata['num_samples'] = shape[0]
         metadata['num_channels'] = 1
 
-    # 生成默认通道名
-    if metadata['num_channels'] > 0:
+    # 通道名：extraction npz 的成员名即导联名，优先于默认名
+    declared_names = (npz_info or {}).get('channel_names') or []
+    if declared_names and len(declared_names) == metadata['num_channels']:
+        metadata['channel_names'] = list(declared_names)
+    elif metadata['num_channels'] > 0:
         metadata['channel_names'] = [f"Ch{i + 1}" for i in range(metadata['num_channels'])]
+
+    metadata['channel_units'] = [metadata['units']] * metadata['num_channels']
 
     # 计算时长
     if metadata['num_samples'] > 0 and metadata['sampling_freq'] > 0:
@@ -748,16 +890,13 @@ def open_local_file():
         # 根据文件类型处理
         if ext in supported_npy:
             # 处理 NumPy 文件
+            npz_info = None
             if ext == '.npy':
-                import numpy as np
                 data = np.load(file_path, mmap_mode='r')  # 使用 mmap 避免全量加载
             else:  # .npz
-                import numpy as np
-                npz_file = np.load(file_path)
-                key = list(npz_file.keys())[0]
-                data = npz_file[key]
+                data, npz_info = load_npz(np.load(file_path))
 
-            metadata = _extract_npy_metadata(data, os.path.basename(file_path))
+            metadata = _extract_npy_metadata(data, os.path.basename(file_path), npz_info)
             annotations = []
             data_path = None
             annot_path = None
@@ -834,16 +973,14 @@ def upload_file():
         # 根据文件类型处理
         if ext in supported_npy:
             # 处理 NumPy 文件
+            npz_info = None
             if ext == '.npy':
                 data = np.load(save_path)
             else:  # .npz
-                npz_file = np.load(save_path)
-                # 获取第一个数组
-                key = list(npz_file.keys())[0]
-                data = npz_file[key]
+                data, npz_info = load_npz(np.load(save_path))
 
             # 提取元数据
-            metadata = _extract_npy_metadata(data, file.filename)
+            metadata = _extract_npy_metadata(data, file.filename, npz_info)
             annotations = []
             data_path = None
             annot_path = None
@@ -972,9 +1109,9 @@ def get_data(file_id):
             # 读取 NumPy 文件（需要读取所有原始通道以便计算差分）
             ext = os.path.splitext(info['filename'])[1].lower()
             if ext == '.npz':
-                npz_file = np.load(info['path'])
-                key = list(npz_file.keys())[0]
-                full_data = npz_file[key]
+                # 必须与 open_local/upload 走同一条 load_npz——否则元数据入口通过、
+                # 波形端点仍取到 _meta 的 JSON 字符串并在切片时 500（#28）
+                full_data, _ = load_npz(np.load(info['path']))
             else:
                 full_data = np.load(info['path'])
 
@@ -1189,7 +1326,12 @@ def get_data(file_id):
             'downsample': downsample,
             'num_samples': actual_samples,
             'data': data_list,
-            'is_computed_mode': is_computed_mode
+            'is_computed_mode': is_computed_mode,
+            # 数值与单位声明必须同源：后端路径的 currentData 此前不带 units，
+            # 导致 exportCSV 即便元数据已解析出 uV 也只能写"单位未知"（#27 入口 B）
+            'units': metadata.get('units', units_mod.UNKNOWN),
+            'channel_units': _output_units(metadata, output_channel_names,
+                                           display_channels, is_computed_mode)
         })
 
     except Exception as e:

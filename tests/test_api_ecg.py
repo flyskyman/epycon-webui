@@ -671,3 +671,189 @@ class TestUploadEndpoint:
         assert os.path.exists(temp_path)
         client.delete(f"/api/ecg/cleanup/{file_id}")
         assert not os.path.exists(temp_path)
+
+
+# ========================= 单位契约 / extraction npz 往返 =========================
+
+class TestUnitsContract:
+    """读取侧必须采信文件声明，冲突/无声明返回 unknown（KNOWN_ISSUES #26）。"""
+
+    def _h5(self, tmp_path, name, *, info=None, root=None, gen=None, contract=None):
+        p = str(tmp_path / f"{name}.h5")
+        with h5py.File(p, "w") as f:
+            f.create_dataset("Data", data=np.zeros((2, 10), dtype=np.float32))
+            if root:
+                f.attrs["units"] = root
+            if gen:
+                f.attrs["GeneratedBy"] = gen
+            if contract is not None:
+                f.attrs["EpyconUnitsContract"] = contract
+            if info:
+                dt = np.dtype([("ChannelName", "S8"), ("DatacacheName", "S8"), ("Units", "S8")])
+                f.create_dataset("Info", data=np.array(
+                    [(n.encode(), b"RAW", u.encode()) for n, u in info], dtype=dt))
+        return p
+
+    def _units(self, path):
+        with h5py.File(path, "r") as f:
+            return api_ecg._extract_metadata(f, "Data")["units"]
+
+    def test_planter_output_declares_uv(self, planter_h5):
+        """真实 HDFPlanter 产物：Info 声明 uV 且带契约标记 -> 采信 uV。"""
+        assert self._units(planter_h5) == "uV"
+
+    def test_legacy_epycon_mv_resolved_as_uv(self, tmp_path):
+        """#19 前的旧文件：Info 标 mV、无契约标记、实为 µV。"""
+        p = self._h5(tmp_path, "legacy", info=[("I", "mV")], gen="Epycon")
+        assert self._units(p) == "uV"
+
+    def test_contract_marked_mv_is_honored(self, tmp_path):
+        """带契约标记就以声明为准——legacy 规则不得越界误判合法 mV 文件。"""
+        p = self._h5(tmp_path, "real_mv", info=[("I", "mV")], gen="Epycon", contract=1)
+        assert self._units(p) == "mV"
+
+    def test_third_party_root_attr_is_read(self, tmp_path):
+        """root attr 声明此前被完全无视（#26）。"""
+        p = self._h5(tmp_path, "root_mv", root="mV", gen="Other")
+        assert self._units(p) == "mV"
+
+    def test_conflicting_declarations_return_unknown(self, tmp_path):
+        p = self._h5(tmp_path, "conflict", root="mV", info=[("I", "uV")])
+        assert self._units(p) == "unknown"
+
+    def test_no_declaration_returns_unknown(self, tmp_path):
+        p = self._h5(tmp_path, "bare")
+        assert self._units(p) == "unknown"
+
+    def test_mixed_units_preserved_per_channel(self, tmp_path, client):
+        """混合单位文件：标量 unknown，但逐通道声明已知，导出不得一律写未知。"""
+        path = self._h5(tmp_path, "mixed", info=[("I", "uV"), ("II", "mV")])
+        with h5py.File(path, "r") as f:
+            md = api_ecg._extract_metadata(f, "Data")
+        assert md["units"] == "unknown"          # 标量表达不了混合
+        assert md["channel_units"] == ["uV", "mV"]   # 但逐通道保留
+
+        cols = api_ecg._output_units(md, ["I", "II"], [0, 1], False)
+        assert cols == ["uV", "mV"]              # 逐列对齐，不丢信息
+
+    def test_homogeneous_units_fill_all_columns(self, tmp_path):
+        path = self._h5(tmp_path, "homo", info=[("I", "uV"), ("II", "uV")],
+                        gen="Epycon", contract=1)
+        with h5py.File(path, "r") as f:
+            md = api_ecg._extract_metadata(f, "Data")
+        assert api_ecg._output_units(md, ["I", "II"], [0, 1], False) == ["uV", "uV"]
+
+    def test_units_attr_lookup_is_case_insensitive(self, tmp_path):
+        """后端大小写无关；前端 h5wasm 亦然，否则同一文件按读取路径漂移。"""
+        p = str(tmp_path / "upper.h5")
+        with h5py.File(p, "w") as f:
+            f.create_dataset("Data", data=np.zeros((2, 10), dtype=np.float32))
+            f.attrs["UNITS"] = "mV"
+        assert self._units(p) == "mV"
+
+class TestExtractionNpzRoundtrip:
+    """extraction 的 .npz 必须能真正进入 WebUI（KNOWN_ISSUES #28）。
+
+    夹具用 _save_npz 的**真实产物**，不手搓 npz——此前 API 无条件取首个成员，
+    而 _meta 恰是首成员，导致 JSON 字符串被当波形、通道数为 0。
+    """
+
+    def _result(self, units="uV"):
+        return {
+            "study": "s", "log": "00000000", "version": "4.3.2", "fs": 2000,
+            "units": units, "resolution_nV": 78,
+            "target": {"elapsed": "2.658", "epoch": 1.0, "offset_in_seg_s": 2.658},
+            "requested_window": {"before": 1, "after": 1},
+            "returned_window": {"start_s": 1.6, "end_s": 3.6,
+                                "clipped": False, "missing_s": 0},
+            "leads": [
+                {"name": "II", "status": "ok", "n": 4, "samples": [1.0, 2.0, 3.0, 4.0]},
+                {"name": "V1", "status": "ok", "n": 4, "samples": [5.0, 6.0, 7.0, 8.0]},
+                {"name": "V6", "status": "railed", "reason": "通道恒定于满量程，电极未连接"},
+            ],
+        }
+
+    @pytest.fixture
+    def extraction_npz(self, tmp_path):
+        from epycon.cli.extract import _save_npz
+        _, actual = _save_npz(str(tmp_path / "extracted"), self._result())
+        return actual
+
+    def test_meta_is_not_mistaken_for_waveform(self, extraction_npz):
+        data, info = api_ecg.load_npz(np.load(extraction_npz))
+        assert data.shape == (4, 2)          # 修复前：_meta 的 0 维字符串
+        assert info["channel_names"] == ["II", "V1"]
+
+    def test_declared_units_and_fs_adopted(self, extraction_npz):
+        data, info = api_ecg.load_npz(np.load(extraction_npz))
+        md = api_ecg._extract_npy_metadata(data, "extracted.npz", info)
+        assert md["units"] == "uV"           # 修复前：硬编码 mV，丢弃显式声明
+        assert md["sampling_freq"] == 2000   # 修复前：默认 250
+        assert md["num_channels"] == 2       # 修复前：0
+        assert md["channel_names"] == ["II", "V1"]
+
+    def test_raw_counts_units_preserved(self, tmp_path):
+        """raw_counts 模式声明 counts——不可物理定标，不得被当成电压。"""
+        from epycon.cli.extract import _save_npz
+        _, actual = _save_npz(str(tmp_path / "counts"), self._result(units="counts"))
+        data, info = api_ecg.load_npz(np.load(actual))
+        md = api_ecg._extract_npy_metadata(data, "counts.npz", info)
+        assert md["units"] == "counts"
+
+    def test_bare_npz_without_meta_keeps_legacy_behavior(self, tmp_path):
+        """无 _meta 的普通 npz 保持既有语义（取第一个数组），单位 unknown。"""
+        p = str(tmp_path / "bare.npz")
+        np.savez(p, arr=np.zeros((10, 2), dtype=np.float32))
+        data, info = api_ecg.load_npz(np.load(p))
+        assert data.shape == (10, 2)
+        assert info is None
+        md = api_ecg._extract_npy_metadata(data, "bare.npz", info)
+        assert md["units"] == "unknown"
+
+    def test_open_local_endpoint_accepts_extraction_npz(self, client, extraction_npz):
+        """端到端：真实 extraction 产物经 open_local 进入查看器。"""
+        resp = client.post("/api/ecg/open_local", json={"path": extraction_npz})
+        assert resp.status_code == 200, resp.get_json()
+        md = resp.get_json()["metadata"]
+        assert md["num_channels"] == 2
+        assert md["units"] == "uV"
+        assert md["channel_names"] == ["II", "V1"]
+
+
+    def test_data_endpoint_returns_waveform_and_units(self, client, extraction_npz):
+        """波形端点必须与元数据入口走同一条 load_npz。
+
+        此前 open/upload 已改用 load_npz，但 /data 仍取 keys()[0] —— 于是元数据
+        入口返回 200、波形端点却拿到 _meta 的 JSON 字符串并在切片时 500。
+        """
+        resp = client.post("/api/ecg/open_local", json={"path": extraction_npz})
+        assert resp.status_code == 200, resp.get_json()
+        file_id = resp.get_json()["file_id"]
+
+        resp = client.get(f"/api/ecg/data/{file_id}?start=0&end=1")
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        assert body["channel_names"] == ["II", "V1"]
+        assert body["num_samples"] > 0
+        # 数值与单位声明必须同源地送到前端，否则导出只能写"单位未知"
+        assert body["units"] == "uV"
+        assert body["data"][0] == pytest.approx([1.0, 5.0])
+
+    def test_data_endpoint_carries_units_for_h5(self, client, planter_h5):
+        """后端路径的 /data 也须带 units（#27 入口 B 的前端导出依赖它）。"""
+        file_id = _open_local(client, planter_h5)["file_id"]
+        resp = client.get(f"/api/ecg/data/{file_id}?start=0&end=1")
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["units"] == "uV"
+
+    def test_upload_endpoint_accepts_extraction_npz(self, client, extraction_npz):
+        with open(extraction_npz, "rb") as f:
+            resp = client.post(
+                "/api/ecg/upload",
+                data={"file": (f, "extracted.npz")},
+                content_type="multipart/form-data",
+            )
+        assert resp.status_code == 200, resp.get_json()
+        md = resp.get_json()["metadata"]
+        assert md["num_channels"] == 2
+        assert md["units"] == "uV"

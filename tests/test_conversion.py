@@ -97,6 +97,32 @@ class TestConvertStudy:
         with h5py.File(tmp_path / "00000000.h5", "r") as f:
             assert "Marks" not in f  # fid 都指向 00000001
 
+    def test_csv_and_h5_agree_on_values_and_units(self, tmp_path, entries):
+        """同一输入的 CSV 与 HDF5 必须数值+单位一致（KNOWN_ISSUES #27 入口 A）。
+
+        此前 CSVPlanter 静默丢弃 factor/units：CSV 写 nV 裸数值、表头无单位，
+        与同一次转换的 HDF5（µV）相差 1000×。
+        """
+        h5_dir, csv_dir = tmp_path / "h5", tmp_path / "csv"
+        for out_dir, fmt in ((h5_dir, "h5"), (csv_dir, "csv")):
+            cfg = _base_cfg(STUDY.parent, out_dir, merge=False)
+            cfg["data"]["output_format"] = fmt
+            cfg["entries"]["convert"] = False
+            convert_study(str(STUDY), "study01", str(out_dir), cfg, entries)
+
+        with h5py.File(h5_dir / "00000000.h5", "r") as f:
+            h5_first_row = f["Data"][:, 0] if f["Data"].shape[0] < f["Data"].shape[1] \
+                else f["Data"][0, :]
+
+        lines = (csv_dir / "00000000.csv").read_text(encoding="utf-8").splitlines()
+        header, first_row = lines[0], lines[1]
+
+        # 表头必须声明单位
+        assert all("(uV)" in col for col in header.split(","))
+        # 数值必须与 HDF5 逐列一致
+        csv_vals = [float(v) for v in first_row.split(",")]
+        assert csv_vals == pytest.approx(list(map(float, h5_first_row)), rel=1e-5)
+
     @pytest.mark.parametrize("merge", [True, False])
     def test_units_label_is_uv(self, tmp_path, entries, merge):
         """输出单位必须标 uV：量纲链 raw × resolution(78 nV/LSb) / factor(1000) = uV。

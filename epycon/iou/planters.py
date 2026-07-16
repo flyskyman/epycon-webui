@@ -5,6 +5,7 @@ import numpy as np
 
 from epycon.core._dataclasses import Entry
 from epycon.core._formatting import _tocsv, _tosel, SignalPlantDefaults
+from epycon.core.units import UNITS_CONTRACT_ATTR, UNITS_CONTRACT_VERSION
 
 from epycon.core._typing import (
     Union, PathLike, NumpyArray, Tuple, List, Any,
@@ -200,15 +201,37 @@ class DatalogPlanter:
         raise NotImplementedError
 
 
+def apply_factor(darray: NumpyArray, factor: Union[int, float]) -> NumpyArray:
+    """按 factor 缩放并转 float32（写出格式统一为 float32）。CSV/HDF5 共用。
+
+    HDFPlanter 此前写作 `if not issubdtype(dtype, float32): astype(float32) / factor`——
+    把"转 dtype"与"施加缩放"混为一谈，导致 **float32 输入静默跳过缩放**：数据没被
+    ÷factor，却仍按 `units` 声明标注，等于 #19 的翻版（声明与数值不同源）。
+    整数输入恰好走了除法分支，才让 conversion 的真实路径一直是对的。
+    """
+    out = darray.astype(np.float32, copy=False)
+    if factor != 1:
+        out = out / factor
+    return out
+
+
 class CSVPlanter(DatalogPlanter):
     """CSV 格式数据输出器。
 
     Attributes:
         delimiter: CSV 分隔符 (默认为逗号)
+        factor: 数值缩放因子（与 HDFPlanter 同义：写出前 darray / factor）
+        units: 物理单位，写入表头 `通道名(单位)`
+
+    `factor`/`units` 此前被静默丢弃（只 pop 了 delimiter），导致 `conversion.py`
+    明明传了 `factor=1000, units="uV"` 却毫无效果：CSV 写出 nV 裸数值、表头无单位，
+    与同一次转换的 HDF5（µV）相差 1000×（KNOWN_ISSUES #27 入口 A）。
     """
 
     _delimiter: str
     delimiter: str  # 向后兼容别名
+    factor: Union[int, float]
+    units: Optional[str]
 
     def __init__(
         self,
@@ -220,6 +243,9 @@ class CSVPlanter(DatalogPlanter):
         super().__init__(f_path, column_names)
 
         self._delimiter = kwargs.pop("delimiter", ",")
+        # 默认 1 = 不缩放：直接构造 CSVPlanter 而不传 factor 的既有调用方行为不变
+        self.factor = kwargs.pop("factor", 1)
+        self.units = kwargs.pop("units", None)
         self._header_isstored = False
         self._fmt = None
         # Backwards compatibility: expose `delimiter` attribute for callers
@@ -253,8 +279,15 @@ class CSVPlanter(DatalogPlanter):
             else:
                 assert len(self.column_names) == darray.shape[1]
 
-            self._f_obj.writelines(self.delimiter.join(self.column_names) + '\n')
+            # 表头声明单位：数值与声明必须同源，否则无从判读量纲
+            header = ([f"{n}({self.units})" for n in self.column_names]
+                      if self.units else list(self.column_names))
+            self._f_obj.writelines(self.delimiter.join(header) + '\n')
             self._header_isstored = True
+
+        # 与 HDFPlanter 共用缩放实现，保证同一次转换的 CSV 与 HDF5 量纲一致
+        if self.factor != 1:
+            darray = apply_factor(darray, self.factor)
 
         # write data
         if self._fmt is None:
@@ -388,6 +421,8 @@ class HDFPlanter(DatalogPlanter):
         self._f_obj.attrs['GeneratedBy'] = self._PARSER
         self._f_obj.attrs['LeftI'] = self._LEFT_INDEX
         self._f_obj.attrs['RightI'] = self._RIGHT_INDEX
+        # 单位契约标记：声明 Info.Units 如实可信，读取侧无需对本文件做 #19 的 legacy 判定
+        self._f_obj.attrs[UNITS_CONTRACT_ATTR] = UNITS_CONTRACT_VERSION
 
         # Add custom attributes (V68.1 Feature)
         if self.extra_attributes:
@@ -507,8 +542,7 @@ class HDFPlanter(DatalogPlanter):
         darray = darray.transpose()
 
         # Only float32 supported by SignalPlant
-        if not np.issubdtype(darray.dtype, np.float32):
-            darray = darray.astype(np.float32) / self.factor
+        darray = apply_factor(darray, self.factor)
 
         # Create new dataset if not exists
         if self._DATASET_DNAME not in self._f_obj:
