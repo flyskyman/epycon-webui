@@ -1,5 +1,6 @@
 import os
 import tempfile
+import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 from epycon.iou.parsers import LogParser
@@ -140,3 +141,34 @@ class TestChannelNameParsing:
 
             assert header.get_chnames() == ['15']
             assert header.channels.mount['15'] == (0,)
+
+
+class TestTwosComplementBoundary:
+    """样本已是有符号 int32（`datablock.fmt = '<i4'`），_twos_complement 应为恒等变换。
+
+    原实现 `limit = val // 2 - 1` 把 **最大正数** 2147483647（= 正向满量程）也判为负数，
+    减去 2³² 得到 -2147483649——一个**超出 int32 值域**的数。realdata 与真实临床数据里
+    整段 railed 的通道就是这个值；`extraction.RAIL_VALUES` 一度把 -2147483649 收进去
+    迁就它，属于将就症状而非修根因。
+    """
+
+    def test_max_positive_int32_is_not_flipped(self):
+        """2147483647 是最大正数，不是负数。"""
+        from epycon.iou.parsers import _twos_complement
+        out = _twos_complement(np.array([2147483647], dtype=np.int32), 4)
+        assert int(out[0]) == 2147483647
+
+    def test_signed_int32_input_is_identity(self):
+        """输入已有符号，函数不该改动任何值。"""
+        from epycon.iou.parsers import _twos_complement
+        vals = np.array([0, 1, -1, 32767, -32768, 2147483646, 2147483647,
+                         -2147483648, -2147483647], dtype=np.int32)
+        out = _twos_complement(vals.copy(), 4)
+        assert out.tolist() == vals.tolist()
+
+    def test_no_value_escapes_int32_range(self):
+        from epycon.iou.parsers import _twos_complement
+        vals = np.array([2147483647, -2147483648], dtype=np.int32)
+        out = _twos_complement(vals, 4)
+        assert out.min() >= -2147483648
+        assert out.max() <= 2147483647

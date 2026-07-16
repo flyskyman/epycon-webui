@@ -20,7 +20,9 @@ from epycon.core._validators import _validate_version
 from epycon.core.helpers import get_channel_mappings
 from epycon.iou import LogParser, mount_channels, readentries
 
-RAIL_VALUES = frozenset({2147483647, -2147483648, -2147483649})
+# int32 的正/负向满量程。曾含 -2147483649——那不是合法 int32 值，而是
+# _twos_complement 边界 off-by-one 把 +2147483647 翻出来的产物；根因已修，故移除。
+RAIL_VALUES = frozenset({2147483647, -2147483648})
 
 
 class ExtractionError(ValueError):

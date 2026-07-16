@@ -138,8 +138,13 @@ class TestRawAndRail:
         v6_ref = seg["header"].channels.content[names.index("V6")].reference
         raw = read_raw_window(seg, 1316, 9316, VER)
         col = raw[:, v6_ref]
-        assert bool(np.all(col == -2147483649))
+        # 未连接电极停在 int32 正向满量程。此处原断言 -2147483649 ——
+        # 那是 _twos_complement off-by-one 的产物，非文件真值（见
+        # tests/test_parsers_extended.py::TestTwosComplementBoundary）
+        assert bool(np.all(col == 2147483647))
         assert is_railed(col) is True
+        # 修复后不得再出现越界 int32 值
+        assert raw.min() >= -2147483648 and raw.max() <= 2147483647
 
     def test_connected_column_not_railed(self):
         from epycon.extraction import load_segments, read_raw_window, is_railed
@@ -317,9 +322,19 @@ class TestRailPure:
     """is_railed 纯逻辑，用合成数组即可测，CI 可跑。"""
 
     def test_railed_full_scale_constant(self):
+        """满量程 = int32 的两个端点。
+
+        原断言用的 -2147483649 **不是合法 int32 值**，而是 `_twos_complement`
+        边界 off-by-one 把 +2147483647 翻出来的产物——测试曾把 bug 钉住。
+        """
         from epycon.extraction import is_railed
-        assert is_railed(np.full(100, -2147483649, dtype=np.int64)) is True
-        assert is_railed(np.full(100, 2147483647, dtype=np.int64)) is True
+        assert is_railed(np.full(100, 2147483647, dtype=np.int64)) is True    # 正向满量程
+        assert is_railed(np.full(100, -2147483648, dtype=np.int64)) is True   # 负向满量程
+
+    def test_impossible_int32_value_is_not_a_rail(self):
+        """-2147483649 超出 int32 值域，修复后不可能出现，不该被当作栏杆值。"""
+        from epycon.extraction import is_railed
+        assert is_railed(np.full(100, -2147483649, dtype=np.int64)) is False
 
     def test_constant_but_not_rail_value_is_ok(self):
         from epycon.extraction import is_railed

@@ -40,11 +40,21 @@ from epycon.config.byteschema import (
 
 
 def _twos_complement(darray, bytesize):
+    """把无符号读入的 bytesize 字节整数还原为二补数有符号值。
+
+    边界是 **2^(n-1)**：`[0, 2^(n-1)-1]` 为正，`[2^(n-1), 2^n-1]` 才是负数。
+    原实现用 `val // 2 - 1`，把**最大正数** 2^(n-1)-1（= 正向满量程）也减了 2^n，
+    得到 -2^(n-1)-1 这个**超出该位宽值域**的数——realdata 与真实临床数据里整段 railed
+    的通道就是它（-2147483649），`extraction.RAIL_VALUES` 曾把该值收进去迁就症状。
+
+    注：`datablock.fmt = '<i4'`，numpy 读出来已是有符号 int32，故本函数对当前所有
+    schema 实为恒等变换；修正边界后它才真正无副作用。
+    """
     import numpy as np
     # 强制使用 64 位整数，修复 Windows 溢出报错
     val = np.int64(1 << (bytesize * 8))
     darray = darray.astype(np.int64)
-    limit = np.int64(val // 2 - 1)
+    limit = np.int64(val // 2)
     darray[darray >= limit] -= val
     return darray
 
