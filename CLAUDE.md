@@ -28,7 +28,7 @@ Abbott WorkMate EP 数据解析/转换工具（fork 自 FNUSA-ICRC epycon）+ Fl
 ## 常用命令
 
 ```powershell
-.venv\Scripts\python.exe -m pytest -q          # 全套测试（147 个，全绿是基线）
+.venv\Scripts\python.exe -m pytest -q          # 全套测试，全绿是基线
 .venv\Scripts\python.exe -m flake8 epycon/     # 必须 0 告警（CI 强制）
 # 真实转换验证（merge 模式）：
 $env:EPYCON_CONFIG="$PWD\config\config.json"; $env:EPYCON_JSONSCHEMA="$PWD\config\schema.json"
