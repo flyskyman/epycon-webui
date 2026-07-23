@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox
 from flask import Flask, request, jsonify, send_file, send_from_directory, make_response, render_template_string
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
+import base64
 import glob
 import json
 from glob import iglob
@@ -998,6 +999,142 @@ def api_select_folder():
         return jsonify({"path": path})
     except Exception as e:
         return jsonify({"error": str(e), "path": ""})
+
+
+# --- WorkMate Log Parser 服务器端扫描 ---
+# 只返回原始字节（base64），解析统一由前端 JS 完成，避免两套解析器漂移。
+_WORKMATE_SKIP_DIRS = {'__pycache__', '$recycle.bin', 'system volume information'}
+
+
+def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=300,
+                        max_depth=8, max_studies=500, time_budget_s=20):
+    """递归扫描 root，收集含 entries.log（可选 MASTER）的 study 目录。
+
+    安全边界：只读取文件名精确匹配 entries.log / MASTER（大小写不敏感）的
+    文件内容；隐藏目录与系统目录剪枝；深度/数量/单文件/总量/时间任一触顶
+    即置 truncated 并停止，超限文件记入 skipped。
+    """
+    t0 = time.time()
+    root = os.path.realpath(root)
+    studies, skipped = [], []
+    truncated = False
+    total_bytes = 0
+    max_file = max_file_mb * 1024 * 1024
+    max_total = max_total_mb * 1024 * 1024
+
+    def _load_file(path):
+        """读取单个文件为 {size, mtime, b64}；超限/失败返回 None 并记录。"""
+        nonlocal total_bytes, truncated
+        try:
+            size = os.path.getsize(path)
+        except OSError as e:
+            skipped.append({"path": path.replace(os.sep, '/'),
+                            "reason": f"read_error: {e}"})
+            return None
+        if size > max_file:
+            skipped.append({"path": path.replace(os.sep, '/'),
+                            "reason": "too_large"})
+            return None
+        if total_bytes + size > max_total:
+            truncated = True
+            return None
+        try:
+            with open(path, 'rb') as f:
+                raw = f.read()
+        except OSError as e:
+            skipped.append({"path": path.replace(os.sep, '/'),
+                            "reason": f"read_error: {e}"})
+            return None
+        total_bytes += len(raw)
+        return {"size": len(raw),
+                "mtime": int(os.path.getmtime(path)),
+                "b64": base64.b64encode(raw).decode('ascii')}
+
+    for dirpath, dirs, files in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        depth = 0 if rel == '.' else rel.count(os.sep) + 1
+        if depth >= max_depth:
+            skipped.append({"path": dirpath.replace(os.sep, '/'),
+                            "reason": "depth_limit"})
+            dirs[:] = []
+        else:
+            dirs[:] = [d for d in dirs
+                       if not d.startswith(('.', '~'))
+                       and d.lower() not in _WORKMATE_SKIP_DIRS]
+
+        if time.time() - t0 > time_budget_s or len(studies) >= max_studies:
+            truncated = True
+            break
+
+        entries_path = master_path = None
+        for fname in files:
+            low = fname.lower()
+            if low == 'entries.log':
+                entries_path = os.path.join(dirpath, fname)
+            elif low == 'master':
+                master_path = os.path.join(dirpath, fname)
+        if not entries_path:
+            continue
+
+        entries_blob = _load_file(entries_path)
+        if truncated:
+            break
+        if entries_blob is None:
+            continue  # 超限/读取失败已入 skipped，study 整体跳过
+        master_blob = _load_file(master_path) if master_path else None
+        if truncated:
+            break
+
+        studies.append({
+            "rel_path": '' if rel == '.' else rel.replace(os.sep, '/'),
+            "abs_path": dirpath.replace(os.sep, '/'),
+            "entries": entries_blob,
+            "master": master_blob,
+        })
+
+    return {"root": root.replace(os.sep, '/'), "studies": studies,
+            "skipped": skipped, "truncated": truncated}
+
+
+@app.route('/api/workmate/scan', methods=['POST'])
+def api_workmate_scan():
+    """WorkMate Log Parser 一键扫描：递归收集 entries.log/MASTER 原始字节。
+
+    请求体 {"root": 绝对路径}；省略 root 时回落到 prefs 里记忆的
+    workmate_scan_root（配合 /api/select-folder + /api/save-prefs 使用）。
+    """
+    data = request.get_json(silent=True) or {}
+    root = data.get('root') or ''
+    if not root:
+        try:
+            if os.path.exists(PREFS_FILE) and os.path.getsize(PREFS_FILE) > 0:
+                with open(PREFS_FILE, 'r', encoding='utf-8') as f:
+                    prefs = json.load(f)
+                if isinstance(prefs, dict):
+                    root = prefs.get('workmate_scan_root') or ''
+        except Exception as e:
+            logger.warning(f"读取 prefs 失败: {e}")
+    if not root:
+        return jsonify({"status": "error",
+                        "message": "未指定扫描根目录，请先选择数据目录"}), 400
+    if not os.path.isabs(root):
+        return jsonify({"status": "error",
+                        "message": "扫描根目录必须是绝对路径"}), 400
+    real = os.path.realpath(root)
+    if not os.path.isdir(real):
+        return jsonify({"status": "error",
+                        "message": f"目录不存在: {root}"}), 400
+    if os.path.dirname(real) == real:
+        # 盘符根/文件系统根：误选会扫全盘，直接拒绝
+        return jsonify({"status": "error",
+                        "message": "不能选择盘符根目录，请选择具体的数据目录"}), 400
+
+    t0 = time.time()
+    result = _scan_workmate_root(real)
+    result["status"] = "ok"
+    result["elapsed_ms"] = int((time.time() - t0) * 1000)
+    return jsonify(result)
+
 
 @app.route('/api/shutdown', methods=['POST'])
 def api_shutdown():
