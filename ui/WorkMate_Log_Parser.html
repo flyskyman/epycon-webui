@@ -4,112 +4,285 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WorkMate Log Parser: V13 Deep Search</title>
+    <title>WorkMate 日志核查台</title>
     <style>
+        /* ============================================================
+           WorkMate 日志核查台 — 设计 token
+           定调：EP 导管室的日志核查仪器。冷静、走纸感、mono 数据。
+           ============================================================ */
         :root {
-            --primary: #0f172a;
-            --accent: #3b82f6;
-            --bg: #f8fafc;
-            --white: #ffffff;
-            --border: #e2e8f0;
-            --success: #10b981;
+            --paper: #F2F5F7;          /* 页面底：冷灰蓝「关机监护屏」 */
+            --surface: #FFFFFF;
+            --ink: #1B2B3A;            /* 主文字：深墨蓝 */
+            --ink-soft: #5B6B7A;
+            --ink-faint: #8CA0AF;
+            --pulse: #0E7C86;          /* 唯一主 accent：监护仪青 */
+            --pulse-soft: #E3F1F2;
+            --warn: #B7791F;           /* 告警琥珀 */
+            --warn-soft: #FDF3E3;
+            --alert: #B42318;          /* 倒退/漂移红 */
+            --alert-soft: #FBEAE8;
+            --grid: #D9E1E7;           /* 边线 / ECG 走纸格 */
+            --mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace;
+            --sans: system-ui, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
-            font-family: 'Segoe UI', Inter, system-ui, sans-serif;
-            background-color: #f8fafc;
-            color: #334155;
+            font-family: var(--sans);
+            background: var(--paper);
+            color: var(--ink);
             margin: 0;
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            /* Fix scroll */
+            font-size: 14px;
         }
 
         .container {
             display: flex;
             flex-direction: column;
-            background: white;
+            background: var(--surface);
             flex: 1;
-            /* Take remaining height */
             height: 100%;
             min-height: 0;
-            /* Critical for nested scroll */
             overflow: hidden;
-            /* Pass scroll to children */
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
         }
 
-        /* New Layout Class for Views */
         .view-container {
             display: flex;
             flex-direction: column;
             flex: 1;
             overflow: hidden;
-            /* Force table-wrap to scroll */
             height: 100%;
             min-height: 0;
-            /* Critical */
         }
 
-        /* Table wrapper（此前重复定义两处，已合并为一处） */
         .table-wrap {
             flex: 1;
             min-height: 0;
-            /* Critical */
             overflow: auto;
             position: relative;
             display: flex;
-            /* Ensure full width */
             flex-direction: column;
         }
 
-        /* Header */
+        /* ---------------- 仪表条（头部） ----------------
+           底衬 1mm/5mm ECG 走纸格（全页唯一格纹，透明度压低）；
+           右上角预留空间给 Flask 注入的「返回数据中心」浮层。 */
         .header {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border);
-            background: #fff;
+            padding: 14px 170px 12px 22px;
+            border-bottom: 1px solid var(--grid);
+            background:
+                linear-gradient(rgba(217, 225, 231, 0.28) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(217, 225, 231, 0.28) 1px, transparent 1px),
+                linear-gradient(rgba(217, 225, 231, 0.14) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(217, 225, 231, 0.14) 1px, transparent 1px),
+                var(--surface);
+            background-size: 20px 20px, 20px 20px, 4px 4px, 4px 4px, auto;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
         }
 
-        .header h2 {
+        .brand .eyebrow {
+            font-family: var(--mono);
+            font-size: 10px;
+            letter-spacing: 0.22em;
+            color: var(--pulse);
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+
+        .brand h1 {
             margin: 0;
-            font-size: 18px;
-            color: var(--primary);
+            font-size: 19px;
+            font-weight: 650;
+            color: var(--ink);
             display: flex;
             align-items: center;
             gap: 10px;
+            letter-spacing: 0.01em;
         }
 
         .badge-count {
-            background: var(--accent);
+            background: var(--pulse);
             color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
+            padding: 1px 8px;
+            border-radius: 3px;
             font-size: 12px;
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
         }
 
-        .stats-bar {
-            font-size: 13px;
-            color: #64748b;
-            display: flex;
-            gap: 20px;
+        /* 面包屑 */
+        #navBreadcrumb {
             align-items: center;
+            font-size: 13px;
+            color: var(--ink-soft);
+            background: var(--paper);
+            padding: 4px 12px;
+            border: 1px solid var(--grid);
+            border-radius: 3px;
         }
 
-        .stat-item strong {
-            color: #0f172a;
+        #navBreadcrumb .nav-link {
+            cursor: pointer;
+            color: var(--pulse);
             font-weight: 600;
         }
 
-        /* Filter Bar */
+        #navCurrent {
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        /* 右侧 mono 读数排 */
+        .stats-bar {
+            display: flex;
+            gap: 18px;
+            align-items: baseline;
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--ink-soft);
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .stat-item .stat-label {
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--ink-faint);
+        }
+
+        .stat-item strong {
+            color: var(--ink);
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ---------------- 操作区 ---------------- */
+        .drop-zone {
+            padding: 14px 22px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--grid);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            transition: background 0.2s;
+        }
+
+        .zone-hint {
+            color: var(--ink-soft);
+            font-size: 13px;
+            margin-left: 10px;
+        }
+
+        .zone-hint b {
+            font-family: var(--mono);
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        #modeIndicator {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--ink-faint);
+            margin-top: 2px;
+        }
+
+        /* 按钮 */
+        .btn-action {
+            padding: 6px 14px;
+            border-radius: 3px;
+            border: 1px solid var(--grid);
+            background: var(--surface);
+            cursor: pointer;
+            font-size: 13px;
+            font-family: var(--sans);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--ink);
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+            font-weight: 500;
+            height: 32px;
+        }
+
+        .btn-action:hover:not(:disabled) {
+            border-color: var(--pulse);
+            color: var(--pulse);
+            background: var(--pulse-soft);
+        }
+
+        .btn-action:focus-visible,
+        .btn-page:focus-visible,
+        .search-box:focus-visible,
+        .checkbox-wrapper:focus-within {
+            outline: 2px solid var(--pulse);
+            outline-offset: 1px;
+        }
+
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--pulse);
+            color: white;
+            border-color: var(--pulse);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #0A626A;
+            border-color: #0A626A;
+            color: white;
+        }
+
+        .btn-green {
+            color: var(--pulse);
+            border-color: var(--pulse);
+        }
+
+        .btn-green:hover:not(:disabled) {
+            background: var(--pulse-soft);
+        }
+
+        .search-box {
+            width: 200px;
+            padding: 6px 12px;
+            border: 1px solid var(--grid);
+            border-radius: 3px;
+            font-size: 13px;
+            font-family: var(--sans);
+            height: 32px;
+            background: var(--surface);
+            color: var(--ink);
+        }
+
+        .search-box::placeholder {
+            color: var(--ink-faint);
+        }
+
+        /* ---------------- 过滤条 ---------------- */
         .filter-bar {
-            padding: 10px 20px;
-            background: #f1f5f9;
-            border-bottom: 1px solid var(--border);
+            padding: 10px 22px;
+            background: var(--paper);
+            border-bottom: 1px solid var(--grid);
             display: flex;
             align-items: center;
             gap: 10px;
@@ -117,10 +290,12 @@
         }
 
         .filter-label {
-            font-size: 12px;
-            font-weight: 700;
-            color: #475569;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--ink-faint);
             text-transform: uppercase;
+            letter-spacing: 0.14em;
             margin-right: 5px;
         }
 
@@ -128,60 +303,45 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            background: white;
+            background: var(--surface);
             padding: 4px 10px;
-            border-radius: 20px;
-            border: 1px solid #cbd5e1;
+            border-radius: 3px;
+            border: 1px solid var(--grid);
             font-size: 12px;
+            font-family: var(--mono);
             cursor: pointer;
             user-select: none;
-            transition: all 0.2s;
+            transition: border-color 0.15s, background 0.15s;
         }
 
         .checkbox-wrapper:hover {
-            border-color: var(--accent);
+            border-color: var(--pulse);
         }
 
         .checkbox-wrapper.active {
-            background: #dbeafe;
-            color: #1e40af;
-            border-color: #93c5fd;
+            background: var(--pulse-soft);
+            color: var(--pulse);
+            border-color: var(--pulse);
         }
 
-        /* [NEW] Highlight for search hits in hidden groups */
         .checkbox-wrapper.hit {
-            background: #fee2e2;
-            color: #991b1b;
-            border-color: #fca5a5;
-            box-shadow: 0 0 0 2px #fecaca;
-            animation: pulse-red 2s infinite;
+            background: var(--alert-soft);
+            color: var(--alert);
+            border-color: var(--alert);
+            animation: pulse-alert 2s infinite;
         }
 
-        @keyframes pulse-red {
-            0% {
-                box-shadow: 0 0 0 0px #fecaca;
-            }
-
-            70% {
-                box-shadow: 0 0 0 4px rgba(254, 202, 202, 0);
-            }
-
-            100% {
-                box-shadow: 0 0 0 0px rgba(254, 202, 202, 0);
-            }
-        }
-
-        .checkbox-wrapper.inactive {
-            opacity: 0.6;
-            background: #f1f5f9;
-            color: #94a3b8;
+        @keyframes pulse-alert {
+            0% { box-shadow: 0 0 0 0 rgba(180, 35, 24, 0.25); }
+            70% { box-shadow: 0 0 0 4px rgba(180, 35, 24, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(180, 35, 24, 0); }
         }
 
         .checkbox-wrapper input {
             display: none;
         }
 
-        /* [NEW] Toast Style */
+        /* ---------------- Toast ---------------- */
         #toast-container {
             position: fixed;
             top: 20px;
@@ -195,151 +355,29 @@
         }
 
         .toast {
-            background: #1e293b;
+            background: var(--ink);
             color: white;
             padding: 10px 20px;
-            border-radius: 8px;
+            border-radius: 3px;
             font-size: 13px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            animation: toast-in 0.3s ease-out, toast-out 0.3s ease-in 2.7s forwards;
+            box-shadow: 0 4px 12px rgba(27, 43, 58, 0.25);
+            animation: toast-in 0.25s ease-out, toast-out 0.25s ease-in 2.75s forwards;
             display: flex;
             align-items: center;
             gap: 10px;
         }
 
         @keyframes toast-in {
-            from {
-                transform: translateY(-20px);
-                opacity: 0;
-            }
-
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
+            from { transform: translateY(-16px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
 
         @keyframes toast-out {
-            from {
-                transform: translateY(0);
-                opacity: 1;
-            }
-
-            to {
-                transform: translateY(-20px);
-                opacity: 0;
-            }
+            from { transform: translateY(0); opacity: 1; }
+            to { transform: translateY(-16px); opacity: 0; }
         }
 
-        /* Drag & Drop Zone */
-        .drop-zone {
-            padding: 20px;
-            margin: 0;
-            background: #fff;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            flex-wrap: wrap;
-            transition: background 0.2s;
-        }
-
-        .drop-zone.drag-over {
-            background: #eff6ff;
-            border-color: var(--accent);
-        }
-
-        .drop-hint {
-            border: 2px dashed #cbd5e1;
-            border-radius: 8px;
-            padding: 10px 20px;
-            color: #64748b;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: #f8fafc;
-            flex-grow: 1;
-            justify-content: center;
-            cursor: pointer;
-        }
-
-        .drop-hint:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-            background: #fff;
-        }
-
-        /* Controls */
-        .btn-action {
-            padding: 6px 14px;
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            background: white;
-            cursor: pointer;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: #334155;
-            transition: all 0.2s;
-            font-weight: 500;
-            height: 32px;
-        }
-
-        .btn-action:hover:not(:disabled) {
-            background: #f8fafc;
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .btn-action:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-            border: none;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            background: #1e293b;
-            color: white;
-        }
-
-        .btn-green {
-            color: var(--success);
-            border-color: #a7f3d0;
-        }
-
-        .btn-green:hover:not(:disabled) {
-            background: #ecfdf5;
-            border-color: var(--success);
-        }
-
-        .search-box {
-            width: 200px;
-            padding: 6px 12px;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-size: 13px;
-            height: 18px;
-        }
-
-        .sort-toggle {
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 13px;
-            color: var(--accent);
-            font-weight: 600;
-            margin-left: auto;
-        }
-
+        /* ---------------- 表格 ---------------- */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -351,133 +389,148 @@
             position: sticky;
             top: 0;
             z-index: 10;
-            background: #f8fafc;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            background: var(--paper);
+            box-shadow: 0 1px 0 var(--grid);
         }
 
         th {
-            padding: 10px 15px;
+            padding: 9px 14px;
             text-align: left;
+            font-family: var(--mono);
+            font-size: 11px;
             font-weight: 600;
-            color: #475569;
-            border-bottom: 1px solid var(--border);
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--ink-soft);
+            border-bottom: 1px solid var(--grid);
             white-space: nowrap;
         }
 
         th.sortable {
             cursor: pointer;
-            transition: background 0.2s;
             position: relative;
             padding-right: 25px;
+            transition: color 0.15s;
         }
 
         th.sortable:hover {
-            background: #f1f5f9;
-            color: var(--accent);
+            color: var(--pulse);
         }
 
         th.sortable::after {
             content: '↕';
             position: absolute;
             right: 8px;
-            color: #cbd5e1;
+            color: var(--ink-faint);
             font-size: 10px;
         }
 
         th.sortable.asc::after {
             content: '↑';
-            color: var(--accent);
+            color: var(--pulse);
         }
 
         th.sortable.desc::after {
             content: '↓';
-            color: var(--accent);
+            color: var(--pulse);
         }
 
         td {
-            padding: 8px 15px;
-            border-bottom: 1px solid var(--border);
+            padding: 7px 14px;
+            border-bottom: 1px solid var(--grid);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        tr:hover {
-            background: #f1f5f9;
+        tbody tr:hover {
+            background: var(--pulse-soft);
         }
 
-        /* Column Widths */
         .col-idx {
-            width: 50px;
-            color: #94a3b8;
+            width: 46px;
+            color: var(--ink-faint);
             text-align: center;
-        }
-
-        /* 增加来源列宽度，以显示完整路径 */
-        .col-source {
-            width: 220px;
-            color: #475569;
-            font-weight: 500;
-            font-size: 12px;
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
         }
 
         .col-time {
             width: 100px;
-            font-family: 'Consolas', monospace;
-            font-weight: bold;
+            font-family: var(--mono);
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
         }
 
         .col-group {
-            width: 100px;
+            width: 110px;
         }
 
         .col-msg {
             width: auto;
         }
 
+        /* 分组 tag：统一低饱和底 + 分组色只用于文字，压住花色 */
         .tag {
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 10px;
             font-weight: 700;
+            font-family: var(--mono);
             text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: var(--paper);
+            border: 1px solid var(--grid);
+            color: var(--ink-soft);
         }
 
-        .tag-PACE {
-            background: #ffedd5;
-            color: #c2410c;
+        .tag-PACE { color: #A15C07; border-color: #E8CFA8; }
+        .tag-EVENT { color: #9D174D; border-color: #ECC7D7; }
+        .tag-NOTE { color: #1A7F37; border-color: #BFE3CB; }
+        .tag-PROTOCOL { color: var(--pulse); border-color: #B5D9DC; }
+
+        /* ---------------- 徽标 ---------------- */
+        .chip {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            font-family: var(--mono);
+            margin-left: 6px;
+            white-space: nowrap;
+            vertical-align: 1px;
         }
 
-        .tag-EVENT {
-            background: #fce7f3;
-            color: #be185d;
+        .chip-new { background: var(--pulse-soft); color: var(--pulse); }
+        .chip-ok { background: #E4F3E9; color: #1A7F37; }
+        .chip-cache { background: var(--paper); color: var(--ink-faint); }
+        .chip-warn { background: var(--warn-soft); color: var(--warn); }
+        .chip-drift { background: var(--alert-soft); color: var(--alert); }
+
+        /* 时间异常行 */
+        tr.row-warn td {
+            background: var(--warn-soft);
         }
 
-        .tag-NOTE {
-            background: #dcfce7;
-            color: #15803d;
+        tr.row-warn td.col-time {
+            color: var(--warn);
         }
 
-        .tag-PROTOCOL {
-            background: #e0f2fe;
-            color: #0369a1;
+        /* 时间轴微条（signature）：日志时间戳映射为刻度，异常加高变色 */
+        .timeline-strip {
+            display: block;
         }
 
-        .tag-SYS,
-        .tag-DEBUG,
-        .tag-UNK {
-            background: #f1f5f9;
-            color: #94a3b8;
+        .timeline-strip.clickable {
+            cursor: crosshair;
         }
 
-        .row-error {
-            background: #fff1f2;
-        }
-
+        /* ---------------- 底部与分页 ---------------- */
         .footer {
-            padding: 10px 20px;
-            border-top: 1px solid var(--border);
-            background: #f8fafc;
+            padding: 9px 20px;
+            border-top: 1px solid var(--grid);
+            background: var(--paper);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -486,114 +539,118 @@
 
         .btn-page {
             padding: 5px 12px;
-            border: 1px solid var(--border);
-            background: white;
-            border-radius: 4px;
+            border: 1px solid var(--grid);
+            background: var(--surface);
+            border-radius: 3px;
             cursor: pointer;
             font-size: 13px;
-            color: #475569;
+            color: var(--ink-soft);
+            font-family: var(--mono);
         }
 
         .btn-page:hover:not(:disabled) {
-            border-color: var(--accent);
-            color: var(--accent);
+            border-color: var(--pulse);
+            color: var(--pulse);
         }
 
         .btn-page:disabled {
-            opacity: 0.5;
+            opacity: 0.45;
             cursor: not-allowed;
-            background: #f1f5f9;
+            background: var(--paper);
         }
 
         .page-info {
-            font-size: 13px;
+            font-size: 12px;
+            font-family: var(--mono);
             font-variant-numeric: tabular-nums;
-            width: 120px;
+            min-width: 140px;
             text-align: center;
+            color: var(--ink-soft);
         }
 
-        /* 状态徽标（缓存/新增/漂移/时间异常） */
-        .chip {
-            display: inline-block;
-            padding: 1px 7px;
-            border-radius: 10px;
-            font-size: 11px;
-            font-weight: 600;
-            margin-left: 4px;
-            white-space: nowrap;
-        }
-
-        .chip-new {
-            background: #dbeafe;
-            color: #1d4ed8;
-        }
-
-        .chip-ok {
-            background: #dcfce7;
-            color: #15803d;
-        }
-
-        .chip-cache {
-            background: #f1f5f9;
-            color: #64748b;
-        }
-
-        .chip-warn {
-            background: #fef3c7;
-            color: #b45309;
-        }
-
-        .chip-drift {
-            background: #fee2e2;
-            color: #b91c1c;
-        }
-
-        /* 时间异常行高亮 */
-        tr.row-warn td {
-            background: #fffbeb;
-        }
-
-        tr.row-warn td.col-time {
-            color: #b45309;
-        }
-
-        /* 存储状态横幅（IndexedDB 不可用时提示） */
+        /* ---------------- 存储横幅 ---------------- */
         #storageBanner {
             display: none;
-            padding: 8px 20px;
-            background: #fef3c7;
-            color: #92400e;
+            padding: 8px 22px;
+            background: var(--warn-soft);
+            color: var(--warn);
             font-size: 13px;
-            border-bottom: 1px solid #fde68a;
+            border-bottom: 1px solid #EBD9B4;
         }
 
-        /* 漂移冲突弹层 */
+        /* ---------------- 诊断抽屉（默认收起，出错自动展开） ---------------- */
+        #consoleDrawer {
+            border-top: 1px solid var(--grid);
+            background: #14212B;
+            flex-shrink: 0;
+        }
+
+        #consoleToggle {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #7FA3B5;
+            font-family: var(--mono);
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            text-align: left;
+            padding: 6px 22px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #consoleToggle:hover {
+            color: #B8D4E0;
+        }
+
+        #consoleBody {
+            display: none;
+            padding: 4px 22px 10px;
+            max-height: 150px;
+            overflow: auto;
+        }
+
+        #consoleDrawer.open #consoleBody {
+            display: block;
+        }
+
+        #sysLog {
+            white-space: pre-wrap;
+            color: #9FBFA8;
+            font-family: var(--mono);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        /* ---------------- 漂移冲突弹层 ---------------- */
         #conflictOverlay {
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(15, 23, 42, 0.5);
+            background: rgba(27, 43, 58, 0.55);
             z-index: 10000;
             align-items: center;
             justify-content: center;
         }
 
         #conflictModal {
-            background: white;
-            border-radius: 10px;
+            background: var(--surface);
+            border-radius: 4px;
+            border-top: 3px solid var(--alert);
             max-width: 720px;
             width: 92%;
             max-height: 80vh;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+            box-shadow: 0 20px 40px rgba(15, 27, 39, 0.35);
         }
 
         #conflictModal .modal-head {
             padding: 14px 20px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--grid);
             font-weight: 700;
-            color: #b91c1c;
+            color: var(--alert);
         }
 
         #conflictModal .modal-body {
@@ -603,25 +660,25 @@
 
         #conflictModal .modal-foot {
             padding: 12px 20px;
-            border-top: 1px solid var(--border);
+            border-top: 1px solid var(--grid);
             display: flex;
             justify-content: flex-end;
             gap: 10px;
         }
 
         .conflict-item {
-            border: 1px solid #fecaca;
-            background: #fef2f2;
-            border-radius: 8px;
+            border: 1px solid #EFC7C2;
+            background: var(--alert-soft);
+            border-radius: 4px;
             padding: 10px 14px;
             margin: 8px 0;
             font-size: 13px;
         }
 
         .conflict-item .diff-line {
-            font-family: 'Consolas', monospace;
+            font-family: var(--mono);
             font-size: 12px;
-            color: #7f1d1d;
+            color: #7A1B12;
             margin: 2px 0;
         }
 
@@ -630,6 +687,14 @@
             display: flex;
             gap: 8px;
         }
+
+        /* ---------------- 动效收敛 ---------------- */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
     </style>
 </head>
 
@@ -637,21 +702,26 @@
 
     <div class="container">
         <div class="header">
-            <div style="display:flex; align-items:center; gap:15px;">
-                <h2 style="margin:0;">WorkMate Explorer <span class="badge-count" id="countBadge">0</span></h2>
+            <div style="display:flex; align-items:center; gap:16px;">
+                <div class="brand">
+                    <div class="eyebrow">WorkMate · entries.log</div>
+                    <h1>日志核查台 <span class="badge-count" id="countBadge">0</span></h1>
+                </div>
                 <!-- Breadcrumb Navigation -->
-                <div id="navBreadcrumb"
-                    style="display:none; align-items:center; font-size:14px; color:#64748b; background:#f1f5f9; padding:4px 12px; border-radius:15px;">
-                    <span class="nav-link" id="navHome"
-                        style="cursor:pointer; color:#3b82f6; font-weight:600;">首页列表</span>
+                <div id="navBreadcrumb" style="display:none;">
+                    <span class="nav-link" id="navHome">首页列表</span>
                     <span style="margin:0 8px;">/</span>
-                    <span id="navCurrent" style="font-weight:600; color:#0f172a;">-</span>
+                    <span id="navCurrent">-</span>
                 </div>
             </div>
             <div id="toast-container"></div>
             <div class="stats-bar">
-                <span class="stat-item">Total Patients: <strong id="statPatientCount">-</strong></span>
-                <span class="stat-item">Time Range: <strong id="statTimeRange">-</strong></span>
+                <span class="stat-item"><span class="stat-label">患者</span><strong
+                        id="statPatientCount">-</strong></span>
+                <span class="stat-item"><span class="stat-label">时间范围</span><strong
+                        id="statTimeRange">-</strong></span>
+                <span class="stat-item"><span class="stat-label">存储</span><strong id="cacheState">-</strong></span>
+                <span class="stat-item"><span class="stat-label">模式</span><strong id="modeState">-</strong></span>
             </div>
         </div>
 
@@ -668,25 +738,23 @@
 
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <button id="btnAutoScan" class="btn-action btn-primary"
-                        style="height:36px; padding:0 20px; font-size:14px; display:none;">⚡ 一键扫描</button>
+                        style="height:36px; padding:0 20px; display:none;">一键扫描</button>
                     <button id="btnChangeRoot" class="btn-action" style="height:36px; display:none;"
                         title="重新选择扫描根目录">更换目录</button>
-                    <button id="btnSingle" class="btn-action" style="height:36px; padding:0 15px; font-size:14px;">📄
-                        导入单文件</button>
-                    <button id="btnScan" class="btn-action"
-                        style="height:36px; padding:0 20px; font-size:14px;">📂 导入文件夹 (递归扫描)</button>
-                    <div style="color:#64748b; font-size:13px; margin-left:10px;">
-                        支持拖拽！会自动匹配同目录下的 <b>MASTER</b> 和 <b>entries.log</b>
-                        <div id="modeIndicator" style="font-size:12px; color:#94a3b8;"></div>
+                    <button id="btnSingle" class="btn-action" style="height:36px;">导入单文件</button>
+                    <button id="btnScan" class="btn-action" style="height:36px;">导入文件夹</button>
+                    <div class="zone-hint">
+                        支持整个文件夹拖入此区域，自动配对同目录下的 <b>MASTER</b> 与 <b>entries.log</b>
+                        <div id="modeIndicator"></div>
                     </div>
                 </div>
 
                 <div id="dashSearchGroup" style="margin-left:auto; display:none; gap:10px;">
                     <input type="text" id="contentSearch" class="search-box" style="width:200px;"
-                        placeholder="🔍 搜索日志内容 (Deep)...">
+                        placeholder="深搜日志内容…">
                     <input type="text" id="dashSearch" class="search-box" style="width:200px;"
-                        placeholder="🔍 搜索姓名、ID 或日期...">
-                    <button id="btnClearCache" class="btn-action" title="删除内嵌数据库中的全部缓存数据">🗑 清空缓存</button>
+                        placeholder="搜索姓名 / ID / 日期…">
+                    <button id="btnClearCache" class="btn-action" title="删除内嵌数据库中的全部缓存数据">清空缓存</button>
                 </div>
             </div>
 
@@ -694,35 +762,41 @@
                 <table id="dashTable">
                     <thead>
                         <tr>
-                            <th style="width:50px;">#</th>
-                            <th style="width:150px;">病人姓名 (Name)</th>
-                            <th style="width:120px;">病人 ID</th>
-                            <th style="width:140px;">操作日期</th>
-                            <th style="width:100px;">日志数</th>
-                            <th>数据源路径 (Source Path)</th>
-                            <th style="width:80px;">操作</th>
+                            <th style="width:46px;">#</th>
+                            <th style="width:170px;">病人姓名</th>
+                            <th style="width:110px;">病人 ID</th>
+                            <th style="width:110px;">操作日期</th>
+                            <th style="width:70px;">日志数</th>
+                            <th style="width:150px;" title="日志时间戳分布：刻度密度即手术节奏，琥珀/红色为时间异常">手术节奏</th>
+                            <th>数据源路径</th>
+                            <th style="width:110px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="dashBody">
                         <tr>
-                            <td colspan="7" style="text-align:center; padding:60px; color:#94a3b8;">
-                                <div style="font-size:40px; margin-bottom:10px;">📂</div>
-                                <div>请点击上方按钮或拖入文件夹开始扫描</div>
+                            <td colspan="8" style="text-align:center; padding:60px; color:var(--ink-faint);">
+                                <div style="font-family:var(--mono); font-size:12px; letter-spacing:0.1em; margin-bottom:8px;">
+                                    NO DATA</div>
+                                <div>点击上方按钮，或将数据文件夹拖入此窗口开始</div>
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
-            <!-- Debug Console (Visible for troubleshooting) -->
-            <div
-                style="background:#1e1e1e; color:#0f0; font-family:monospace; padding:10px; font-size:11px; max-height:150px; overflow:auto; border-top:1px solid #333;">
-                <div style="font-weight:bold; margin-bottom:5px; display:flex; justify-content:space-between;">
-                    <span>📟 System Log (如果导入失败，请截图此区域)</span>
-                    <button onclick="document.getElementById('sysLog').innerHTML=''"
-                        style="font-size:10px; cursor:pointer;">Clear</button>
+            <!-- 诊断抽屉（默认收起，出错自动展开） -->
+            <div id="consoleDrawer">
+                <button id="consoleToggle" type="button">
+                    <span>诊断日志 · SYSTEM LOG</span>
+                    <span id="consoleToggleState">展开 ▸</span>
+                </button>
+                <div id="consoleBody">
+                    <div style="text-align:right; margin-bottom:4px;">
+                        <button id="btnConsoleClear"
+                            style="font-size:10px; cursor:pointer; background:transparent; border:1px solid #3A5060; color:#7FA3B5; border-radius:3px; padding:2px 10px;">清空</button>
+                    </div>
+                    <div id="sysLog">Ready.</div>
                 </div>
-                <div id="sysLog" style="white-space:pre-wrap;">Ready.</div>
             </div>
         </div>
 
@@ -736,9 +810,14 @@
 
                 <div style="margin-left:auto; display:flex; gap:10px;">
                     <input type="text" id="logSearch" class="search-box" placeholder="搜索日志内容...">
-                    <button id="btnCsv" class="btn-action">⬇ CSV</button>
-                    <button id="btnXls" class="btn-action btn-green">⬇ XLS</button>
+                    <button id="btnCsv" class="btn-action">导出 CSV</button>
+                    <button id="btnXls" class="btn-action btn-green">导出 XLS</button>
                 </div>
+            </div>
+
+            <!-- 放大版时间轴：点击跳转到对应日志行 -->
+            <div id="detailTimeline"
+                style="display:none; padding:8px 22px 4px; border-bottom:1px solid var(--grid); background:var(--surface);">
             </div>
 
             <div class="table-wrap">
@@ -822,6 +901,16 @@
                     el.innerText += `\n[${new Date().toLocaleTimeString()}] ${msg}`;
                     el.scrollTop = el.scrollHeight;
                 }
+                // 错误自动展开诊断抽屉
+                if (String(msg).indexOf('❌') !== -1) setConsoleOpen(true);
+            }
+
+            function setConsoleOpen(open) {
+                const drawer = document.getElementById('consoleDrawer');
+                const state = document.getElementById('consoleToggleState');
+                if (!drawer) return;
+                drawer.classList.toggle('open', open);
+                if (state) state.textContent = open ? '收起 ▾' : '展开 ▸';
             }
 
             function showToast(msg, icon = "💡") {
@@ -1171,11 +1260,17 @@
 
             async function initStorage() {
                 db = await openDB();
+                const cacheState = document.getElementById('cacheState');
                 if (!db) {
                     const banner = document.getElementById('storageBanner');
                     if (banner) banner.style.display = 'block';
+                    if (cacheState) { cacheState.textContent = '内存(易失)'; cacheState.title = 'IndexedDB 不可用，刷新后数据丢失'; }
                     log('⚠️ IndexedDB 不可用，本次数据仅保存在内存中，刷新即丢失。');
                     return;
+                }
+                if (cacheState) {
+                    cacheState.textContent = '持久化';
+                    cacheState.title = '数据保存在本浏览器的 IndexedDB 中；file:// 与本地服务两种打开方式的缓存相互独立';
                 }
                 const n = await restoreFromDB();
                 if (n > 0) showToast(`已从内嵌数据库恢复 ${n} 条患者日志缓存`, '💾');
@@ -1478,17 +1573,20 @@
             }
 
             function updateModeUI() {
-                const labels = {
-                    flask: '当前：本地服务模式，可全自动扫描服务器目录',
-                    fsapi: '当前：浏览器直读模式，首次选择目录后可一键重扫',
-                    input: '当前：兼容导入模式（此浏览器不支持目录直读）'
+                const info = {
+                    flask: ['本地服务', '经本地服务打开：一键扫描由后端自动递归数据目录'],
+                    fsapi: ['浏览器直读', '双击直开：首次选择目录后，此后每次打开可一键重扫'],
+                    input: ['兼容导入', '此浏览器不支持目录直读，请使用导入按钮或拖拽']
                 };
+                const m = info[runMode] || info.input;
+                const state = document.getElementById('modeState');
+                if (state) { state.textContent = m[0]; state.title = m[1]; }
                 const ind = document.getElementById('modeIndicator');
-                if (ind) ind.textContent = labels[runMode] || '';
+                if (ind) ind.textContent = m[1];
                 const btn = document.getElementById('btnAutoScan');
                 if (btn) {
                     btn.style.display = (runMode === 'input') ? 'none' : 'flex';
-                    btn.textContent = (runMode === 'flask') ? '⚡ 一键扫描 (服务器)' : '⚡ 一键扫描';
+                    btn.textContent = (runMode === 'flask') ? '一键扫描（服务器）' : '一键扫描';
                 }
                 const chg = document.getElementById('btnChangeRoot');
                 if (chg) chg.style.display = (runMode === 'input') ? 'none' : 'flex';
@@ -1739,9 +1837,9 @@
 
             function setDashLoading(isLoading, msg = "") {
                 if (isLoading) {
-                    els.dashBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:50px;">
-                <div style="font-weight:bold; color:#3b82f6;">⏳ 处理中... (请查看控制台如有错误)</div>
-                <div style="font-size:12px; color:#64748b;">${msg}</div>
+                    els.dashBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:50px;">
+                <div style="font-weight:bold; color:var(--pulse);">处理中…（如有错误请查看下方诊断日志）</div>
+                <div style="font-size:12px; color:var(--ink-soft); font-family:var(--mono);">${msg}</div>
             </td></tr>`;
                 }
             }
@@ -1774,9 +1872,11 @@
                 if (els.countBadge) els.countBadge.innerText = list.length;
 
                 if (els.statTimeRange) {
-                    const validDates = list.map(s => s.date).filter(d => d !== '-' && d.length >= 10);
+                    // 此前用 length>=10 过滤，把 "2026/1/28" 这类未补零日期全部误滤掉了
+                    const validDates = list.map(s => s.date)
+                        .filter(d => d !== '-' && !isNaN(new Date(d).getTime()));
                     if (validDates.length > 0) {
-                        validDates.sort();
+                        validDates.sort((a, b) => new Date(a) - new Date(b));
                         const min = validDates[0];
                         const max = validDates[validDates.length - 1];
                         els.statTimeRange.innerText = (min === max) ? min : `${min} ~ ${max}`;
@@ -1787,7 +1887,7 @@
 
                 els.dashBody.innerHTML = "";
                 if (list.length === 0) {
-                    els.dashBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px;">无匹配记录</td></tr>`;
+                    els.dashBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px;">无匹配记录</td></tr>`;
                     return;
                 }
 
@@ -1812,11 +1912,12 @@
                             <span class="badge-count">${s.rows.length}</span>
                             ${matchInfo}
                         </td>
-                        <td style="color:#64748b; font-size:12px;">${h(s.path)}</td>
+                        <td>${timelineSVG(s, 140, 16)}</td>
+                        <td style="color:var(--ink-soft); font-size:12px; font-family:var(--mono);">${h(s.path)}</td>
                         <td>
                             <div style="display:flex; gap:6px;">
-                                <button class="btn-action btn-primary btn-view" style="padding:2px 8px; font-size:12px;">查看</button>
-                                <button class="btn-action btn-del" title="从列表与缓存中删除" style="padding:2px 8px; font-size:12px;">✕</button>
+                                <button class="btn-action btn-primary btn-view" style="padding:2px 8px; font-size:12px; height:auto;">查看</button>
+                                <button class="btn-action btn-del" title="从列表与缓存中删除" style="padding:2px 8px; font-size:12px; height:auto;">✕</button>
                             </div>
                         </td>
                     `;
@@ -1831,6 +1932,83 @@
 
                     els.dashBody.appendChild(tr);
                 });
+            }
+
+            // ---------------- 时间轴微条（signature） ----------------
+            // 把 study 全部日志时间戳映射为细刻度：密度即手术节奏；
+            // 时间异常处加高变色（倒退红 / 跳变·非法琥珀）。
+            function timelineTicks(rows, w, h) {
+                const valid = rows.filter(r => r.ts > TS_MIN_VALID);
+                if (valid.length < 2) return null;
+                let min = Infinity, max = -Infinity;
+                for (const r of valid) {
+                    if (r.ts < min) min = r.ts;
+                    if (r.ts > max) max = r.ts;
+                }
+                const span = Math.max(1, max - min);
+                // 采样护栏：普通刻度按步长抽稀，异常刻度全画
+                const stride = Math.max(1, Math.ceil(valid.length / 400));
+                let ticks = `<line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="var(--grid)" stroke-width="1"/>`;
+                valid.forEach((r, i) => {
+                    const flagged = r.flags && r.flags.length;
+                    if (!flagged && i % stride !== 0) return;
+                    const x = ((r.ts - min) / span * (w - 2) + 1).toFixed(1);
+                    if (flagged) {
+                        const color = r.flags.indexOf('ts_backward') !== -1 ? 'var(--alert)' : 'var(--warn)';
+                        ticks += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="${color}" stroke-width="1.6"/>`;
+                    } else {
+                        ticks += `<line x1="${x}" y1="${(h * 0.25).toFixed(1)}" x2="${x}" y2="${(h * 0.75).toFixed(1)}" stroke="var(--pulse)" stroke-width="1" opacity="0.45"/>`;
+                    }
+                });
+                return { ticks, min, max, span };
+            }
+
+            function timelineSVG(study, w, h) {
+                const t = timelineTicks(study.rows, w, h);
+                if (!t) return `<svg class="timeline-strip" width="${w}" height="${h}"></svg>`;
+                return `<svg class="timeline-strip" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${t.ticks}</svg>`;
+            }
+
+            // 明细视图放大版：宽度自适应，点击跳转到最近的日志行
+            function renderDetailTimeline() {
+                const cont = document.getElementById('detailTimeline');
+                if (!cont) return;
+                const W = 1000, H = 24;
+                const t = timelineTicks(appData.detailRows, W, H);
+                if (!t) {
+                    cont.style.display = 'none';
+                    return;
+                }
+                const fmt = ts => new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
+                cont.innerHTML =
+                    `<svg class="timeline-strip clickable" width="100%" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${t.ticks}</svg>` +
+                    `<div style="display:flex; justify-content:space-between; font-family:var(--mono); font-size:10px; color:var(--ink-faint); margin-top:2px;">` +
+                    `<span>${fmt(t.min)}</span><span>点击时间轴跳转到对应日志行</span><span>${fmt(t.max)}</span></div>`;
+                cont.style.display = 'block';
+                const svg = cont.querySelector('svg');
+                svg.onclick = (e) => {
+                    const rect = svg.getBoundingClientRect();
+                    const frac = (e.clientX - rect.left) / Math.max(1, rect.width);
+                    jumpToTs(t.min + frac * t.span);
+                };
+            }
+
+            function jumpToTs(ts) {
+                const rows = appData.detailFilterRows;
+                if (!rows.length) return;
+                let best = 0, bestD = Infinity;
+                rows.forEach((r, i) => {
+                    const d = Math.abs(r.ts - ts);
+                    if (d < bestD) { bestD = d; best = i; }
+                });
+                appData.detailPage = Math.floor(best / PAGE_SIZE) + 1;
+                renderLogTable();
+                const tr = els.logBody.children[best % PAGE_SIZE];
+                if (tr && tr.scrollIntoView) {
+                    tr.scrollIntoView({ block: 'center' });
+                    tr.style.outline = '2px solid var(--pulse)';
+                    setTimeout(() => { tr.style.outline = ''; }, 1500);
+                }
             }
 
             // study 状态徽标 + 时间异常徽标
@@ -1918,6 +2096,7 @@
                     switchView('detail');
                     appData.detailPage = 1;
                     applyDetailFilters();
+                    renderDetailTimeline();
                 } catch (e) {
                     console.error("Error loading detail:", e);
                     alert("加载详情失败: " + e.message);
@@ -2170,6 +2349,18 @@
                 const btnChangeRoot = document.getElementById('btnChangeRoot');
                 if (btnAutoScan) btnAutoScan.onclick = () => autoScan(false);
                 if (btnChangeRoot) btnChangeRoot.onclick = () => autoScan(true);
+
+                // 诊断抽屉
+                const consoleToggle = document.getElementById('consoleToggle');
+                if (consoleToggle) consoleToggle.onclick = () => {
+                    const drawer = document.getElementById('consoleDrawer');
+                    setConsoleOpen(drawer && !drawer.classList.contains('open'));
+                };
+                const btnConsoleClear = document.getElementById('btnConsoleClear');
+                if (btnConsoleClear) btnConsoleClear.onclick = () => {
+                    const el = document.getElementById('sysLog');
+                    if (el) el.innerText = 'Ready.';
+                };
 
                 // 打开内嵌数据库并恢复缓存（异步，不阻塞首屏）
                 initStorage();
