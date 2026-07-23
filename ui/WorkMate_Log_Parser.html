@@ -666,13 +666,18 @@
                 <input type="file" id="fileInput" accept=".log" multiple style="display:none">
                 <input type="file" id="folderInput" webkitdirectory style="display:none">
 
-                <div style="display:flex; gap:10px; align-items:center;">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <button id="btnAutoScan" class="btn-action btn-primary"
+                        style="height:36px; padding:0 20px; font-size:14px; display:none;">⚡ 一键扫描</button>
+                    <button id="btnChangeRoot" class="btn-action" style="height:36px; display:none;"
+                        title="重新选择扫描根目录">更换目录</button>
                     <button id="btnSingle" class="btn-action" style="height:36px; padding:0 15px; font-size:14px;">📄
                         导入单文件</button>
-                    <button id="btnScan" class="btn-action btn-primary"
+                    <button id="btnScan" class="btn-action"
                         style="height:36px; padding:0 20px; font-size:14px;">📂 导入文件夹 (递归扫描)</button>
                     <div style="color:#64748b; font-size:13px; margin-left:10px;">
                         支持拖拽！会自动匹配同目录下的 <b>MASTER</b> 和 <b>entries.log</b>
+                        <div id="modeIndicator" style="font-size:12px; color:#94a3b8;"></div>
                     </div>
                 </div>
 
@@ -1455,6 +1460,213 @@
                 scanItems(Array.from(fileList));
             }
 
+            // ---------------- 运行模式检测与一键扫描 ----------------
+            // flask: 经 Flask 服务打开，后端可全自动递归扫描服务器目录
+            // fsapi: file:// 直开且支持 File System Access API（Chrome/Edge）
+            // input: 兜底（Safari/Firefox），沿用导入按钮/拖拽
+            let runMode = 'input';
+
+            async function detectMode() {
+                if (location.protocol === 'http:' || location.protocol === 'https:') {
+                    try {
+                        const r = await fetch('/api/load-prefs');
+                        if (r.ok) return 'flask';
+                    } catch (e) { /* 后端不可达，继续探测 */ }
+                }
+                if (typeof window.showDirectoryPicker === 'function') return 'fsapi';
+                return 'input';
+            }
+
+            function updateModeUI() {
+                const labels = {
+                    flask: '当前：本地服务模式，可全自动扫描服务器目录',
+                    fsapi: '当前：浏览器直读模式，首次选择目录后可一键重扫',
+                    input: '当前：兼容导入模式（此浏览器不支持目录直读）'
+                };
+                const ind = document.getElementById('modeIndicator');
+                if (ind) ind.textContent = labels[runMode] || '';
+                const btn = document.getElementById('btnAutoScan');
+                if (btn) {
+                    btn.style.display = (runMode === 'input') ? 'none' : 'flex';
+                    btn.textContent = (runMode === 'flask') ? '⚡ 一键扫描 (服务器)' : '⚡ 一键扫描';
+                }
+                const chg = document.getElementById('btnChangeRoot');
+                if (chg) chg.style.display = (runMode === 'input') ? 'none' : 'flex';
+            }
+
+            async function autoScan(forceReselect) {
+                if (runMode === 'flask') return flaskScan(forceReselect);
+                if (runMode === 'fsapi') return fsapiScan(forceReselect);
+                els.folderIn.click(); // input 模式兜底
+            }
+
+            // 扫描收尾（flask/fsapi 共用；导入管线 ingestFileMap 有自己的更详细反馈）
+            function finishScanUI(freshCount, conflictCount) {
+                const searchGroup = document.getElementById('dashSearchGroup');
+                if (searchGroup) searchGroup.style.display = (appData.studies.length > 0) ? 'flex' : 'none';
+                if (freshCount > 0) {
+                    let msg = `扫描完成：${freshCount} 个患者日志。`;
+                    if (conflictCount) msg += `其中 ${conflictCount} 个与缓存不一致，待核实。`;
+                    showToast(msg, conflictCount ? '⚠️' : '✅');
+                } else {
+                    showToast('扫描完成，未发现 entries.log', '💡');
+                }
+            }
+
+            // ---------------- Flask provider ----------------
+            async function getFlaskRoot(forceReselect) {
+                if (!forceReselect) {
+                    try {
+                        const prefs = await (await fetch('/api/load-prefs')).json();
+                        if (prefs && prefs.workmate_scan_root) return prefs.workmate_scan_root;
+                    } catch (e) { /* prefs 读不到就走选择器 */ }
+                }
+                const res = await (await fetch('/api/select-folder')).json();
+                if (!res.path) return null;
+                await fetch('/api/save-prefs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workmate_scan_root: res.path })
+                });
+                return res.path;
+            }
+
+            function b64ToBuf(b64) {
+                const bin = atob(b64);
+                const u = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+                return u.buffer;
+            }
+
+            async function flaskScan(forceReselect) {
+                let root;
+                try {
+                    root = await getFlaskRoot(forceReselect);
+                } catch (e) {
+                    log(`❌ 获取扫描目录失败: ${e.message}`);
+                    return;
+                }
+                if (!root) { showToast('未选择扫描目录', '⚠️'); return; }
+
+                setDashLoading(true, `服务器端扫描 ${root} ...`);
+                log(`Flask 模式扫描: ${root}`);
+
+                let body;
+                try {
+                    const resp = await fetch('/api/workmate/scan', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ root: root })
+                    });
+                    body = await resp.json();
+                    if (!resp.ok || body.status !== 'ok') throw new Error(body.message || `HTTP ${resp.status}`);
+                } catch (e) {
+                    setDashLoading(false);
+                    renderDashboard();
+                    log(`❌ 服务器扫描失败: ${e.message}`);
+                    alert(`服务器扫描失败: ${e.message}`);
+                    return;
+                }
+
+                if (body.truncated) {
+                    log(`⚠️ 扫描被截断（超出数量/大小/时间预算），结果可能不完整。`);
+                }
+                (body.skipped || []).forEach(k => log(`  - [Skipped] ${k.path} (${k.reason})`));
+                log(`服务器返回 ${body.studies.length} 个 study（耗时 ${body.elapsed_ms}ms）`);
+
+                const fresh = [];
+                for (const st of body.studies) {
+                    try {
+                        const study = await parseStudy(
+                            st.abs_path,
+                            b64ToBuf(st.entries.b64),
+                            st.master ? b64ToBuf(st.master.b64) : null);
+                        fresh.push(study);
+                    } catch (e) { log(`Parse error ${st.abs_path}: ${e.message}`); }
+                }
+
+                const { conflicts } = await ingestStudies(fresh, 'flask');
+                setDashLoading(false);
+                renderDashboard();
+                finishScanUI(fresh.length, conflicts.length);
+            }
+
+            // ---------------- File System Access provider ----------------
+            async function fsapiPickRoot() {
+                const handle = await window.showDirectoryPicker({ mode: 'read' });
+                await idbPut('handles', handle, 'scanRoot');
+                return handle;
+            }
+
+            // 取回持久化的目录句柄并确保读权限（requestPermission 需在用户手势内）
+            async function fsapiGetRoot() {
+                let handle;
+                try {
+                    handle = await idbGet('handles', 'scanRoot');
+                } catch (e) { return null; }
+                if (!handle) return null;
+                if (typeof handle.queryPermission === 'function') {
+                    let p = await handle.queryPermission({ mode: 'read' });
+                    if (p !== 'granted') p = await handle.requestPermission({ mode: 'read' });
+                    if (p !== 'granted') return null;
+                }
+                return handle;
+            }
+
+            async function fsapiCollect(dirHandle, prefix, out, depth) {
+                if (depth > 8) return; // 与后端 max_depth 对齐
+                for await (const entry of dirHandle.values()) {
+                    const name = entry.name.normalize('NFC'); // mac NFD 文件名规范化
+                    if (name.startsWith('.') || name.startsWith('~')) continue;
+                    if (entry.kind === 'file') {
+                        const low = name.toLowerCase();
+                        if (low === 'entries.log' || low === 'master') {
+                            try {
+                                out.push({ file: await entry.getFile(), path: prefix + name });
+                            } catch (e) { log(`Read Error: ${prefix + name}: ${e.message}`); }
+                        }
+                    } else if (entry.kind === 'directory') {
+                        await fsapiCollect(entry, prefix + name + '/', out, depth + 1);
+                    }
+                }
+            }
+
+            async function fsapiScan(forceReselect) {
+                let handle = null;
+                try {
+                    if (forceReselect) {
+                        handle = await fsapiPickRoot();
+                    } else {
+                        handle = await fsapiGetRoot();
+                        if (!handle) handle = await fsapiPickRoot();
+                    }
+                } catch (e) {
+                    if (e && e.name === 'AbortError') return; // 用户取消选择
+                    log(`❌ 目录访问失败: ${e.message}`);
+                    return;
+                }
+                if (!handle) return;
+
+                setDashLoading(true, `扫描 ${handle.name} ...`);
+                log(`浏览器直读模式扫描: ${handle.name}`);
+
+                const files = [];
+                try {
+                    await fsapiCollect(handle, handle.name + '/', files, 0);
+                } catch (e) {
+                    // 句柄失效：目录被移动/重命名/删除
+                    log(`❌ 扫描失败: ${e.message}，已清除失效句柄，请重新选择目录`);
+                    await idbDelete('handles', 'scanRoot');
+                    setDashLoading(false);
+                    renderDashboard();
+                    alert('目录访问失败（可能已移动或删除），请重新选择。');
+                    return;
+                }
+
+                log(`发现 ${files.length} 个候选文件`);
+                await ingestFileMap(groupFiles(files), files);
+            }
+
             // ================================================================
             // 7. state
             // ================================================================
@@ -1953,8 +2165,17 @@
                 if (els.btnConflictKeepAll) els.btnConflictKeepAll.onclick = () => resolveAllConflicts(false);
                 if (els.btnConflictOverwriteAll) els.btnConflictOverwriteAll.onclick = () => resolveAllConflicts(true);
 
+                // 一键扫描（flask/fsapi 模式）
+                const btnAutoScan = document.getElementById('btnAutoScan');
+                const btnChangeRoot = document.getElementById('btnChangeRoot');
+                if (btnAutoScan) btnAutoScan.onclick = () => autoScan(false);
+                if (btnChangeRoot) btnChangeRoot.onclick = () => autoScan(true);
+
                 // 打开内嵌数据库并恢复缓存（异步，不阻塞首屏）
                 initStorage();
+
+                // 探测运行模式并更新按钮/提示
+                detectMode().then(m => { runMode = m; updateModeUI(); });
             }
 
             boot();
