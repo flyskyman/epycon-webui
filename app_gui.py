@@ -1006,7 +1006,7 @@ def api_select_folder():
 _WORKMATE_SKIP_DIRS = {'__pycache__', '$recycle.bin', 'system volume information'}
 
 
-def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=300,
+def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=64,
                         max_depth=8, max_studies=500, time_budget_s=20):
     """递归扫描 root，收集含 entries.log（可选 MASTER）的 study 目录。
 
@@ -1054,8 +1054,11 @@ def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=300,
         rel = os.path.relpath(dirpath, root)
         depth = 0 if rel == '.' else rel.count(os.sep) + 1
         if depth >= max_depth:
-            skipped.append({"path": dirpath.replace(os.sep, '/'),
-                            "reason": "depth_limit"})
+            # 该目录自身的文件仍会采集，只是不再深入子目录——
+            # 仅当确有子目录被剪掉时才记录，避免 skipped 语义误导
+            if dirs:
+                skipped.append({"path": dirpath.replace(os.sep, '/') + "/*",
+                                "reason": "depth_limit"})
             dirs[:] = []
         else:
             dirs[:] = [d for d in dirs
@@ -1078,11 +1081,16 @@ def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=300,
 
         entries_blob = _load_file(entries_path)
         if truncated:
+            # 总量预算触顶：该 study 未能返回，必须显式入账而非无声消失
+            skipped.append({"path": dirpath.replace(os.sep, '/'),
+                            "reason": "total_budget"})
             break
         if entries_blob is None:
             continue  # 超限/读取失败已入 skipped，study 整体跳过
         master_blob = _load_file(master_path) if master_path else None
         if truncated:
+            skipped.append({"path": dirpath.replace(os.sep, '/'),
+                            "reason": "total_budget"})
             break
 
         studies.append({
@@ -1102,7 +1110,19 @@ def api_workmate_scan():
 
     请求体 {"root": 绝对路径}；省略 root 时回落到 prefs 里记忆的
     workmate_scan_root（配合 /api/select-folder + /api/save-prefs 使用）。
+
+    安全：该端点返回患者文件原始字节，而本应用全局启用了 CORS——
+    必须拒绝非本机页面发起的跨源请求（浏览器对跨源 POST 一定携带
+    Origin 头），否则任意网页可借用户浏览器批量读取数据。
     """
+    origin = request.headers.get('Origin')
+    if origin:
+        from urllib.parse import urlparse
+        host = urlparse(origin).hostname
+        if host not in ('127.0.0.1', 'localhost'):
+            return jsonify({"status": "error",
+                            "message": "拒绝非本机来源的扫描请求"}), 403
+
     data = request.get_json(silent=True) or {}
     root = data.get('root') or ''
     if not root:

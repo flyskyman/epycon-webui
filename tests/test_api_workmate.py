@@ -127,6 +127,26 @@ class TestScanRoot:
         assert res["studies"] == []
         assert any(k["reason"] == "depth_limit" for k in res["skipped"])
 
+    def test_depth_limit_own_files_still_collected(self, tmp_path):
+        """depth==max_depth 目录自身的文件仍被采集，且无子目录时不产生误导性 skipped"""
+        d = tmp_path / "a" / "b"
+        d.mkdir(parents=True)
+        (d / "entries.log").write_bytes(make_entries_log([(3, 1, "x")]))
+        res = _scan_workmate_root(str(tmp_path), max_depth=2)
+        assert len(res["studies"]) == 1
+        assert res["skipped"] == []
+
+    def test_total_budget_records_skipped(self, tmp_path):
+        """总量预算触顶：未返回的 study 必须入 skipped，不允许无声消失"""
+        for name in ("s1", "s2"):
+            d = tmp_path / name
+            d.mkdir()
+            (d / "entries.log").write_bytes(b"\x00" * (600 * 1024))
+        res = _scan_workmate_root(str(tmp_path), max_total_mb=1)
+        assert res["truncated"] is True
+        assert len(res["studies"]) == 1
+        assert any(k["reason"] == "total_budget" for k in res["skipped"])
+
     def test_max_studies_truncates(self, data_root):
         res = _scan_workmate_root(str(data_root), max_studies=1)
         assert len(res["studies"]) <= 1
@@ -162,6 +182,19 @@ class TestScanEndpoint:
         resp = client.post("/api/workmate/scan", json={"root": fs_root})
         assert resp.status_code == 400
         assert "根目录" in resp.get_json()["message"]
+
+    def test_cross_origin_rejected(self, client, data_root):
+        """全局 CORS 放行下，恶意网页不得借用户浏览器批量读取患者文件"""
+        resp = client.post("/api/workmate/scan",
+                           json={"root": str(data_root)},
+                           headers={"Origin": "https://evil.example"})
+        assert resp.status_code == 403
+
+    def test_local_origin_allowed(self, client, data_root):
+        resp = client.post("/api/workmate/scan",
+                           json={"root": str(data_root)},
+                           headers={"Origin": "http://127.0.0.1:5050"})
+        assert resp.status_code == 200
 
     def test_scan_ok(self, client, data_root):
         resp = client.post("/api/workmate/scan", json={"root": str(data_root)})

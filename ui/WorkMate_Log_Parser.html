@@ -1182,10 +1182,23 @@
                 });
             }
 
-            const idbGet = (store, key) => idbOp(store, 'readonly', s => s.get(key));
-            const idbGetAll = (store) => idbOp(store, 'readonly', s => s.getAll());
-            const idbDelete = (store, key) => idbOp(store, 'readwrite', s => s.delete(key));
-            const idbClear = (store) => idbOp(store, 'readwrite', s => s.clear());
+            // 读/删失败降级为"无记录"并写诊断日志——不能让一条损坏记录
+            // 把整条 ingest 链变成 unhandled rejection、加载态永久卡死
+            function idbFail(op, store) {
+                return (e) => {
+                    log(`❌ 数据库${op}失败 (${store}): ${e && e.name}: ${e && e.message}`);
+                    return undefined;
+                };
+            }
+
+            const idbGet = (store, key) =>
+                idbOp(store, 'readonly', s => s.get(key)).catch(idbFail('读取', store));
+            const idbGetAll = (store) =>
+                idbOp(store, 'readonly', s => s.getAll()).catch(idbFail('读取', store));
+            const idbDelete = (store, key) =>
+                idbOp(store, 'readwrite', s => s.delete(key)).catch(idbFail('删除', store));
+            const idbClear = (store) =>
+                idbOp(store, 'readwrite', s => s.clear()).catch(idbFail('清空', store));
 
             async function idbPut(store, val, key) {
                 try {
@@ -1320,6 +1333,11 @@
                 let added = 0, refreshed = 0;
                 for (const s of freshList) {
                     s.key = studyKey(s.path);
+                    // 单文件导入没有目录身份，同名不同源文件会互相碰撞并触发伪漂移；
+                    // 以内容哈希做身份：同文件重导去重，不同文件各自成条
+                    if (s.path.indexOf('Single/') === 0) {
+                        s.key += '#' + (s.contentHash || '').substring(0, 12);
+                    }
                     s.source = sourceLabel || '';
                     const old = await idbGet('studies', s.key);
                     if (!old) {
@@ -1938,7 +1956,10 @@
             // 把 study 全部日志时间戳映射为细刻度：密度即手术节奏；
             // 时间异常处加高变色（倒退红 / 跳变·非法琥珀）。
             function timelineTicks(rows, w, h) {
-                const valid = rows.filter(r => r.ts > TS_MIN_VALID);
+                // 上下界与 detectTimeAnomalies 一致：一条损坏的未来时间戳
+                // 会把 span 拉长几十年、正常刻度全被压扁
+                const upperBound = Date.now() + 24 * 3600 * 1000;
+                const valid = rows.filter(r => r.ts > TS_MIN_VALID && r.ts < upperBound);
                 if (valid.length < 2) return null;
                 let min = Infinity, max = -Infinity;
                 for (const r of valid) {
@@ -2330,14 +2351,25 @@
 
                 // 拖拽导入
                 if (els.dropZone) {
-                    els.dropZone.addEventListener('dragover', e => { e.preventDefault(); els.dropZone.style.background = '#eef2ff'; });
+                    els.dropZone.addEventListener('dragover', e => { e.preventDefault(); els.dropZone.style.background = 'var(--pulse-soft)'; });
                     els.dropZone.addEventListener('dragleave', e => { e.preventDefault(); els.dropZone.style.background = ''; });
-                    els.dropZone.addEventListener('drop', async e => {
+                    els.dropZone.addEventListener('drop', e => {
                         e.preventDefault();
+                        e.stopPropagation(); // 不再冒泡到 window 级兜底，避免重复扫描
                         els.dropZone.style.background = '';
                         if (e.dataTransfer.items) scanItems(e.dataTransfer.items);
                     });
                 }
+
+                // 窗口级兜底：空态文案引导"拖入此窗口"，拖到表格等其他区域
+                // 松手时若无此护栏，浏览器会直接导航到被拖文件、丢失页面状态
+                window.addEventListener('dragover', e => { e.preventDefault(); });
+                window.addEventListener('drop', e => {
+                    e.preventDefault();
+                    if (e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length) {
+                        scanItems(e.dataTransfer.items);
+                    }
+                });
 
                 // 缓存管理与漂移弹层
                 if (els.btnClearCache) els.btnClearCache.onclick = clearCache;
