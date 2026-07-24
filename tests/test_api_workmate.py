@@ -8,11 +8,16 @@ entries.log/MASTER fixture 用 struct 按 x64 版式合成（head 36 + N*220，
 姓名 0x02/64B、ID 0x43/16B），与前端 JS 解析器约定一致。
 """
 import base64
+import inspect
+import json
 import os
+import re
 import struct
+from pathlib import Path
 
 import pytest
 
+import app_gui
 from app_gui import app, _scan_workmate_root
 
 HEAD64 = 36
@@ -214,3 +219,41 @@ class TestScanEndpoint:
         resp = client.post("/api/workmate/scan", json={})
         assert resp.status_code == 200, resp.get_json()
         assert len(resp.get_json()["studies"]) == 2
+
+
+# ========================= 前后端扫描规则同步守卫 =========================
+
+class TestScanRulesSync:
+    """ui/WorkMate_Log_Parser.html 的 SCAN_RULES 是后端 _WORKMATE_* 常量的
+    JS 镜像。两侧规则必须逐条一致，否则同一数据目录在 Flask 模式与
+    file:// 直读模式会扫出不同的 study 集合（数据漂移）。
+    模式同 tests/test_units_contract.py。
+    """
+
+    @pytest.fixture(scope="class")
+    def scan_rules(self):
+        html = Path("ui/WorkMate_Log_Parser.html").read_text(encoding="utf-8")
+        m = re.search(
+            r"SCAN_RULES_SYNC_BEGIN\s*\n\s*const SCAN_RULES = (\{.*?\});\s*\n\s*// SCAN_RULES_SYNC_END",
+            html, re.DOTALL)
+        assert m, "HTML 中未找到 SCAN_RULES 同步标记块"
+        return json.loads(m.group(1))
+
+    def test_max_depth(self, scan_rules):
+        assert scan_rules["maxDepth"] == app_gui._WORKMATE_MAX_DEPTH
+        sig = inspect.signature(_scan_workmate_root)
+        assert sig.parameters["max_depth"].default == app_gui._WORKMATE_MAX_DEPTH
+
+    def test_hidden_prefixes(self, scan_rules):
+        assert tuple(scan_rules["hiddenPrefixes"]) == app_gui._WORKMATE_HIDDEN_PREFIXES
+
+    def test_skip_dirs(self, scan_rules):
+        assert set(scan_rules["skipDirs"]) == app_gui._WORKMATE_SKIP_DIRS
+
+    def test_target_files(self, scan_rules):
+        assert set(scan_rules["targetFiles"]) == set(app_gui._WORKMATE_TARGET_FILES)
+
+    def test_rules_are_lowercase(self, scan_rules):
+        """两侧匹配都先 lowercase，规则表本身必须已是小写，否则永远匹配不上"""
+        for v in scan_rules["skipDirs"] + scan_rules["targetFiles"]:
+            assert v == v.lower()

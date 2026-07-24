@@ -883,6 +883,13 @@
             const DB_NAME = 'workmate_log_parser';
             const DB_VERSION = 1;
 
+            // 扫描规则——与 app_gui.py 的 _WORKMATE_* 常量必须逐条一致，
+            // 否则同一数据目录在 Flask 模式与 file:// 模式会扫出不同结果（漂移）。
+            // tests/test_api_workmate.py::TestScanRulesSync 守卫；此处必须保持纯 JSON 字面量。
+            // SCAN_RULES_SYNC_BEGIN
+            const SCAN_RULES = {"maxDepth": 8, "hiddenPrefixes": [".", "~"], "skipDirs": ["__pycache__", "$recycle.bin", "system volume information"], "targetFiles": ["entries.log", "master"]};
+            // SCAN_RULES_SYNC_END
+
             // ================================================================
             // 2. utils
             // ================================================================
@@ -1734,18 +1741,19 @@
             }
 
             async function fsapiCollect(dirHandle, prefix, out, depth) {
-                if (depth > 8) return; // 与后端 max_depth 对齐
+                if (depth > SCAN_RULES.maxDepth) return;
                 for await (const entry of dirHandle.values()) {
                     const name = entry.name.normalize('NFC'); // mac NFD 文件名规范化
-                    if (name.startsWith('.') || name.startsWith('~')) continue;
+                    const low = name.toLowerCase();
+                    if (SCAN_RULES.hiddenPrefixes.some(p => name.startsWith(p))) continue;
                     if (entry.kind === 'file') {
-                        const low = name.toLowerCase();
-                        if (low === 'entries.log' || low === 'master') {
+                        if (SCAN_RULES.targetFiles.indexOf(low) !== -1) {
                             try {
                                 out.push({ file: await entry.getFile(), path: prefix + name });
                             } catch (e) { log(`Read Error: ${prefix + name}: ${e.message}`); }
                         }
                     } else if (entry.kind === 'directory') {
+                        if (SCAN_RULES.skipDirs.indexOf(low) !== -1) continue;
                         await fsapiCollect(entry, prefix + name + '/', out, depth + 1);
                     }
                 }

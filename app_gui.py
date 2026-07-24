@@ -1003,11 +1003,18 @@ def api_select_folder():
 
 # --- WorkMate Log Parser 服务器端扫描 ---
 # 只返回原始字节（base64），解析统一由前端 JS 完成，避免两套解析器漂移。
+# 以下扫描规则与 ui/WorkMate_Log_Parser.html 的 SCAN_RULES 必须逐条一致，
+# 否则同一目录在 Flask/file:// 两种模式扫出不同结果——
+# tests/test_api_workmate.py::TestScanRulesSync 守卫。
 _WORKMATE_SKIP_DIRS = {'__pycache__', '$recycle.bin', 'system volume information'}
+_WORKMATE_HIDDEN_PREFIXES = ('.', '~')
+_WORKMATE_TARGET_FILES = ('entries.log', 'master')
+_WORKMATE_MAX_DEPTH = 8
 
 
 def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=64,
-                        max_depth=8, max_studies=500, time_budget_s=20):
+                        max_depth=_WORKMATE_MAX_DEPTH, max_studies=500,
+                        time_budget_s=20):
     """递归扫描 root，收集含 entries.log（可选 MASTER）的 study 目录。
 
     安全边界：只读取文件名精确匹配 entries.log / MASTER（大小写不敏感）的
@@ -1062,7 +1069,7 @@ def _scan_workmate_root(root, *, max_file_mb=50, max_total_mb=64,
             dirs[:] = []
         else:
             dirs[:] = [d for d in dirs
-                       if not d.startswith(('.', '~'))
+                       if not d.startswith(_WORKMATE_HIDDEN_PREFIXES)
                        and d.lower() not in _WORKMATE_SKIP_DIRS]
 
         if time.time() - t0 > time_budget_s or len(studies) >= max_studies:
