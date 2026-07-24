@@ -1006,7 +1006,10 @@ def api_select_folder():
 # 以下扫描规则与 ui/WorkMate_Log_Parser.html 的 SCAN_RULES 必须逐条一致，
 # 否则同一目录在 Flask/file:// 两种模式扫出不同结果——
 # tests/test_api_workmate.py::TestScanRulesSync 守卫。
-_WORKMATE_SKIP_DIRS = {'__pycache__', '$recycle.bin', 'system volume information'}
+# _gsdata_ 是 GoodSync 的同步状态/历史目录，内含 entries.log 版本副本，
+# 扫进来即假阳性 study 并触发伪漂移
+_WORKMATE_SKIP_DIRS = {'__pycache__', '$recycle.bin', 'system volume information',
+                       '_gsdata_'}
 _WORKMATE_HIDDEN_PREFIXES = ('.', '~')
 _WORKMATE_TARGET_FILES = ('entries.log', 'master')
 _WORKMATE_MAX_DEPTH = 8

@@ -62,13 +62,17 @@ def data_root(tmp_path):
     bare.mkdir()
     (bare / "entries.log").write_bytes(make_entries_log([(6, ts0, "Pace 600ms")]))
 
-    # 干扰项：隐藏目录、系统目录、无关文件——都不得被读取
+    # 干扰项：隐藏目录、系统目录、同步工具缓存、无关文件——都不得被读取
     hidden = tmp_path / ".hidden"
     hidden.mkdir()
     (hidden / "entries.log").write_bytes(make_entries_log([(3, ts0, "ghost")]))
     pycache = tmp_path / "__pycache__"
     pycache.mkdir()
     (pycache / "entries.log").write_bytes(b"junk")
+    # GoodSync 同步历史目录：内含 entries.log 版本副本，扫进来即假阳性
+    gsdata = tmp_path / "PAT001" / "_gsdata_" / "_history_"
+    gsdata.mkdir(parents=True)
+    (gsdata / "entries.log").write_bytes(make_entries_log([(3, ts0, "stale copy")]))
     (tmp_path / ".DS_Store").write_bytes(b"\x00" * 16)
     (tmp_path / "noise.txt").write_text("not a log")
     return tmp_path
@@ -94,6 +98,7 @@ class TestScanRoot:
         for s in res["studies"]:
             assert ".hidden" not in s["rel_path"]
             assert "__pycache__" not in s["rel_path"]
+            assert "_gsdata_" not in s["rel_path"]
 
     def test_b64_bytes_roundtrip(self, data_root):
         res = _scan_workmate_root(str(data_root))

@@ -887,7 +887,7 @@
             // 否则同一数据目录在 Flask 模式与 file:// 模式会扫出不同结果（漂移）。
             // tests/test_api_workmate.py::TestScanRulesSync 守卫；此处必须保持纯 JSON 字面量。
             // SCAN_RULES_SYNC_BEGIN
-            const SCAN_RULES = {"maxDepth": 8, "hiddenPrefixes": [".", "~"], "skipDirs": ["__pycache__", "$recycle.bin", "system volume information"], "targetFiles": ["entries.log", "master"]};
+            const SCAN_RULES = {"maxDepth": 8, "hiddenPrefixes": [".", "~"], "skipDirs": ["__pycache__", "$recycle.bin", "system volume information", "_gsdata_"], "targetFiles": ["entries.log", "master"]};
             // SCAN_RULES_SYNC_END
 
             // ================================================================
