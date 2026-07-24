@@ -688,6 +688,141 @@
             gap: 8px;
         }
 
+        /* ---------------- 视图标签 ---------------- */
+        .view-tabs {
+            display: flex;
+            gap: 6px;
+            margin-left: 18px;
+        }
+
+        .tab-btn {
+            font-family: var(--mono);
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            padding: 6px 16px;
+            border: 1px solid var(--grid);
+            border-radius: 3px;
+            background: var(--paper);
+            color: var(--ink-soft);
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
+        }
+
+        .tab-btn:hover {
+            color: var(--pulse);
+            border-color: var(--pulse);
+        }
+
+        .tab-btn.active {
+            background: var(--surface);
+            color: var(--pulse);
+            border-color: var(--pulse);
+            font-weight: 700;
+        }
+
+        /* ---------------- 审计台 ---------------- */
+        #auditBody {
+            padding: 18px 22px;
+            overflow: auto;
+        }
+
+        .audit-tiles {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-bottom: 18px;
+        }
+
+        .audit-tile {
+            border: 1px solid var(--grid);
+            border-radius: 4px;
+            background: var(--surface);
+            padding: 10px 16px;
+            min-width: 110px;
+        }
+
+        .audit-tile .tile-num {
+            font-family: var(--mono);
+            font-size: 22px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: var(--ink);
+        }
+
+        .audit-tile .tile-label {
+            font-size: 11px;
+            color: var(--ink-faint);
+            margin-top: 2px;
+        }
+
+        .audit-tile.tile-alert .tile-num { color: var(--alert); }
+        .audit-tile.tile-warn .tile-num { color: var(--warn); }
+        .audit-tile.tile-ok .tile-num { color: var(--pulse); }
+
+        .audit-section {
+            margin-bottom: 20px;
+        }
+
+        .audit-section h3 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--ink);
+            margin: 0 0 4px;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .audit-section .section-note {
+            font-size: 12px;
+            color: var(--ink-faint);
+            margin-bottom: 8px;
+        }
+
+        .audit-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 7px 12px;
+            border: 1px solid var(--grid);
+            border-radius: 3px;
+            margin-bottom: 6px;
+            background: var(--surface);
+            font-size: 13px;
+            flex-wrap: wrap;
+        }
+
+        .audit-row .row-who {
+            font-weight: 600;
+            min-width: 140px;
+        }
+
+        .audit-row .row-path {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--ink-soft);
+            flex: 1;
+            min-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .audit-row .row-evidence {
+            font-size: 12px;
+            color: var(--ink-soft);
+        }
+
+        .audit-empty {
+            text-align: center;
+            padding: 40px;
+            color: var(--ink-faint);
+        }
+
+        #auditMapTable td, #auditMapTable th {
+            padding: 6px 12px;
+        }
+
         /* ---------------- 动效收敛 ---------------- */
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
@@ -706,6 +841,10 @@
                 <div class="brand">
                     <div class="eyebrow">WorkMate · entries.log</div>
                     <h1>日志核查台 <span class="badge-count" id="countBadge">0</span></h1>
+                </div>
+                <div class="view-tabs" id="viewTabs">
+                    <button class="tab-btn active" data-view="dash">病例列表</button>
+                    <button class="tab-btn" data-view="audit">审计台</button>
                 </div>
                 <!-- Breadcrumb Navigation -->
                 <div id="navBreadcrumb" style="display:none;">
@@ -754,8 +893,6 @@
                         placeholder="深搜日志内容…">
                     <input type="text" id="dashSearch" class="search-box" style="width:200px;"
                         placeholder="搜索姓名 / ID / 日期…">
-                    <button id="btnPatientMap" class="btn-action"
-                        title="导出 姓名↔手术日期↔study文件夹 三元映射 CSV（姓名为 MASTER 声明值）">患者对照表</button>
                     <button id="btnClearCache" class="btn-action" title="删除内嵌数据库中的全部缓存数据">清空缓存</button>
                 </div>
             </div>
@@ -844,6 +981,11 @@
                 <button class="btn-page" id="btnNext" disabled>›</button>
                 <button class="btn-page" id="btnLast" disabled>»</button>
             </div>
+        </div>
+
+        <!-- VIEW 3: AUDIT（审计台） -->
+        <div id="view-audit" class="view-container" style="display:none;">
+            <div id="auditBody"></div>
         </div>
 
         <!-- 漂移冲突确认弹层 -->
@@ -1477,15 +1619,20 @@
                 }
             }
 
+            // 对照表排序：按姓名聚簇，Unknown 沉底提醒补 MASTER
+            function sortPatientMap(studies) {
+                return studies.slice().sort((a, b) => {
+                    const au = (a.name === 'Unknown'), bu = (b.name === 'Unknown');
+                    if (au !== bu) return au ? 1 : -1;
+                    return a.name.localeCompare(b.name) || (a.ts - b.ts);
+                });
+            }
+
             // 患者对照表（三元映射的物化形式）；姓名列明示仅为 MASTER 声明
             function buildPatientMapCsv(studies) {
                 const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
                 const flagLabel = { conflict: '同日志异患者', copy: '重复拷贝', suspect: '疑似重复' };
-                const sorted = studies.slice().sort((a, b) => {
-                    const au = (a.name === 'Unknown'), bu = (b.name === 'Unknown');
-                    if (au !== bu) return au ? 1 : -1; // Unknown 沉底，提醒补 MASTER
-                    return a.name.localeCompare(b.name) || (a.ts - b.ts);
-                });
+                const sorted = sortPatientMap(studies);
                 const BOM = String.fromCharCode(0xFEFF);
                 let csv = BOM + '姓名(MASTER声明),患者ID,手术日期,study文件夹,日志行数,entries指纹,标记\n';
                 for (const s of sorted) {
@@ -1503,6 +1650,114 @@
                 const stamp = new Date().toISOString().substring(0, 10);
                 triggerDL(buildPatientMapCsv(appData.studies),
                     `患者对照表_${stamp}.csv`, 'text/csv');
+            }
+
+            // ---------------- 审计台：全部审计发现的聚合视图 ----------------
+            function buildAuditModel(studies) {
+                const m = {
+                    total: studies.length,
+                    conflicts: studies.filter(s => s.dupFlag === 'conflict'),
+                    suspects: studies.filter(s => s.dupFlag === 'suspect'),
+                    copies: studies.filter(s => s.dupFlag === 'copy'),
+                    anomalous: studies.filter(s => s.anomalies && s.anomalies.total > 0),
+                    unknownMaster: studies.filter(s => s.name === 'Unknown'),
+                    driftKept: studies.filter(s => s.driftSeenAt)
+                };
+                m.totalFindings = m.conflicts.length + m.suspects.length +
+                    m.anomalous.length + m.unknownMaster.length;
+                return m;
+            }
+
+            function renderAudit() {
+                const cont = document.getElementById('auditBody');
+                if (!cont) return;
+                computePatientFlags();
+                const m = buildAuditModel(appData.studies);
+
+                const tile = (num, label, cls) =>
+                    `<div class="audit-tile ${cls || ''}"><div class="tile-num">${num}</div><div class="tile-label">${label}</div></div>`;
+                let html = '<div class="audit-tiles">' +
+                    tile(m.total, '病例总数', 'tile-ok') +
+                    tile(m.conflicts.length, '同日志异患者', m.conflicts.length ? 'tile-alert' : '') +
+                    tile(m.suspects.length, '疑似重复', m.suspects.length ? 'tile-warn' : '') +
+                    tile(m.copies.length, '重复拷贝', '') +
+                    tile(m.anomalous.length, '时间异常', m.anomalous.length ? 'tile-warn' : '') +
+                    tile(m.unknownMaster.length, '缺 MASTER', m.unknownMaster.length ? 'tile-warn' : '') +
+                    '</div>';
+
+                const auditRow = (s, evidence) => `
+                    <div class="audit-row">
+                        <span class="row-who">${h(s.name)} <span style="color:var(--ink-faint); font-family:var(--mono); font-size:12px;">${h(s.pid)}</span></span>
+                        <span style="font-family:var(--mono); font-size:12px;">${h(s.date)}</span>
+                        <span class="row-path" title="${h(s.path)}">${h(s.path)}</span>
+                        <span class="row-evidence">${h(evidence)}</span>
+                        <button class="btn-action" data-act="view" data-id="${s.id}" style="padding:2px 10px; font-size:12px; height:auto;">查看</button>
+                        <button class="btn-action" data-act="del" data-id="${s.id}" style="padding:2px 10px; font-size:12px; height:auto;">删除</button>
+                    </div>`;
+                const section = (title, note, items, evidenceFn) => {
+                    if (!items.length) return '';
+                    return `<div class="audit-section"><h3>${title} <span class="badge-count">${items.length}</span></h3>` +
+                        `<div class="section-note">${note}</div>` +
+                        items.map(s => auditRow(s, evidenceFn(s))).join('') + '</div>';
+                };
+                const fp = s => (s.entriesHash || '').substring(0, 12);
+
+                html += section('同日志异患者（MASTER 污染）',
+                    '同一份 entries.log 指纹出现在多个文件夹，但 MASTER 声明了不同患者——至少一个 MASTER 被污染，请逐条核实。',
+                    m.conflicts, s => `entries 指纹 ${fp(s)}`);
+                html += section('疑似重复',
+                    'MASTER 声明的患者+日期相同但日志内容不同——可能是同一手术的不同版本，或其中一方 MASTER 被污染，声明证据不足以下结论。',
+                    m.suspects, s => `entries 指纹 ${fp(s)}`);
+                html += section('重复拷贝',
+                    '日志内容与患者声明均完全一致的纯拷贝，可安全清理其一。',
+                    m.copies, s => `entries 指纹 ${fp(s)}`);
+                html += section('时间异常',
+                    '日志内部时间戳存在倒退 / 跳变 / 非法值，进入明细可用「仅看时间异常」过滤定位。',
+                    m.anomalous, s => `倒退 ${s.anomalies.backward} · 跳变 ${s.anomalies.jump} · 非法 ${s.anomalies.invalid}`);
+                html += section('缺 MASTER（无法建立患者映射）',
+                    '未找到 MASTER 文件，姓名为 Unknown，三元映射缺角——请补齐同目录 MASTER 后重扫。',
+                    m.unknownMaster, () => 'MASTER 未提供姓名');
+                html += section('曾漂移并保留库中版本',
+                    '重扫时检出与磁盘不一致、经人工裁决保留了库中版本的记录（存档参考）。',
+                    m.driftKept, s => `裁决于 ${new Date(s.driftSeenAt).toLocaleString()}`);
+
+                if (m.totalFindings === 0 && !m.copies.length && !m.driftKept.length) {
+                    html += '<div class="audit-empty">当前无审计发现——所有病例的映射、内容指纹与时间序列均一致。</div>';
+                }
+
+                // 患者对照表（三元映射内联视图 + 导出）
+                const sorted = sortPatientMap(appData.studies);
+                const flagLabel = { conflict: '同日志异患者', copy: '重复拷贝', suspect: '疑似重复' };
+                html += '<div class="audit-section"><h3>患者对照表 <span class="badge-count">' + sorted.length + '</span></h3>' +
+                    '<div class="section-note">姓名 ↔ 手术日期 ↔ study 文件夹 的三元映射（姓名为 MASTER 声明值，非验证值）。' +
+                    '<button id="btnPatientMap" class="btn-action" style="display:inline-flex; margin-left:10px; padding:2px 10px; font-size:12px; height:auto;">导出 CSV</button></div>';
+                if (sorted.length) {
+                    html += '<div style="overflow:auto;"><table id="auditMapTable"><thead><tr>' +
+                        '<th>姓名(MASTER声明)</th><th>患者 ID</th><th>手术日期</th><th>study 文件夹</th><th>行数</th><th>entries 指纹</th><th>标记</th>' +
+                        '</tr></thead><tbody>' +
+                        sorted.map(s => `<tr>
+                            <td>${h(s.name)}</td><td style="font-family:var(--mono);">${h(s.pid)}</td>
+                            <td style="font-family:var(--mono);">${h(s.date)}</td>
+                            <td style="font-family:var(--mono); font-size:12px;" title="${h(s.path)}">${h(s.path)}</td>
+                            <td style="font-family:var(--mono);">${s.rows.length}</td>
+                            <td style="font-family:var(--mono); font-size:12px;">${h(fp(s))}</td>
+                            <td>${h(flagLabel[s.dupFlag] || '')}</td>
+                        </tr>`).join('') + '</tbody></table></div>';
+                }
+                html += '</div>';
+
+                cont.innerHTML = html;
+
+                // 行为绑定（innerHTML 重建后重新挂）
+                cont.querySelectorAll('button[data-act]').forEach(b => {
+                    const s = appData.studies.find(x => x.id === b.dataset.id);
+                    if (!s) return;
+                    b.onclick = (b.dataset.act === 'view')
+                        ? () => loadStudyDetail(s.id)
+                        : () => deleteStudy(s).then(() => renderAudit());
+                });
+                const btnMap = cont.querySelector('#btnPatientMap');
+                if (btnMap) btnMap.onclick = downloadPatientMap;
             }
 
             // ================================================================
@@ -1931,14 +2186,16 @@
             // 8. render
             // ================================================================
             function switchView(mode) {
-                if (mode === 'dash') {
-                    els.viewDash.style.display = 'flex';
-                    els.viewDetail.style.display = 'none';
-                    if (els.navBread) els.navBread.style.display = 'none';
-                } else {
-                    els.viewDash.style.display = 'none';
-                    els.viewDetail.style.display = 'flex';
-                }
+                const auditView = document.getElementById('view-audit');
+                els.viewDash.style.display = (mode === 'dash') ? 'flex' : 'none';
+                els.viewDetail.style.display = (mode === 'detail') ? 'flex' : 'none';
+                if (auditView) auditView.style.display = (mode === 'audit') ? 'flex' : 'none';
+                if (els.navBread) els.navBread.style.display = (mode === 'detail') ? 'flex' : 'none';
+                // 标签态：detail 是病例列表的下钻，归属列表标签
+                document.querySelectorAll('#viewTabs .tab-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.view === (mode === 'audit' ? 'audit' : 'dash'));
+                });
+                if (mode === 'audit') renderAudit();
             }
 
             function setDashLoading(isLoading, msg = "") {
@@ -2472,8 +2729,11 @@
 
                 // 缓存管理与漂移弹层
                 if (els.btnClearCache) els.btnClearCache.onclick = clearCache;
-                const btnPatientMap = document.getElementById('btnPatientMap');
-                if (btnPatientMap) btnPatientMap.onclick = downloadPatientMap;
+
+                // 视图标签（病例列表 / 审计台）
+                document.querySelectorAll('#viewTabs .tab-btn').forEach(b => {
+                    b.onclick = () => switchView(b.dataset.view);
+                });
                 if (els.btnConflictKeepAll) els.btnConflictKeepAll.onclick = () => resolveAllConflicts(false);
                 if (els.btnConflictOverwriteAll) els.btnConflictOverwriteAll.onclick = () => resolveAllConflicts(true);
 
