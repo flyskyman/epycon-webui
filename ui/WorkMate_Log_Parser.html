@@ -754,6 +754,8 @@
                         placeholder="深搜日志内容…">
                     <input type="text" id="dashSearch" class="search-box" style="width:200px;"
                         placeholder="搜索姓名 / ID / 日期…">
+                    <button id="btnPatientMap" class="btn-action"
+                        title="导出 姓名↔手术日期↔study文件夹 三元映射 CSV（姓名为 MASTER 声明值）">患者对照表</button>
                     <button id="btnClearCache" class="btn-action" title="删除内嵌数据库中的全部缓存数据">清空缓存</button>
                 </div>
             </div>
@@ -1109,6 +1111,7 @@
                     rows: [],
                     anomalies: null,
                     contentHash: null,
+                    entriesHash: null,
                     hashAlgo: null
                 };
 
@@ -1147,6 +1150,10 @@
                 const hashed = await hashContent(logBuf, masterBuf);
                 study.contentHash = hashed.hash;
                 study.hashAlgo = hashed.algo;
+                // entries 独立指纹（不混入 MASTER 字节）：MASTER 可能被污染，
+                // 患者身份的强证据只能来自日志内容本身
+                const hashedEntries = await hashContent(logBuf, null);
+                study.entriesHash = hashedEntries.hash;
 
                 return study;
             }
@@ -1239,6 +1246,7 @@
                     rows: s.rows,
                     rowCount: s.rows.length,
                     contentHash: s.contentHash,
+                    entriesHash: s.entriesHash || null,
                     hashAlgo: s.hashAlgo,
                     anomalies: s.anomalies,
                     source: s.source || '',
@@ -1260,6 +1268,7 @@
                     rows: rec.rows || [],
                     anomalies: rec.anomalies || null,
                     contentHash: rec.contentHash,
+                    entriesHash: rec.entriesHash || null,
                     hashAlgo: rec.hashAlgo,
                     savedAt: rec.savedAt,
                     verifiedAt: rec.verifiedAt,
@@ -1427,6 +1436,73 @@
                     els.conflictBody.appendChild(div);
                 });
                 els.conflictOverlay.style.display = 'flex';
+            }
+
+            // ---------------- 患者映射：姓名↔日期↔文件夹 ----------------
+            // 唯一源就是 studies store 本身（文件夹为主键），此处按两条证据链
+            // 派生患者维度的重复/污染标记。注意：MASTER 可能被污染，声明的
+            // 姓名只是"声明"；跨文件夹的强身份证据是 entries 内容指纹。
+            function computePatientFlags() {
+                const list = appData.studies;
+                list.forEach(s => { s.dupFlag = null; });
+
+                // 证据链 1（强，内容）：同一份 entries 指纹出现在多个文件夹
+                const byEntries = new Map();
+                for (const s of list) {
+                    if (!s.entriesHash) continue; // 旧缓存记录重扫后才有指纹
+                    const k = s.hashAlgo + ':' + s.entriesHash;
+                    if (!byEntries.has(k)) byEntries.set(k, []);
+                    byEntries.get(k).push(s);
+                }
+                for (const group of byEntries.values()) {
+                    if (group.length < 2) continue;
+                    const idents = new Set(group.map(s => s.name + '|' + s.pid));
+                    // 同日志被标为不同患者 = 至少一个 MASTER 被污染
+                    const flag = (idents.size > 1) ? 'conflict' : 'copy';
+                    group.forEach(s => { s.dupFlag = flag; });
+                }
+
+                // 证据链 2（弱，声明）：患者+日期相同但日志内容不同——
+                // 声明本身可能是脏的，只给"疑似"不下结论
+                const byIdent = new Map();
+                for (const s of list) {
+                    if (s.name === 'Unknown' || s.date === '-') continue;
+                    const k = s.name + '|' + s.pid + '|' + s.date;
+                    if (!byIdent.has(k)) byIdent.set(k, []);
+                    byIdent.get(k).push(s);
+                }
+                for (const group of byIdent.values()) {
+                    if (group.length < 2) continue;
+                    group.forEach(s => { if (!s.dupFlag) s.dupFlag = 'suspect'; });
+                }
+            }
+
+            // 患者对照表（三元映射的物化形式）；姓名列明示仅为 MASTER 声明
+            function buildPatientMapCsv(studies) {
+                const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+                const flagLabel = { conflict: '同日志异患者', copy: '重复拷贝', suspect: '疑似重复' };
+                const sorted = studies.slice().sort((a, b) => {
+                    const au = (a.name === 'Unknown'), bu = (b.name === 'Unknown');
+                    if (au !== bu) return au ? 1 : -1; // Unknown 沉底，提醒补 MASTER
+                    return a.name.localeCompare(b.name) || (a.ts - b.ts);
+                });
+                const BOM = String.fromCharCode(0xFEFF);
+                let csv = BOM + '姓名(MASTER声明),患者ID,手术日期,study文件夹,日志行数,entries指纹,标记\n';
+                for (const s of sorted) {
+                    csv += [esc(s.name), esc(s.pid), esc(s.date), esc(s.path),
+                        s.rows.length,
+                        esc((s.entriesHash || '').substring(0, 12)),
+                        esc(flagLabel[s.dupFlag] || '')].join(',') + '\n';
+                }
+                return csv;
+            }
+
+            function downloadPatientMap() {
+                if (!appData.studies.length) { showToast('暂无数据可导出', '💡'); return; }
+                computePatientFlags();
+                const stamp = new Date().toISOString().substring(0, 10);
+                triggerDL(buildPatientMapCsv(appData.studies),
+                    `患者对照表_${stamp}.csv`, 'text/csv');
             }
 
             // ================================================================
@@ -1896,6 +1972,7 @@
             }
 
             function renderDashboard() {
+                computePatientFlags(); // 列表任何变动后重新派生患者重复/污染标记
                 const list = filteredStudies();
 
                 if (els.statPatientCount) els.statPatientCount.innerText = list.length;
@@ -2060,6 +2137,16 @@
                     const t = `倒退 ${s.anomalies.backward} · 跳变 ${s.anomalies.jump} · 非法 ${s.anomalies.invalid}`;
                     out += `<span class="chip chip-warn" title="${h(t)}">时间异常 ×${s.anomalies.total}</span>`;
                 }
+                const dupMap = {
+                    conflict: ['同日志异患者', 'chip-drift',
+                        '同一份 entries.log 在多个文件夹被 MASTER 标为不同患者——至少一个 MASTER 被污染，请核实'],
+                    copy: ['重复拷贝', 'chip-cache',
+                        '与另一文件夹的日志内容完全一致（纯拷贝），可安全清理其一'],
+                    suspect: ['疑似重复', 'chip-warn',
+                        'MASTER 声明的患者+日期相同但日志内容不同——可能是同一手术的不同版本，或其中一方 MASTER 被污染']
+                };
+                const d = dupMap[s.dupFlag];
+                if (d) out += `<span class="chip ${d[1]}" title="${h(d[2])}">${d[0]}</span>`;
                 return out;
             }
 
@@ -2385,6 +2472,8 @@
 
                 // 缓存管理与漂移弹层
                 if (els.btnClearCache) els.btnClearCache.onclick = clearCache;
+                const btnPatientMap = document.getElementById('btnPatientMap');
+                if (btnPatientMap) btnPatientMap.onclick = downloadPatientMap;
                 if (els.btnConflictKeepAll) els.btnConflictKeepAll.onclick = () => resolveAllConflicts(false);
                 if (els.btnConflictOverwriteAll) els.btnConflictOverwriteAll.onclick = () => resolveAllConflicts(true);
 
