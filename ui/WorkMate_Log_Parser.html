@@ -1160,7 +1160,8 @@
                         const d = e.target.result;
                         if (!d.objectStoreNames.contains('studies')) d.createObjectStore('studies', { keyPath: 'key' });
                         if (!d.objectStoreNames.contains('handles')) d.createObjectStore('handles');
-                        if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
+                        // 注：schema 版本由 IndexedDB 自身的 DB_VERSION 机制承担，
+                        // 无需额外 meta store（曾建过空 store，无消费者，已移除）
                     };
                     req.onsuccess = () => resolve(req.result);
                     req.onerror = () => resolve(null);
@@ -1685,7 +1686,10 @@
                 }
 
                 if (body.truncated) {
+                    // 截断必须让用户可见：toast + 展开诊断抽屉给出 skipped 明细
                     log(`⚠️ 扫描被截断（超出数量/大小/时间预算），结果可能不完整。`);
+                    showToast('已部分扫描：超出数量/大小/时间上限，明细见诊断日志', '⚠️');
+                    setConsoleOpen(true);
                 }
                 (body.skipped || []).forEach(k => log(`  - [Skipped] ${k.path} (${k.reason})`));
                 log(`服务器返回 ${body.studies.length} 个 study（耗时 ${body.elapsed_ms}ms）`);
