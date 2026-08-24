@@ -215,6 +215,13 @@ class TestExtractWindow:
         assert by["V6"]["status"] == "rejected"
         assert r["returned_window"]["clipped"] is False
 
+    def test_all_leads_per_lead_status(self):
+        from epycon.extraction import extract_window
+        r = extract_window(str(REAL), at_elapsed="1:07:15", leads=["all"], version=VER)
+        by = {ld["name"]: ld for ld in r["leads"]}
+        assert by["II"]["status"] == "ok" and by["V6"]["status"] == "rejected"
+        assert len(by) > 2 and {ld["status"] for ld in r["leads"]} <= {"ok", "rejected"}
+
     def test_gap_rejects(self):
         from epycon.extraction import extract_window
         with pytest.raises(ExtractionError, match="空档"):
@@ -316,6 +323,12 @@ class TestLeadSourceValidation:
         header = self._fake_header("HI", 999, num_channels=88)
         with pytest.raises(ExtractionError, match="无效"):
             resolve_lead_sources(header, ["HI"], False)
+
+    def test_all_marks_invalid_source_instead_of_raising(self):
+        # --leads all：源无效导联不整批失败，cols=None 交由 extract_window 标 rejected
+        from epycon.extraction import resolve_lead_sources
+        header = self._fake_header("BAD", None)
+        assert resolve_lead_sources(header, ["all"], False) == [("BAD", None)]
 
 
 class TestRailPure:

@@ -147,23 +147,30 @@ def resolve_lead_sources(header, requested, raw_unipolar):
     original（--raw-unipolar）出单极。名字精确匹配，缺失即报错。
     fail-closed：源参考必须是落在 [0, num_channels) 的有效列索引——
     inactive 导联的 None、或脏 header 的越界索引都拒绝，避免 numpy
-    把 None 当 newaxis、或越界索引抛非 ExtractionError 的 IndexError。"""
+    把 None 当 newaxis、或越界索引抛非 ExtractionError 的 IndexError。
+    requested == ["all"]：取该段通道表全部导联，源无效者不整批失败，
+    cols 记 None 由 extract_window 标 rejected（批量场景免拼名；显式点名
+    仍严格——typo 静默变 rejected 比报错更糟）。"""
     cfg = {"data": {
         "leads": "original" if raw_unipolar else "computed",
         "custom_channels": {},
     }}
     mapping = get_channel_mappings(header, cfg)
+    take_all = list(requested) == ["all"]
     out = []
-    for name in requested:
+    for name in (list(mapping) if take_all else requested):
         if name not in mapping:
             raise ExtractionError(
                 f"导联 {name!r} 不在通道表；可用: {sorted(mapping)}")
         cols = mapping[name]
-        for col in cols:
-            if col is None or not (0 <= col < header.num_channels):
-                raise ExtractionError(
-                    f"导联 {name!r} 源电极参考无效（{col}），本次未有效记录")
-        out.append((name, cols))
+        bad = [c for c in cols if c is None or not (0 <= c < header.num_channels)]
+        if bad and take_all:
+            out.append((name, None))
+        elif bad:
+            raise ExtractionError(
+                f"导联 {name!r} 源电极参考无效（{bad[0]}），本次未有效记录")
+        else:
+            out.append((name, cols))
     return out
 
 
@@ -259,6 +266,10 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
 
     lead_out = []
     for name, cols in sources:
+        if cols is None:
+            lead_out.append({"name": name, "status": "rejected",
+                             "reason": "源电极参考无效，本次未有效记录"})
+            continue
         if any(is_railed(raw_int[:, c]) for c in cols):
             lead_out.append({"name": name, "status": "rejected",
                              "reason": "通道恒定于满量程，电极未连接"})
