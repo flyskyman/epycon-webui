@@ -32,7 +32,10 @@ def test_bad_entry_does_not_block_waveform(tmp_path, caplog):
     shutil.copytree(STUDY, src)
     _poison_first_entry_timestamp(src / "entries.log")
     out = tmp_path / "out"
-    out.mkdir()
+    study_out = out / "study01"
+    study_out.mkdir(parents=True)
+    # 上次运行残留的汇总不得在本次失败后幸存（Codex review P2）
+    (study_out / "entries_summary.csv").write_text("stale\n", encoding="utf-8")
 
     env = {
         "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
@@ -44,7 +47,6 @@ def test_bad_entry_does_not_block_waveform(tmp_path, caplog):
             caplog.at_level(logging.ERROR):
         entry_point()
 
-    study_out = out / "study01"
     for fid in ("00000000", "00000001"):
         assert (study_out / f"{fid}.h5").stat().st_size > 0
     # 汇总标注确实失败了：不产出文件，且以 ERROR 显式暴露，不静默

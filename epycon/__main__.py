@@ -116,15 +116,16 @@ def main():
             # 标注导出失败不得阻止波形落盘（issue #11）：realdata 中未初始化的哨兵
             # 时间戳（2^64/1000 s）让 datetime.fromtimestamp 抛 ValueError/OSError，
             # 此前整个 study 因此 0 字节。显式 ERROR，不静默。
+            summary_path = os.path.join(out_dir, "entries_summary.csv")
             try:
-                EntryPlanter(entries).savecsv(
-                    os.path.join(out_dir, "entries_summary.csv"),
-                    criteria=criteria,
-                )
+                EntryPlanter(entries).savecsv(summary_path, criteria=criteria)
             except Exception as e:
+                # 清掉上次运行残留的汇总，避免"新波形 + 旧标注"的静默不一致
+                if os.path.exists(summary_path):
+                    os.remove(summary_path)
                 logger.error(
-                    f"Failed to export entries_summary.csv for {study_id}, "
-                    f"waveform conversion continues: {e!r}")
+                    f"Failed to export entries_summary.csv for {study_id} "
+                    f"(stale copy removed if any), waveform conversion continues: {e!r}")
 
         logger.info(f"Converting study {study_id}")
         convert_study(
