@@ -111,7 +111,7 @@ def test_parse_failure_clears_stale_annotations(tmp_path, caplog):
     out = tmp_path / "out"
     study_out = out / "study01"
     study_out.mkdir(parents=True)
-    stale = [study_out / "entries_summary.csv", study_out / "00000000.csv"]
+    stale = [study_out / "entries_summary.csv", study_out / "00000000_entries.csv"]
     for p in stale:
         p.write_text("stale\n", encoding="utf-8")
 
@@ -129,15 +129,15 @@ def test_per_file_export_failure_removes_stale_and_logs_without_logger(tmp_path,
     entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
     out = tmp_path / "out"
     out.mkdir()
-    (out / "00000000.csv").write_text("stale\n", encoding="utf-8")
+    (out / "00000000_entries.csv").write_text("stale\n", encoding="utf-8")
 
     with caplog.at_level(logging.ERROR):
         n = convert_study(str(src), "study01", str(out), _normal_cfg(), entries, logger=None)
 
     assert n == 2
     _assert_waveforms_written(out)
-    assert not (out / "00000000.csv").exists()   # 哨兵 fid=00000000，该文件导出失败
-    assert (out / "00000001.csv").exists()       # 好条目的导出不受影响
+    assert not (out / "00000000_entries.csv").exists()   # 哨兵 fid=00000000，该文件导出失败
+    assert (out / "00000001_entries.csv").exists()       # 好条目的导出不受影响
     assert any("00000000" in m for m in _errors(caplog))
 
 
@@ -165,7 +165,7 @@ def test_stale_removal_failure_does_not_abort_conversion(tmp_path, caplog, monke
     entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
     out = tmp_path / "out"
     out.mkdir()
-    (out / "00000000.csv").write_text("stale\n", encoding="utf-8")
+    (out / "00000000_entries.csv").write_text("stale\n", encoding="utf-8")
 
     def locked(path):
         raise PermissionError(path)
@@ -210,3 +210,19 @@ def test_gui_parse_failure_clears_stale_summary(tmp_path, monkeypatch):
     assert ok, logs
     _assert_waveforms_written(study_out)
     assert not stale.exists()
+
+
+def test_csv_entries_export_does_not_clobber_csv_waveform(tmp_path):
+    """issue #21：csv+csv 时标注写 <fid>_entries.csv，波形 <fid>.csv 完好。"""
+    src = _copy_study(tmp_path)
+    entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    n = convert_study(str(src), "study01", str(out), _normal_cfg(data_fmt="csv"), entries)
+
+    assert n == 2
+    wave = (out / "00000001.csv").read_text(encoding="utf-8").splitlines()
+    assert "(uV)" in wave[0] and len(wave) > 1000            # 波形未被标注覆盖
+    ann = (out / "00000001_entries.csv").read_text(encoding="utf-8").splitlines()
+    assert ann[0].startswith("Group,FileId") and len(ann) == 3   # 夹具 fid=00000001 有 2 条

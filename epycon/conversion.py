@@ -255,10 +255,12 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
     # 跳过或失败都不得留下旧标注冒充本次产物。
     if cfg["entries"]["convert"]:
         file_fmt = cfg["entries"]["output_format"]
-        entry_path = os.path.join(out_dir, datalog_id + "." + file_fmt)
+        # 标注 CSV 命名 <fid>_entries.csv，与波形 CSV（<fid>.csv）区分——此前 csv+csv 时
+        # 标注直接覆盖刚写好的波形（issue #21）。.sel 保持 <fid>.sel：SignalPlant 按文件名配对
+        suffix = "_entries.csv" if file_fmt == "csv" else "." + file_fmt
+        entry_path = os.path.join(out_dir, datalog_id + suffix)
         try:
-            # csv+csv 时标注与波形同名（issue #21），绝不能把刚写好的波形删掉
-            if entry_path != full_output_path and os.path.exists(entry_path):
+            if os.path.exists(entry_path):
                 os.remove(entry_path)
             if entries:
                 criteria = {
