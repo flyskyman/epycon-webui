@@ -23,6 +23,7 @@
 1. 安装依赖：`pip install -r requirements.txt`
 2. 运行工具集：打开 `ui/index.html` 或运行 `python app_gui.py`
 3. 使用 VS Code 任务：`Ctrl+Shift+P` > `Tasks: Run Task` > `运行 Epycon GUI`
+4. 输出命名（每个 study 一个目录）：波形 `<fid>.h5` / `<fid>.csv`（合并模式 `<study>_merged.h5`），逐段标注 `<fid>_entries.csv` 或 `<fid>.sel`，汇总标注 `entries_summary.csv`
 
 ## 核心技术：ECG 信号处理与渲染流水线 ("Golden Configuration")
 
