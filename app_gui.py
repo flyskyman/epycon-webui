@@ -636,21 +636,24 @@ def execute_epycon_conversion(cfg):
                         conv_logger.info(f"ℹ️ 标注文件不存在: {epath}")
                 
                 # --- [Step 1.5] 导出汇总 entries CSV (summary_csv) ---
-                # [FIX] 仅当 convert=True 时才导出 summary (与 UI 逻辑一致)
-                if cfg["entries"]["convert"] and cfg["entries"].get("summary_csv", False) and all_entries_norm:
+                # 仅当 convert=True 时才导出 summary。先清上次残留：entries 解析失败或
+                # 为空时也不得留下旧汇总冒充本次产物（与 CLI 一致，issue #19）
+                if cfg["entries"]["convert"] and cfg["entries"].get("summary_csv", False):
+                    summary_path = os.path.join(study_out_dir, "entries_summary.csv")
                     try:
-                        summary_path = os.path.join(study_out_dir, "entries_summary.csv")
-                        entryplanter = EntryPlanter(all_entries_norm)
-                        filter_groups = cfg["entries"].get("filter_annotation_type", [])
-                        criteria = {
-                            "fids": list(valid_datalogs) if valid_datalogs else [],
-                            "groups": filter_groups if filter_groups else [],
-                        }
-                        entryplanter.savecsv(summary_path, criteria=criteria)
-                        conv_logger.info(f"📊 导出汇总标注: entries_summary.csv")
-                    except Exception as e:
-                        conv_logger.warning(f"⚠️ 汇总 CSV 导出失败: {e}")
-
+                        if os.path.exists(summary_path):
+                            os.remove(summary_path)
+                        if all_entries_norm:
+                            entryplanter = EntryPlanter(all_entries_norm)
+                            filter_groups = cfg["entries"].get("filter_annotation_type", [])
+                            criteria = {
+                                "fids": list(valid_datalogs) if valid_datalogs else [],
+                                "groups": filter_groups if filter_groups else [],
+                            }
+                            entryplanter.savecsv(summary_path, criteria=criteria)
+                            conv_logger.info(f"📊 导出汇总标注: entries_summary.csv")
+                    except Exception:
+                        conv_logger.exception("⚠️ 汇总 CSV 导出失败，波形转换继续")
                 # --- [Step 2] 数据转换：统一调用核心库实现 (epycon.conversion) ---
                 # 此前这里维护着与 __main__.py 平行的 merge/normal 实现，
                 # 已漂移出多个标注定位缺陷（墙钟偏移映射、int 截断、e.msg 字段名、

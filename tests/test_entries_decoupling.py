@@ -185,3 +185,28 @@ def test_gui_export_global_csv_raises_instead_of_none(tmp_path):
     import app_gui
     with pytest.raises(OSError):
         app_gui.export_global_csv([], str(tmp_path / "missing"), "study01")
+
+
+def test_gui_parse_failure_clears_stale_summary(tmp_path, monkeypatch):
+    """GUI 路径与 CLI 同款：entries.log 解析失败时旧 entries_summary.csv 不得幸存。"""
+    pytest.importorskip("tkinter")
+    import app_gui
+    src = _copy_study(tmp_path)
+    with open(src / "entries.log", "ab") as f:
+        f.write(b"\x00")
+    out = tmp_path / "out"
+    study_out = out / "study01"
+    study_out.mkdir(parents=True)
+    stale = study_out / "entries_summary.csv"
+    stale.write_text("stale\n", encoding="utf-8")
+
+    cfg = _normal_cfg()
+    cfg["paths"] = {"input_folder": str(src.parent), "output_folder": str(out),
+                    "studies": ["study01"]}
+    cfg["entries"]["convert"] = True
+    cfg["entries"]["summary_csv"] = True
+    ok, logs = app_gui.execute_epycon_conversion(cfg)
+
+    assert ok, logs
+    _assert_waveforms_written(study_out)
+    assert not stale.exists()
