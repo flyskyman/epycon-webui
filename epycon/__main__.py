@@ -106,6 +106,10 @@ def main():
                     )
             except OSError:
                 logger.warning("Could not find ENTRIES log file. Annotation export will be skipped.")
+            except Exception:
+                logger.exception(
+                    f"Failed to parse ENTRIES log file for {study_id}, "
+                    f"annotations skipped, waveform conversion continues")
 
         if cfg["entries"]["convert"] and cfg["entries"]["summary_csv"] and entries:
             # create summary csv containing all annotations

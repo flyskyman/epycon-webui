@@ -491,16 +491,14 @@ def clean_entries_content(entries):
 from epycon.core.helpers import get_channel_mappings
 
 def export_global_csv(entries, target_dir, study_id_for_name):
-    try:
-        filename = f"{study_id_for_name}_All_Entries_Normalized.csv"
-        path = os.path.join(target_dir, filename)
-        with open(path, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['UnixSeconds', 'Group', 'Message'])
-            for e in entries:
-                writer.writerow([f"{e.timestamp:.3f}", e.group, e.message])
-        return filename
-    except Exception: return None
+    filename = f"{study_id_for_name}_All_Entries_Normalized.csv"
+    path = os.path.join(target_dir, filename)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['UnixSeconds', 'Group', 'Message'])
+        for e in entries:
+            writer.writerow([f"{e.timestamp:.3f}", e.group, e.message])
+    return filename
 
 # --- 核心转换逻辑 ---
 def execute_epycon_conversion(cfg):
@@ -627,7 +625,10 @@ def execute_epycon_conversion(cfg):
                             
                             # [FIX] 仅当用户启用 export 时才保留这份中间文件
                             if cfg["entries"]["convert"]:
-                                export_global_csv(all_entries_norm, study_out_dir, study_id)
+                                try:
+                                    export_global_csv(all_entries_norm, study_out_dir, study_id)
+                                except Exception:
+                                    conv_logger.exception("⚠️ 归一化标注 CSV 导出失败，波形转换继续")
                         except Exception as e:
                             import traceback
                             conv_logger.warning(f"⚠️ 读取失败: {e}\n{traceback.format_exc()}")

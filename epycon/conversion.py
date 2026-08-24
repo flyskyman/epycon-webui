@@ -4,6 +4,7 @@
 int 截断亚秒、字段名漂移、x32 时间戳误读等），故收敛到本模块。
 任何转换语义的修改只允许发生在这里。
 """
+import logging
 import os
 from datetime import datetime
 from glob import iglob
@@ -256,24 +257,22 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
             "groups": cfg["entries"]["filter_annotation_type"],
         }
         file_fmt = cfg["entries"]["output_format"]
+        entry_path = os.path.join(out_dir, datalog_id + "." + file_fmt)
         try:
             if file_fmt == "csv":
                 entryplanter.savecsv(
-                    os.path.join(out_dir, datalog_id + "." + file_fmt),
-                    criteria=criteria,
-                    ref_timestamp=ref_timestamp,
+                    entry_path, criteria=criteria, ref_timestamp=ref_timestamp,
                 )
             elif file_fmt == "sel":
                 entryplanter.savesel(
-                    os.path.join(out_dir, datalog_id + "." + file_fmt),
-                    ref_timestamp,
-                    fs,
-                    column_names,
-                    criteria=criteria,
+                    entry_path, ref_timestamp, fs, column_names, criteria=criteria,
                 )
-        except Exception as e:
-            if logger:
-                logger.error(f"   ❌ Error exporting entry file for {datalog_id}: {e}")
+        except Exception:
+            # 波形已落盘，标注导出失败只清残留 + 显式报错，不回滚波形（issue #19）
+            if os.path.exists(entry_path):
+                os.remove(entry_path)
+            (logger or logging.getLogger(__name__)).exception(
+                f"   ❌ Error exporting entry file for {datalog_id} (stale copy removed if any)")
     return 1
 
 

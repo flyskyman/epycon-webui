@@ -1,9 +1,11 @@
-"""波形与 entries 解耦（GitHub issue #11）。
+"""波形与 entries 解耦（GitHub issue #11 / #19）。
 
 单个坏 entry（未初始化哨兵时间戳 2^64/1000 s）曾让 `_tocsv` 的
 `datetime.fromtimestamp` 抛 ValueError，CLI 在 convert_study 之前崩溃，
-输出目录 0 字节。波形转换不依赖 entries，不得被连坐。
+输出目录 0 字节。波形转换不依赖 entries，不得被连坐；entries 侧失败必须
+显式（ERROR + 堆栈）、不留上次运行的残留文件。
 """
+import json
 import logging
 import os
 import shutil
@@ -11,8 +13,12 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from epycon.__main__ import main as entry_point
 from epycon.config.byteschema import WMx64EntriesSchema
+from epycon.conversion import convert_study
+from epycon.iou import readentries
 
 ROOT = Path(__file__).parent.parent
 STUDY = ROOT / "examples" / "data" / "study01"
@@ -29,9 +35,34 @@ def _poison_first_entry(entries_log):
     entries_log.write_bytes(bytes(raw))
 
 
-def test_bad_entry_does_not_block_waveform(tmp_path, caplog):
+def _copy_study(tmp_path):
     src = tmp_path / "in" / "study01"
     shutil.copytree(STUDY, src)
+    return src
+
+
+def _run_cli(src, out):
+    env = {
+        "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
+        "EPYCON_JSONSCHEMA": str(ROOT / "epycon" / "config" / "schema.json"),
+    }
+    argv = ["epycon", "-i", str(src.parent), "-o", str(out),
+            "-fmt", "h5", "-e", "True", "-efmt", "csv"]
+    with patch.dict(os.environ, env), patch.object(sys, "argv", argv):
+        entry_point()
+
+
+def _assert_waveforms_written(study_out):
+    for fid in ("00000000", "00000001"):
+        assert (study_out / f"{fid}.h5").stat().st_size > 0
+
+
+def _errors(caplog):
+    return [r.message for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_bad_entry_does_not_block_waveform(tmp_path, caplog):
+    src = _copy_study(tmp_path)
     _poison_first_entry(src / "entries.log")
     out = tmp_path / "out"
     study_out = out / "study01"
@@ -39,19 +70,55 @@ def test_bad_entry_does_not_block_waveform(tmp_path, caplog):
     # 上次运行残留的汇总不得在本次失败后幸存（Codex review P2）
     (study_out / "entries_summary.csv").write_text("stale\n", encoding="utf-8")
 
-    env = {
-        "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
-        "EPYCON_JSONSCHEMA": str(ROOT / "epycon" / "config" / "schema.json"),
-    }
-    argv = ["epycon", "-i", str(src.parent), "-o", str(out),
-            "-fmt", "h5", "-e", "True", "-efmt", "csv"]
-    with patch.dict(os.environ, env), patch.object(sys, "argv", argv), \
-            caplog.at_level(logging.ERROR):
-        entry_point()
+    with caplog.at_level(logging.ERROR):
+        _run_cli(src, out)
 
-    for fid in ("00000000", "00000001"):
-        assert (study_out / f"{fid}.h5").stat().st_size > 0
+    _assert_waveforms_written(study_out)
     # 汇总标注确实失败了：不产出文件，且以 ERROR 显式暴露，不静默
     assert not (study_out / "entries_summary.csv").exists()
-    assert any("entries_summary" in r.message and r.levelno >= logging.ERROR
-               for r in caplog.records)
+    assert any("entries_summary" in m for m in _errors(caplog))
+
+
+def test_unparseable_entries_log_does_not_block_waveform(tmp_path, caplog):
+    """#19 第 1 项：readentries 的 ValueError（字节长度不整除）不得连坐波形。"""
+    src = _copy_study(tmp_path)
+    with open(src / "entries.log", "ab") as f:
+        f.write(b"\x00")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    with caplog.at_level(logging.ERROR):
+        _run_cli(src, out)
+
+    _assert_waveforms_written(out / "study01")
+    assert any("ENTRIES" in m for m in _errors(caplog))
+
+
+def test_per_file_export_failure_removes_stale_and_logs_without_logger(tmp_path, caplog):
+    """#19 第 2 项：逐文件标注导出失败 → 清残留；logger=None 也要有诊断。"""
+    src = _copy_study(tmp_path)
+    _poison_first_entry(src / "entries.log")
+    cfg = json.loads((ROOT / "epycon" / "config" / "config.json").read_text(encoding="utf-8"))
+    cfg["data"]["merge_logs"] = False
+    cfg["entries"]["output_format"] = "csv"   # 默认 sel 不经 fromtimestamp，不会触发
+    entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "00000000.csv").write_text("stale\n", encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR):
+        n = convert_study(str(src), "study01", str(out), cfg, entries, logger=None)
+
+    assert n == 2
+    _assert_waveforms_written(out)
+    assert not (out / "00000000.csv").exists()   # 哨兵 fid=00000000，该文件导出失败
+    assert (out / "00000001.csv").exists()       # 好条目的导出不受影响
+    assert any("00000000" in m for m in _errors(caplog))
+
+
+def test_gui_export_global_csv_raises_instead_of_none(tmp_path):
+    """#19 第 3 项：export_global_csv 不得吞异常返回 None。"""
+    pytest.importorskip("tkinter")
+    import app_gui
+    with pytest.raises(OSError):
+        app_gui.export_global_csv([], str(tmp_path / "missing"), "study01")
