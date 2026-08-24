@@ -167,7 +167,8 @@ python -m epycon
 python -m epycon.cli.extract --study <study目录> --at 1:07:15 --leads "V6,CS 3-4" --window 2 --version 4.3.2
 ```
 
-常用参数：`--at`（流逝时刻，或 `--epoch` 传绝对秒）、`--leads`（逗号分隔导联名）、
+常用参数：`--at`（流逝时刻，或 `--epoch` 传绝对秒）、`--leads`（逗号分隔导联名，按目标段
+通道表精确匹配——各段通道表可不同；`all` = 该段全部导联，源无效者单独标 rejected）、
 `--window N`（对称 ±N 秒，或 `--before/--after` 非对称）、`--raw-unipolar`（出原始单极而非
 双极合成）、`--raw-counts`（出原始整数而非 µV）、`--out x.npz`。全程 fail-closed：时刻落
 段间空档、未连接导联、畸形输入等一律返回结构化错误（stderr JSON + 退出码 2）。

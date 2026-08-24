@@ -16,15 +16,18 @@ def _build_parser():
     ap.add_argument("--study", required=True)
     tgt = ap.add_mutually_exclusive_group(required=True)
     tgt.add_argument("--at", help="流逝时刻 H:MM:SS[.sss]")
-    tgt.add_argument("--epoch", type=float, help="绝对 epoch 秒")
-    ap.add_argument("--leads", required=True, help="逗号分隔导联名")
+    tgt.add_argument("--epoch", type=float,
+                     help="绝对 epoch 秒（浮点须带足精度，如 repr(float)，否则丢亚秒位）")
+    ap.add_argument("--leads", required=True,
+                    help="逗号分隔导联名，按目标段的通道表精确匹配（各 .log 段通道表可不同，"
+                         "勿用别段的表拼名）；all = 该段全部导联，源无效者单独标 rejected")
     ap.add_argument("--window", type=float, default=2.0)
     ap.add_argument("--before", type=float)
     ap.add_argument("--after", type=float)
     ap.add_argument("--raw-unipolar", action="store_true")
     ap.add_argument("--raw-counts", action="store_true")
     ap.add_argument("--version")
-    ap.add_argument("--out", help="写 .npz 文件而非 stdout 全量")
+    ap.add_argument("--out", help="写 .npz 文件而非 stdout 全量（相对路径按当前工作目录解析）")
     return ap
 
 
