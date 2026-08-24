@@ -111,7 +111,8 @@ def test_parse_failure_clears_stale_annotations(tmp_path, caplog):
     out = tmp_path / "out"
     study_out = out / "study01"
     study_out.mkdir(parents=True)
-    stale = [study_out / "entries_summary.csv", study_out / "00000000_entries.csv"]
+    stale = [study_out / "entries_summary.csv", study_out / "00000000_entries.csv",
+             study_out / "00000000.csv"]   # 最后一个：#21 改名前的旧标注文件
     for p in stale:
         p.write_text("stale\n", encoding="utf-8")
 

@@ -505,14 +505,15 @@ def execute_epycon_conversion(cfg):
     mem_handler = MemoryLogHandler()
     mem_handler.setFormatter(logging.Formatter('%(message)s')) # 内存日志只记录纯消息
     
-    # 获取全局定义的 logger
-    conv_logger = logging.getLogger("epycon_web")
+    # [MODIFIED] 现在接受 task_id 以更新状态
+    task_id = cfg.get("_task_id")
+
+    # 每任务独立子 logger：executor 最多 4 个转换并发，共用一个 logger 会让日志互串
+    conv_logger = logging.getLogger(f"epycon_web.conv.{task_id or id(cfg)}")
     conv_logger.setLevel(logging.DEBUG)  # 确保捕获所有级别
     conv_logger.propagate = False  # 不传播到父 logger，只用我们的处理器
     conv_logger.addHandler(mem_handler)  # bb74e5e 误删，此后 res_logs 恒空（issue #23）
-    
-    # [MODIFIED] 现在接受 task_id 以更新状态
-    task_id = cfg.get("_task_id")
+
     
     def update_progress(p, log_msg=None):
         if task_id in TASKS:
@@ -916,12 +917,14 @@ def get_task_status(task_id):
     if not task:
         return jsonify({"status": "not_found"}), 404
     
-    # 提取新日志并清空（防止重复传输）
+    # 先读 status 再清空日志：后台线程先 extend 最终日志、后置 completed，
+    # 反过来读会在完成瞬间把最后一批日志清掉而前端已停止轮询
+    status = task['status']
     new_logs = task['logs']
     task['logs'] = []
-    
+
     return jsonify({
-        "status": task['status'],
+        "status": status,
         "progress": task['progress'],
         "logs": new_logs,
         "result": task['result']

@@ -262,6 +262,9 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
         try:
             if os.path.exists(entry_path):
                 os.remove(entry_path)
+            legacy = os.path.join(out_dir, datalog_id + ".csv")   # #21 改名前的标注文件名
+            if file_fmt == "csv" and legacy != full_output_path and os.path.exists(legacy):
+                os.remove(legacy)
             if entries:
                 criteria = {
                     "fids": [datalog_id],
