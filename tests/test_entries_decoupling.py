@@ -210,6 +210,7 @@ def test_gui_parse_failure_clears_stale_summary(tmp_path, monkeypatch):
     assert ok, logs
     _assert_waveforms_written(study_out)
     assert not stale.exists()
+    assert any("读取失败" in m for m in logs)   # conv_logger 须真的挂上 handler（issue #23）
 
 
 def test_csv_entries_export_does_not_clobber_csv_waveform(tmp_path):

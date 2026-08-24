@@ -509,6 +509,7 @@ def execute_epycon_conversion(cfg):
     conv_logger = logging.getLogger("epycon_web")
     conv_logger.setLevel(logging.DEBUG)  # 确保捕获所有级别
     conv_logger.propagate = False  # 不传播到父 logger，只用我们的处理器
+    conv_logger.addHandler(mem_handler)  # bb74e5e 误删，此后 res_logs 恒空（issue #23）
     
     # [MODIFIED] 现在接受 task_id 以更新状态
     task_id = cfg.get("_task_id")
@@ -894,6 +895,7 @@ def run_direct():
         def background_task():
             try:
                 success, logs = execute_epycon_conversion(config_data)
+                TASKS[task_id]['logs'].extend(logs)  # 前端只读轮询流，result.logs 无人消费
                 TASKS[task_id]['status'] = 'completed' if success else 'failed'
                 TASKS[task_id]['result'] = {'success': success, 'logs': logs}
             except Exception as e:
