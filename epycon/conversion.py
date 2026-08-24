@@ -250,29 +250,32 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
                 elif logger:
                     logger.info(f"   ℹ️ No valid entries to inject for {datalog_id}")
 
-    # 按文件导出标注（csv/sel）
-    if cfg["entries"]["convert"] and entries:
-        criteria = {
-            "fids": [datalog_id],
-            "groups": cfg["entries"]["filter_annotation_type"],
-        }
+    # 按文件导出标注（csv/sel）。波形已落盘：标注侧任何失败（清残留/导出）只显式
+    # 报错，不回滚波形、不中断后续文件（issue #19）。先清上次运行的残留——导出被
+    # 跳过或失败都不得留下旧标注冒充本次产物。
+    if cfg["entries"]["convert"]:
         file_fmt = cfg["entries"]["output_format"]
         entry_path = os.path.join(out_dir, datalog_id + "." + file_fmt)
         try:
-            if file_fmt == "csv":
-                entryplanter.savecsv(
-                    entry_path, criteria=criteria, ref_timestamp=ref_timestamp,
-                )
-            elif file_fmt == "sel":
-                entryplanter.savesel(
-                    entry_path, ref_timestamp, fs, column_names, criteria=criteria,
-                )
-        except Exception:
-            # 波形已落盘，标注导出失败只清残留 + 显式报错，不回滚波形（issue #19）
-            if os.path.exists(entry_path):
+            # csv+csv 时标注与波形同名（issue #21），绝不能把刚写好的波形删掉
+            if entry_path != full_output_path and os.path.exists(entry_path):
                 os.remove(entry_path)
+            if entries:
+                criteria = {
+                    "fids": [datalog_id],
+                    "groups": cfg["entries"]["filter_annotation_type"],
+                }
+                if file_fmt == "csv":
+                    entryplanter.savecsv(
+                        entry_path, criteria=criteria, ref_timestamp=ref_timestamp,
+                    )
+                elif file_fmt == "sel":
+                    entryplanter.savesel(
+                        entry_path, ref_timestamp, fs, column_names, criteria=criteria,
+                    )
+        except Exception:
             (logger or logging.getLogger(__name__)).exception(
-                f"   ❌ Error exporting entry file for {datalog_id} (stale copy removed if any)")
+                f"   ❌ Entry export failed for {datalog_id}, waveform kept")
     return 1
 
 

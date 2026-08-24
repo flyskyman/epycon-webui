@@ -111,25 +111,25 @@ def main():
                     f"Failed to parse ENTRIES log file for {study_id}, "
                     f"annotations skipped, waveform conversion continues")
 
-        if cfg["entries"]["convert"] and cfg["entries"]["summary_csv"] and entries:
-            # create summary csv containing all annotations
-            criteria = {
-                "fids": cfg["data"]["data_files"],
-                "groups": cfg["entries"]["filter_annotation_type"],
-                }
-            # 标注导出失败不得阻止波形落盘（issue #11）：realdata 中未初始化的哨兵
-            # 时间戳（2^64/1000 s）让 datetime.fromtimestamp 抛 ValueError/OSError，
-            # 此前整个 study 因此 0 字节。显式 ERROR，不静默。
+        if cfg["entries"]["convert"] and cfg["entries"]["summary_csv"]:
+            # 标注侧任何失败都不得阻止波形落盘（issue #11/#19）：realdata 中未初始化的
+            # 哨兵时间戳（2^64/1000 s）让 datetime.fromtimestamp 抛 ValueError/OSError，
+            # 此前整个 study 因此 0 字节。先清上次运行的残留——entries 解析失败或为空时
+            # 也不得留下旧汇总冒充本次产物；失败显式 ERROR + 堆栈，不静默。
             summary_path = os.path.join(out_dir, "entries_summary.csv")
             try:
-                EntryPlanter(entries).savecsv(summary_path, criteria=criteria)
-            except Exception as e:
-                # 清掉上次运行残留的汇总，避免"新波形 + 旧标注"的静默不一致
                 if os.path.exists(summary_path):
                     os.remove(summary_path)
+                if entries:
+                    criteria = {
+                        "fids": cfg["data"]["data_files"],
+                        "groups": cfg["entries"]["filter_annotation_type"],
+                        }
+                    EntryPlanter(entries).savecsv(summary_path, criteria=criteria)
+            except Exception:
                 logger.exception(
-                    f"Failed to export entries_summary.csv for {study_id} "
-                    f"(stale copy removed if any), waveform conversion continues: {e!r}")
+                    f"Failed to export entries_summary.csv for {study_id}, "
+                    f"waveform conversion continues")
 
         logger.info(f"Converting study {study_id}")
         convert_study(

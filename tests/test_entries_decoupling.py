@@ -3,7 +3,7 @@
 单个坏 entry（未初始化哨兵时间戳 2^64/1000 s）曾让 `_tocsv` 的
 `datetime.fromtimestamp` 抛 ValueError，CLI 在 convert_study 之前崩溃，
 输出目录 0 字节。波形转换不依赖 entries，不得被连坐；entries 侧失败必须
-显式（ERROR + 堆栈）、不留上次运行的残留文件。
+显式（ERROR + 堆栈）、不留上次运行的残留文件、也绝不能反过来删掉波形。
 """
 import json
 import logging
@@ -41,6 +41,15 @@ def _copy_study(tmp_path):
     return src
 
 
+def _normal_cfg(data_fmt="h5", entries_fmt="csv"):
+    cfg = json.loads((ROOT / "epycon" / "config" / "config.json").read_text(encoding="utf-8"))
+    cfg["data"]["merge_logs"] = False
+    cfg["data"]["output_format"] = data_fmt
+    # 默认 sel 走 _tosel，不经 fromtimestamp，哨兵不触发；测试显式用 csv
+    cfg["entries"]["output_format"] = entries_fmt
+    return cfg
+
+
 def _run_cli(src, out):
     env = {
         "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
@@ -52,9 +61,9 @@ def _run_cli(src, out):
         entry_point()
 
 
-def _assert_waveforms_written(study_out):
+def _assert_waveforms_written(study_out, ext="h5"):
     for fid in ("00000000", "00000001"):
-        assert (study_out / f"{fid}.h5").stat().st_size > 0
+        assert (study_out / f"{fid}.{ext}").stat().st_size > 0
 
 
 def _errors(caplog):
@@ -94,25 +103,79 @@ def test_unparseable_entries_log_does_not_block_waveform(tmp_path, caplog):
     assert any("ENTRIES" in m for m in _errors(caplog))
 
 
+def test_parse_failure_clears_stale_annotations(tmp_path, caplog):
+    """Codex P2：entries.log 解析失败时，旧汇总与旧逐文件标注都不得幸存。"""
+    src = _copy_study(tmp_path)
+    with open(src / "entries.log", "ab") as f:
+        f.write(b"\x00")
+    out = tmp_path / "out"
+    study_out = out / "study01"
+    study_out.mkdir(parents=True)
+    stale = [study_out / "entries_summary.csv", study_out / "00000000.csv"]
+    for p in stale:
+        p.write_text("stale\n", encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR):
+        _run_cli(src, out)
+
+    _assert_waveforms_written(study_out)
+    assert not any(p.exists() for p in stale)
+
+
 def test_per_file_export_failure_removes_stale_and_logs_without_logger(tmp_path, caplog):
     """#19 第 2 项：逐文件标注导出失败 → 清残留；logger=None 也要有诊断。"""
     src = _copy_study(tmp_path)
     _poison_first_entry(src / "entries.log")
-    cfg = json.loads((ROOT / "epycon" / "config" / "config.json").read_text(encoding="utf-8"))
-    cfg["data"]["merge_logs"] = False
-    cfg["entries"]["output_format"] = "csv"   # 默认 sel 不经 fromtimestamp，不会触发
     entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
     out = tmp_path / "out"
     out.mkdir()
     (out / "00000000.csv").write_text("stale\n", encoding="utf-8")
 
     with caplog.at_level(logging.ERROR):
-        n = convert_study(str(src), "study01", str(out), cfg, entries, logger=None)
+        n = convert_study(str(src), "study01", str(out), _normal_cfg(), entries, logger=None)
 
     assert n == 2
     _assert_waveforms_written(out)
     assert not (out / "00000000.csv").exists()   # 哨兵 fid=00000000，该文件导出失败
     assert (out / "00000001.csv").exists()       # 好条目的导出不受影响
+    assert any("00000000" in m for m in _errors(caplog))
+
+
+def test_csv_waveform_survives_entry_export_failure(tmp_path, caplog):
+    """Codex P1：csv+csv 时标注与波形同名（issue #21），失败清理绝不能删波形。"""
+    src = _copy_study(tmp_path)
+    _poison_first_entry(src / "entries.log")
+    entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    with caplog.at_level(logging.ERROR):
+        n = convert_study(str(src), "study01", str(out), _normal_cfg(data_fmt="csv"),
+                          entries, logger=None)
+
+    assert n == 2
+    wave = out / "00000000.csv"
+    assert "(uV)" in wave.read_text(encoding="utf-8").splitlines()[0]   # 仍是波形表头
+    assert any("00000000" in m for m in _errors(caplog))
+
+
+def test_stale_removal_failure_does_not_abort_conversion(tmp_path, caplog, monkeypatch):
+    """Codex P2：清残留本身失败（如文件被占用）也只记 ERROR，后续波形照转。"""
+    src = _copy_study(tmp_path)
+    entries = readentries(f_path=str(src / "entries.log"), version="4.3.2")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "00000000.csv").write_text("stale\n", encoding="utf-8")
+
+    def locked(path):
+        raise PermissionError(path)
+    monkeypatch.setattr(os, "remove", locked)
+
+    with caplog.at_level(logging.ERROR):
+        n = convert_study(str(src), "study01", str(out), _normal_cfg(), entries, logger=None)
+
+    assert n == 2
+    _assert_waveforms_written(out)
     assert any("00000000" in m for m in _errors(caplog))
 
 
