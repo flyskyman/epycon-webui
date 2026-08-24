@@ -13,17 +13,19 @@ Abbott WorkMate EP 数据解析/转换工具（fork 自 FNUSA-ICRC epycon）+ Fl
   3. `gh release create vX.Y.Z-alpha --notes "<从 git log 提炼的用户可见变更>"`
 - 不再新增 release notes 文件（存量已移至 `docs/archive/`）。
 
-## 已知问题台账
+## 已知问题（GitHub Issues）
 
-- `docs/KNOWN_ISSUES.md`：发现但暂不处理的问题必须入账（位置/证据/建议处置）；
-  处理完移入底部"已解决"区并注明日期。不允许"发现了但只在对话里提一句"。
+- 发现但暂不处理的问题必须开 issue（位置/证据/建议处置），修复提交引用 issue 号；
+  不允许"发现了但只在对话里提一句"。`gh issue list` 查看。
+- 2026-08-25 前的台账 `docs/KNOWN_ISSUES.md` 已废除；已解决条目原文归档于
+  `docs/archive/KNOWN_ISSUES_resolved.md`（代码注释里的 `KNOWN_ISSUES #N` 指向它）。
 
 ## 删除代码的规矩（fork 仓库，用户要求严格论证）
 
 删除前必须完成：(1) `git log --follow` + `git log -S` 考古；(2) 对照 fork 起点
 `8ebd16f`（2024-03 上游原版）确认是否上游原状；(3) 查 `docs/papers/315_CinCFinalPDF.pdf`
 （上游 CinC 论文，HDF5 格式的最高权威，Table 1 定义 Data/Info/ChannelSettings/Marks）。
-"当前无引用"单独不构成删除理由。台账记录删除依据与恢复命令。
+"当前无引用"单独不构成删除理由。删除依据与恢复命令记入对应 issue 或提交信息。
 
 ## 常用命令
 

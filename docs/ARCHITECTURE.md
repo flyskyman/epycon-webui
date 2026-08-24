@@ -30,7 +30,7 @@
 entries↔log 一致性硬校验。全程 fail-closed（失败一律 `ExtractionError` → CLI 结构化错误）。
 设计与验收见 `docs/superpowers/specs/2026-07-08-timestamp-lead-extraction-design.md`
 及 `docs/superpowers/plans/2026-07-08-timestamp-lead-extraction.md`；超范围/设计取舍项
-见 `docs/KNOWN_ISSUES.md` #22–24。
+见 `docs/archive/KNOWN_ISSUES_resolved.md` #22–23 及 GitHub issue「KNOWN_ISSUES #24」。
 
 ## 历史注记
 
@@ -44,5 +44,5 @@ entries↔log 一致性硬校验。全程 fail-closed（失败一律 `Extraction
 
 - `CLAUDE.md` — 维护约定（发版流程、台账、删除代码规矩、常用命令）
 - `README.md` 项目结构一节
-- `docs/KNOWN_ISSUES.md` — 待办与调查项
+- GitHub Issues — 待办与调查项；`docs/archive/KNOWN_ISSUES_resolved.md` — 旧台账已解决条目
 - `docs/ECG_LAYOUT_SPEC.md` — ECG 查看器排版逻辑规范（Workmate 物理定标对比分析）
