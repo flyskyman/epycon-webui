@@ -113,10 +113,18 @@ def main():
                 "fids": cfg["data"]["data_files"],
                 "groups": cfg["entries"]["filter_annotation_type"],
                 }
-            EntryPlanter(entries).savecsv(
-                os.path.join(out_dir, "entries_summary.csv"),
-                criteria=criteria,
-            )
+            # 标注导出失败不得阻止波形落盘（issue #11）：realdata 中未初始化的哨兵
+            # 时间戳（2^64/1000 s）让 datetime.fromtimestamp 抛 ValueError/OSError，
+            # 此前整个 study 因此 0 字节。显式 ERROR，不静默。
+            try:
+                EntryPlanter(entries).savecsv(
+                    os.path.join(out_dir, "entries_summary.csv"),
+                    criteria=criteria,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to export entries_summary.csv for {study_id}, "
+                    f"waveform conversion continues: {e!r}")
 
         logger.info(f"Converting study {study_id}")
         convert_study(
