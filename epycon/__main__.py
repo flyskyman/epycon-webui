@@ -123,7 +123,7 @@ def main():
                 # 清掉上次运行残留的汇总，避免"新波形 + 旧标注"的静默不一致
                 if os.path.exists(summary_path):
                     os.remove(summary_path)
-                logger.error(
+                logger.exception(
                     f"Failed to export entries_summary.csv for {study_id} "
                     f"(stale copy removed if any), waveform conversion continues: {e!r}")
 

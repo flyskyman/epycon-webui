@@ -18,19 +18,21 @@ ROOT = Path(__file__).parent.parent
 STUDY = ROOT / "examples" / "data" / "study01"
 
 
-def _poison_first_entry_timestamp(entries_log):
-    """把首条 entry 的 8 字节 ms 时间戳置为 0xFF..FF（realdata 实测的哨兵值）。"""
+def _poison_first_entry(entries_log):
+    """把首条 entry 改成 realdata 实测的哨兵：fid=00000000、8 字节 ms 时间戳 0xFF..FF。"""
     raw = bytearray(entries_log.read_bytes())
-    start = WMx64EntriesSchema.header[1] + WMx64EntriesSchema.timestamp[0]
-    end = WMx64EntriesSchema.header[1] + WMx64EntriesSchema.timestamp[1]
-    raw[start:end] = b"\xff" * (end - start)
+    base = WMx64EntriesSchema.header[1]
+    fid_lo, fid_hi = WMx64EntriesSchema.datalog_id
+    raw[base + fid_lo:base + fid_hi] = b"\x00" * (fid_hi - fid_lo)
+    ts_lo, ts_hi = WMx64EntriesSchema.timestamp
+    raw[base + ts_lo:base + ts_hi] = b"\xff" * (ts_hi - ts_lo)
     entries_log.write_bytes(bytes(raw))
 
 
 def test_bad_entry_does_not_block_waveform(tmp_path, caplog):
     src = tmp_path / "in" / "study01"
     shutil.copytree(STUDY, src)
-    _poison_first_entry_timestamp(src / "entries.log")
+    _poison_first_entry(src / "entries.log")
     out = tmp_path / "out"
     study_out = out / "study01"
     study_out.mkdir(parents=True)
