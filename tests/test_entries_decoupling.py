@@ -111,15 +111,20 @@ def test_parse_failure_clears_stale_annotations(tmp_path, caplog):
     out = tmp_path / "out"
     study_out = out / "study01"
     study_out.mkdir(parents=True)
-    stale = [study_out / "entries_summary.csv", study_out / "00000000_entries.csv"]
+    stale = [study_out / "entries_summary.csv", study_out / "00000000_entries.csv",
+             study_out / "00000000.csv"]   # 最后一个：#21 改名前的旧标注文件
     for p in stale:
-        p.write_text("stale\n", encoding="utf-8")
+        p.write_text("Group,FileId,Time(H:M:S),Annotation\nstale\n", encoding="utf-8")
+    # 同名但内容是旧波形 CSV，不得误删——首列故意叫 Group/FileId，前缀匹配会中招
+    old_wave = study_out / "00000001.csv"
+    old_wave.write_text("Group,FileId,II\n1,2,3\n", encoding="utf-8")   # 旧版无单位表头
 
     with caplog.at_level(logging.ERROR):
         _run_cli(src, out)
 
     _assert_waveforms_written(study_out)
     assert not any(p.exists() for p in stale)
+    assert old_wave.exists()
 
 
 def test_per_file_export_failure_removes_stale_and_logs_without_logger(tmp_path, caplog):

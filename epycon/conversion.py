@@ -10,6 +10,7 @@ from datetime import datetime
 from glob import iglob
 
 from epycon.config.byteschema import MASTER_FILENAME, LOG_PATTERN
+from epycon.core._formatting import _tocsv
 from epycon.core.helpers import get_channel_mappings
 from epycon.iou import (
     LogParser,
@@ -20,6 +21,10 @@ from epycon.iou import (
 )
 from epycon.iou.parsers import _readmaster
 from epycon.utils.person import Tokenize
+
+# 标注 CSV 的两种表头（绝对时间 / 相对时间），由 _tocsv 生成以保持单一来源；
+# 用于识别 #21 改名前的旧标注文件，整行精确匹配，避免误删首列恰好同名的波形 CSV
+_ENTRY_CSV_HEADERS = {_tocsv([], ref_timestamp=r).splitlines()[0] for r in (None, 0)}
 
 
 def strip_log_suffix(name):
@@ -262,6 +267,14 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
         try:
             if os.path.exists(entry_path):
                 os.remove(entry_path)
+            # #21 改名前标注也叫 <fid>.csv，与旧波形 CSV 同名：首行整行匹配 _tocsv 表头
+            # 才是标注，只删标注，旧波形 CSV 留着
+            legacy = os.path.join(out_dir, datalog_id + ".csv")
+            if legacy != full_output_path and os.path.exists(legacy):
+                with open(legacy, encoding="utf-8") as f:
+                    is_annotation = f.readline().rstrip("\r\n") in _ENTRY_CSV_HEADERS
+                if is_annotation:
+                    os.remove(legacy)
             if entries:
                 criteria = {
                     "fids": [datalog_id],
