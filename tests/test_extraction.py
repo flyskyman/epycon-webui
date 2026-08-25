@@ -337,6 +337,15 @@ class TestLeadSourceValidation:
         raw[:, 7] = 3
         assert _lead_signal(raw, (5, 7)).tolist() == [7, 7, 7, 7]
 
+    def test_dedupe_sources_merges_same_electrode_pair(self):
+        # issue #27：同源多显示名只留首个 + 别名；源无效（None）的条目互不合并
+        from epycon.extraction import _dedupe_sources
+        src = [("LBB", (5, 7)), ("LBB-I", (5, 7)), ("LBB 30-100", (5, 7)),
+               ("BAD1", None), ("BAD2", None), ("CS d", (1, 2))]
+        out, aliases = _dedupe_sources(src)
+        assert out == [("LBB", (5, 7)), ("BAD1", None), ("BAD2", None), ("CS d", (1, 2))]
+        assert aliases == {"LBB": ["LBB-I", "LBB 30-100"]}
+
     def test_all_marks_invalid_source_instead_of_raising(self):
         # --leads all：源无效导联不整批失败，cols=None 交由 extract_window 标 rejected
         from epycon.extraction import resolve_lead_sources
