@@ -123,6 +123,48 @@ def test_limb_identities_catch_a_lead_that_does_not_belong(limb_leads):
     assert result["residual"]["aVR = -(I + II) / 2"] > 0.05
 
 
+@pytest.mark.parametrize("bad_lead", ["I", "II", "III", "aVR", "aVL", "aVF"])
+def test_limb_identities_never_pass_when_a_lead_holds_a_nan(limb_leads, bad_lead):
+    """内建 max() 会按顺序吞掉 NaN：NaN 落在 aVF 时曾返回 holds=True、worst=0.0。"""
+    corrupted = {name: values.copy() for name, values in limb_leads.items()}
+    corrupted[bad_lead][5] = np.nan
+    result = check_limb_identities(corrupted)
+    assert not result["holds"]
+    assert not result["derived"]
+    assert np.isnan(result["worst"])
+
+
+def test_channel_facts_count_nonfinite_samples_and_exclude_them(limb_leads):
+    values = np.asarray(limb_leads["I"]).copy()
+    values[3] = np.nan
+    facts = channel_facts(values, name="I")
+    assert facts["nonfinite_fraction"] == pytest.approx(1 / values.size)
+    assert np.isfinite(facts["sd"]) and facts["sd"] > 0
+    assert facts["rail_fraction"] == 0.0          # 一个 NaN 不再把整段假报为削顶
+    assert "0.1% of samples are not finite" in inspect_channels([values], ["I"])[0]["observations"]
+
+
+@pytest.mark.parametrize("n", [50, 100, 150, 200, 1000])
+def test_rail_fraction_has_no_floor_that_depends_on_length(n):
+    """每段有限信号必有一个最小值和一个最大值；无条件计入会给出 2/n 的下限。"""
+    noise = np.random.default_rng(n).normal(size=n)
+    assert channel_facts(noise, name="noise")["rail_fraction"] == 0.0
+    assert inspect_channels([noise], ["noise"])[0]["observations"] == []
+
+
+def test_rail_fraction_still_detects_a_genuinely_clipped_channel():
+    clipped = np.clip(np.random.default_rng(1).normal(size=1000) * 3, -2, 2)
+    facts = channel_facts(clipped, name="clipped")
+    assert facts["rail_fraction"] > 0.2
+    assert "clipped: resting on a repeated extreme" in inspect_channels([clipped], ["c"])[0]["observations"]
+
+
+def test_a_constant_channel_rests_on_its_extreme_at_every_sample():
+    facts = channel_facts(np.zeros(500), name="STIM")
+    assert facts["rail_fraction"] == 1.0
+    assert facts["sd"] == 0.0
+
+
 def test_limb_identities_report_which_leads_are_missing():
     with pytest.raises(KeyError, match="aVF"):
         check_limb_identities({"I": np.zeros(4), "II": np.zeros(4), "III": np.zeros(4),

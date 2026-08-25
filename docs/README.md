@@ -5,6 +5,7 @@
 | 文件 | 用途 |
 |---|---|
 | `ARCHITECTURE.md` | 转码入口点与调用链（conversion.py 单一实现的导览图） |
+| `CHANNEL_INTEGRITY.md` | 读取层的通道完整性：重复/死通道识别、肢导联恒等式、导出页开头 2 s 建立期 |
 | `ECG_LAYOUT_SPEC.md` | Workmate vs Web Viewer 排版逻辑对比与物理定标（1mV=1cm）分析 |
 | `archive/KNOWN_ISSUES_resolved.md` | 旧台账已解决条目归档（2026-08-25 起待办问题走 GitHub Issues） |
 | `technical_rendering_spec.md` | ECG 渲染"黄金配置"技术规范（README 流水线图的依据） |

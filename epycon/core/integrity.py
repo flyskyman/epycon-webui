@@ -15,6 +15,10 @@ Motivating cases, both from a WorkMate x64 study read through this package:
 
 Thresholds are arguments rather than constants on purpose. The defaults were chosen on a single WorkMate
 x64 study and should be treated as a starting point, not as validated limits.
+
+Non-finite samples are reported rather than assumed away: epycon's own decoders do not produce them, but
+this module is a general tool and one NaN must not be able to make a channel look clipped or its standard
+deviation vanish.
 """
 from hashlib import md5
 
@@ -41,21 +45,38 @@ def channel_facts(samples, name: str = "") -> dict:
     """Measurements of one channel. No thresholds are applied here.
 
     Returns ``zero_fraction`` (samples exactly zero), ``frozen_fraction`` (consecutive samples exactly
-    equal, which a held or disconnected input produces), and ``rail_fraction`` (samples sitting on the
-    channel's own extremes), alongside the content digest and basic statistics.
+    equal, which a held or disconnected input produces), ``rail_fraction`` (samples resting on a repeated
+    extreme, see below) and ``nonfinite_fraction``, alongside the content digest and basic statistics.
+
+    Non-finite samples are counted and then excluded from every other statistic, so that one NaN cannot
+    turn ``sd`` into NaN or collapse the range and make an ordinary channel look clipped.
+
+    ``rail_fraction`` counts an extreme only when that exact value occurs at least twice. Every finite
+    channel has one minimum and one maximum sample, so counting them unconditionally would put a floor of
+    2/n on this fraction and make any channel shorter than 2/threshold samples look clipped; a channel that
+    is genuinely resting against a rail repeats the value.
     """
     column = np.asarray(samples, dtype=float).ravel()
-    step = np.diff(column)
-    low, high = (float(column.min()), float(column.max())) if column.size else (0.0, 0.0)
+    finite = np.isfinite(column)
+    values = column[finite]
+    step = np.diff(values)
+    rail = 0
+    if values.size:
+        low, high = float(values.min()), float(values.max())
+        at_low = int(np.count_nonzero(values == low))
+        at_high = int(np.count_nonzero(values == high))
+        rail = (at_low if at_low >= 2 else 0) + (at_high if at_high >= 2 else 0)
+        if high == low:  # a constant channel rests on its extreme at every sample
+            rail = int(values.size)
     return {
         "name": name,
         "digest": channel_digest(column),
         "n_samples": int(column.size),
-        "sd": float(column.std()) if column.size else 0.0,
-        "zero_fraction": float(np.mean(column == 0.0)) if column.size else 1.0,
+        "nonfinite_fraction": float(np.mean(~finite)) if column.size else 1.0,
+        "sd": float(values.std()) if values.size else 0.0,
+        "zero_fraction": float(np.mean(values == 0.0)) if values.size else 1.0,
         "frozen_fraction": float(np.mean(step == 0.0)) if step.size else 1.0,
-        "rail_fraction": (float(np.mean((column <= low) | (column >= high)))
-                          if column.size and high > low else 1.0),
+        "rail_fraction": float(rail / values.size) if values.size else 1.0,
     }
 
 
@@ -99,7 +120,9 @@ def inspect_channels(
         elif facts["frozen_fraction"] >= frozen_fraction:
             observations.append("frozen: held or disconnected")
         if facts["rail_fraction"] >= rail_fraction:
-            observations.append("clipped: sitting on its own extremes")
+            observations.append("clipped: resting on a repeated extreme")
+        if facts["nonfinite_fraction"] > 0.0:
+            observations.append(f"{facts['nonfinite_fraction']:.1%} of samples are not finite")
         facts["observations"] = observations
         results.append(facts)
     return results
@@ -140,7 +163,10 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
         raise KeyError(f"limb leads missing: {', '.join(missing)}")
     arrays = {name: np.asarray(values, dtype=float) for name, values in leads.items()}
     residuals = {label: float(np.max(np.abs(expression(arrays)))) for label, expression in LIMB_IDENTITIES.items()}
-    worst = max(residuals.values())
+    # np.max, not the builtin: builtin max() compares pairwise, so a NaN is swallowed or returned depending
+    # on where it sits in the sequence, and a NaN in aVF would report a worst residual of 0.0 — a silent
+    # pass in exactly the case this check exists to catch. np.max propagates, and `nan <= tolerance` is False.
+    worst = float(np.max(list(residuals.values())))
     return {
         "residual": residuals,
         "worst": worst,
