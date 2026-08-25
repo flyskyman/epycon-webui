@@ -260,7 +260,7 @@ except ImportError: pass
 # ========================================================
 try:
     from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN, MASTER_FILENAME
-    from epycon.iou import LogParser, EntryPlanter, readentries, readentries_header
+    from epycon.iou import LogParser, EntryPlanter, readentries, readentries_utc_offset
     from epycon.iou.parsers import _readmaster
     from epycon.utils.person import Tokenize
 except ImportError as e:
@@ -617,8 +617,8 @@ def execute_epycon_conversion(cfg):
                 utc_offset_sec = None
                 if os.path.exists(epath):
                     try:
-                        utc_offset_sec = readentries_header(
-                            epath, version=cfg["global_settings"]["workmate_version"]).utc_offset_sec
+                        utc_offset_sec = readentries_utc_offset(
+                            epath, version=cfg["global_settings"]["workmate_version"])
                     except Exception:
                         conv_logger.exception("⚠️ entries.log 文件头解析失败，RecordDate 退回分析机本地时间")
 

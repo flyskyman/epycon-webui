@@ -101,36 +101,25 @@ def test_readentries_sample_index_from_generator(tmp_path):
     assert readentries(str(tmp_path / 'entries.log'), version='4.1')[0].sample_index is None
 
 
-def test_readentries_header_from_fixture():
-    """issue #36：头 0x02 u64 ms、0x0A/0x16 ASCII 墙钟、0x20 DFile 数；
-    夹具墙钟按 UTC+8 写入 → utc_offset_sec = 28800"""
+def test_readentries_utc_offset(tmp_path):
+    """issue #36：偏移 = 头 ASCII 墙钟（0x0A 日期 + 0x16 时间）− u64 epoch。
+    夹具墙钟按 UTC+8 写入 → 28800；全零头 / x32 无时间串 → None"""
     if not TEST_DATA_PATH.exists():
         pytest.skip(f"测试数据文件不存在: {TEST_DATA_PATH}")
-    from epycon.iou import readentries_header
-
-    h = readentries_header(str(TEST_DATA_PATH), version='4.3.2')
-    assert h.timestamp == pytest.approx(1769608082.246)
-    assert h.num_datalogs == 2
-    assert h.wall_clock == "01/28/2026 21:48:02"
-    assert h.utc_offset_sec == 8 * 3600
-
-
-def test_readentries_header_without_wall_clock(tmp_path):
-    """墙钟串缺失（全零头）→ wall_clock/utc_offset_sec 为 None；x32 无时间串同样 None"""
+    import struct
     sys.path.insert(0, str(Path("scripts").resolve()))
     from generate_fake_wmx import write_entries
-    from epycon.iou import readentries_header
+    from epycon.iou import readentries_utc_offset
 
-    import struct
+    assert readentries_utc_offset(str(TEST_DATA_PATH), version='4.3.2') == 8 * 3600
+
     blank = bytearray(0x24 + 0xDC)
     blank[0x02:0x0A] = struct.pack('<Q', 1704038400000)
     (tmp_path / 'entries.log').write_bytes(bytes(blank))
-    h = readentries_header(str(tmp_path / 'entries.log'), version='4.3.2')
-    assert (h.timestamp, h.wall_clock, h.utc_offset_sec, h.num_datalogs) == (1704038400.0, None, None, 0)
+    assert readentries_utc_offset(str(tmp_path / 'entries.log'), version='4.3.2') is None
 
     write_entries(str(tmp_path), version='4.1', datalog_id=1, entries=[(2, 1704038400, 'x')])
-    h32 = readentries_header(str(tmp_path / 'entries.log'), version='4.1')
-    assert (h32.wall_clock, h32.utc_offset_sec, h32.num_datalogs) == (None, None, None)
+    assert readentries_utc_offset(str(tmp_path / 'entries.log'), version='4.1') is None
 
 
 def test_group_map_covers_observed_subtypes():

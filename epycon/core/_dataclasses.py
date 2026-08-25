@@ -28,20 +28,6 @@ class Entry:
         return datetime.fromtimestamp(self.timestamp).strftime(format)
 
 
-@dataclass(frozen=True)
-class EntriesHeader:
-    """entries.log 文件头（issue #36，849 个真实 study 验证）。
-
-    WorkMate 的 epoch 字段是采集机墙钟按其 OS 时区解释的结果（实测一批机器为
-    US Central、另一批为 UTC+8），头里的 ASCII 墙钟才是操作者看到的时刻；两者之差
-    即采集机 OS 的 UTC 偏移，用它格式化 DFile 时间戳才能还原墙钟。
-    """
-    timestamp: float                    # 头 u64 ms → 秒，与 DFile 头同一时间语义
-    wall_clock: Union[str, None]        # "MM/DD/YYYY HH:MM:SS"；x32 无时间串 → None
-    num_datalogs: Union[int, None]      # x64 头 0x20；x32 → None
-    utc_offset_sec: Union[int, None]    # 墙钟 − epoch，按 15 min 取整；无墙钟 → None
-
-
 # @dataclass
 # class EntriesList:
 #     fid: str

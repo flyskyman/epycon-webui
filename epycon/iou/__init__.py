@@ -2,7 +2,7 @@ from .parsers import (
     LogParser as LogParser,
     _readmaster as readmaster,
     _readentries as readentries,
-    _readentries_header as readentries_header,
+    _readentries_utc_offset as readentries_utc_offset,
     _mount_channels as mount_channels
 )
 

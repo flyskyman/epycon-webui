@@ -66,7 +66,7 @@ def record_date(timestamp, utc_offset_sec=None):
 
     WorkMate 的 epoch 是墙钟按采集机 OS 时区解释的结果（issue #36：849 个 study 实测，
     一批机器为 US Central、另一批为 UTC+8），只有按该偏移格式化才还原操作者看到的
-    时刻；偏移由 entries.log 头的 ASCII 墙钟推得（readentries_header）。没有偏移信息
+    时刻；偏移由 entries.log 头的 ASCII 墙钟推得（readentries_utc_offset）。没有偏移信息
     （无 entries.log、x32、合成夹具）时按分析机本地时间格式化——即此前的行为。
     """
     if not timestamp:
@@ -326,7 +326,7 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
                  timestamp 为 unix 秒；CLI 传 readentries 原始结果，
                  GUI 传清洗后的 MutableEntry）
         extra_attributes: 额外并入 HDF5 根属性的字典（如 GUI 的 PatientName）
-        utc_offset_sec: 采集机 OS 的 UTC 偏移（readentries_header().utc_offset_sec），
+        utc_offset_sec: 采集机 OS 的 UTC 偏移（readentries_utc_offset()），
                  用于 RecordDate 还原墙钟；None 时按分析机本地时间（见 record_date）
     """
     valid_datalogs = set(

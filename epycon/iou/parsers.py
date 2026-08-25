@@ -31,7 +31,6 @@ from epycon.core._dataclasses import (
     Channel,
     Channels,
     Entry,
-    EntriesHeader,
 )
 
 from epycon.config.byteschema import (
@@ -552,48 +551,31 @@ def _entries_schema(version: Optional[str]):
     raise NotImplementedError
 
 
-def _readentries_header(
+def _readentries_utc_offset(
     f_path: Union[str, bytes, os.PathLike],
     version: Optional[str] = None,
-    ) -> EntriesHeader:
-    """解析 entries.log 文件头：epoch、ASCII 墙钟、DFile 数、采集机 UTC 偏移（issue #36）。
+    ) -> Optional[int]:
+    """采集机 OS 的 UTC 偏移（秒）= entries.log 头 ASCII 墙钟 − u64 epoch（issue #36）。
 
-    墙钟串缺失或不合法（合成夹具、x32 无时间串）→ wall_clock/utc_offset_sec 为 None。
+    WorkMate 的 epoch 是墙钟按采集机 OS 时区解释的结果，头里的墙钟串才是操作者看到
+    的时刻。真机两者相差 ≤1 s，按 15 min（时区粒度）取整。x32 无时间串、墙钟串缺失或
+    不合法（合成夹具）→ None。
     """
     diary = _entries_schema(version)
     barray = readbin(f_path)
     if barray is None or len(barray) < diary.header[1]:
         raise ValueError('entries.log shorter than its header')
-
+    if not hasattr(diary, "header_time"):
+        return None
     fmt, factor = diary.timestamp_fmt
-    timestamp = struct.unpack(fmt, barray[diary.header_timestamp[0]:diary.header_timestamp[1]])[0] / factor
-
-    num_datalogs = None
-    if hasattr(diary, "header_num_datalogs"):
-        num_datalogs = struct.unpack("<H", barray[diary.header_num_datalogs[0]:diary.header_num_datalogs[1]])[0]
-
-    wall_clock = None
-    utc_offset_sec = None
-    if hasattr(diary, "header_time"):
-        date_s = barray[diary.header_date[0]:diary.header_date[1]].decode('ascii', 'replace')
-        time_s = barray[diary.header_time[0]:diary.header_time[1]].decode('ascii', 'replace')
-        try:
-            wall = datetime.strptime(f"{date_s} {time_s}", "%m/%d/%Y %H:%M:%S")
-        except ValueError:
-            wall = None
-        if wall is not None:
-            wall_clock = f"{date_s} {time_s}"
-            # 墙钟串当作 UTC 读出的 epoch 与文件 epoch 之差 = 采集机 OS 的 UTC 偏移；
-            # 真机两者相差 ≤1 s，按 15 min（时区偏移粒度）取整
-            wall_as_utc = wall.replace(tzinfo=timezone.utc).timestamp()
-            utc_offset_sec = int(round((wall_as_utc - timestamp) / 900.0)) * 900
-
-    return EntriesHeader(
-        timestamp=timestamp,
-        wall_clock=wall_clock,
-        num_datalogs=num_datalogs,
-        utc_offset_sec=utc_offset_sec,
-    )
+    epoch = struct.unpack(fmt, barray[diary.header_timestamp[0]:diary.header_timestamp[1]])[0] / factor
+    wall_s = (barray[diary.header_date[0]:diary.header_date[1]] + b" "
+              + barray[diary.header_time[0]:diary.header_time[1]]).decode('ascii', 'replace')
+    try:
+        wall = datetime.strptime(wall_s, "%m/%d/%Y %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return int(round((wall.timestamp() - epoch) / 900.0)) * 900
 
 
 def _readentries(
@@ -613,14 +595,7 @@ def _readentries(
     # initialize entries list
     entries: List[Entry] = []
 
-    # validate WM version and return correct byte schema
-    diary: Union[type[WMx32EntriesSchema], type[WMx64EntriesSchema]]
-    if _validate_version(version) == 'x32':
-        diary = WMx32EntriesSchema
-    elif _validate_version(version) == 'x64':
-        diary = WMx64EntriesSchema
-    else:
-        raise NotImplementedError
+    diary = _entries_schema(version)
 
     try:
         # read entire binary file

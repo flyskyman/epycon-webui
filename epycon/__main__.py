@@ -70,7 +70,7 @@ def main():
     from glob import iglob
 
     from epycon.config.byteschema import ENTRIES_FILENAME
-    from epycon.iou import EntryPlanter, readentries, readentries_header
+    from epycon.iou import EntryPlanter, readentries, readentries_utc_offset
     from epycon.conversion import convert_study, resolve_subject
 
     input_folder = _validate_path(cfg["paths"]["input_folder"], name='input folder')
@@ -104,9 +104,8 @@ def main():
         utc_offset_sec = None
         if os.path.exists(entries_path):
             try:
-                utc_offset_sec = readentries_header(
-                    entries_path, version=cfg["global_settings"]["workmate_version"],
-                ).utc_offset_sec
+                utc_offset_sec = readentries_utc_offset(
+                    entries_path, version=cfg["global_settings"]["workmate_version"])
             except Exception:
                 logger.exception(
                     f"Failed to parse ENTRIES header for {study_id}, "
