@@ -197,10 +197,10 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     ``derived`` is not claimed. Note the blind spot documented above: these identities cannot detect a
     swap between leads I and II.
 
-    ``derived`` presumes exact float64 arithmetic. Three of the four identities divide by two, so leads
-    stored as integers or float32 keep a residual (1.5 LSB for truncated int16, ~1e-7 for float32) however
-    faithfully the recorder derived them: ``holds`` is then the caller's call via ``tolerance``, and
-    ``derived`` is not a test of storage dtype.
+    ``derived`` presumes float64 arithmetic: its 1e-9 threshold absorbs float64 rounding (a scaled copy
+    leaves ~1e-14) but not float32 (~1e-7), and three of the four identities divide by two, so leads stored
+    as integers keep a residual (1.5 LSB for truncated int16) however faithfully the recorder derived them.
+    ``holds`` is then the caller's call via ``tolerance``; ``derived`` is not a test of storage dtype.
     """
     missing = [name for name in LIMB_LEADS if name not in leads]
     if missing:

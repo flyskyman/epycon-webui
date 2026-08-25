@@ -168,9 +168,13 @@ def test_flat_leads_satisfy_every_identity_but_prove_nothing(leads):
 def test_derived_presumes_float64_and_is_not_a_dtype_test(leads):
     """三条恒等式含 /2：整型或 float32 存储各留一份残差，derived 永远为假，不论记录仪导得多忠实。
     不调容差——容差是调用方按 LSB 设的，这里把代价钉成断言而不是藏起来。"""
+    # float64 缩放后浮点非结合性留下 ~1e-14 残差，1e-9 阈值吸收得了它，吸收不了 float32 的 ~1e-7
+    scaled = check_limb_identities({k: v * 100 for k, v in leads.items()})
+    assert scaled["derived"] and 0 < scaled["worst"] < 1e-9
+
     float32 = check_limb_identities({k: v.astype(np.float32) for k, v in leads.items()})
     assert float32["holds"] and not float32["derived"]
-    assert 0 < float32["worst"] < 1e-6
+    assert 1e-9 < float32["worst"] < 1e-6
 
     int16 = {k: (v * 1000).astype(np.int16) for k, v in leads.items()}   # 截断：残差恰为 1.5 LSB
     assert check_limb_identities(int16)["worst"] == 1.5
