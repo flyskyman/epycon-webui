@@ -205,11 +205,13 @@ def main():
         print(f'Wrote MASTER to {mpath}')
 
     if args.with_entries:
-        # 采样索引相对刚写出的 DFile 头时间戳（x64: u64 ms；x32 无此字段），默认条目也以它为基准
-        log_ts_ms = None
-        if args.version != '4.1':
-            with open(args.out, 'rb') as lf:
-                log_ts_ms = struct.unpack('<Q', lf.read(8))[0]
+        # 条目时间以刚写出的 DFile 头时间戳为基准（x64: u64 ms；x32: u32 s），
+        # 这样默认条目落在录制附近；x64 的采样索引也相对它计算
+        x64 = args.version != '4.1'
+        with open(args.out, 'rb') as lf:
+            log_ts = struct.unpack('<Q', lf.read(8))[0] if x64 else struct.unpack('<L', lf.read(4))[0]
+        log_ts_ms = log_ts if x64 else None
+        minute = 60000 if x64 else 60
 
         # Load entries from JSON file if provided
         if args.entries_json:
@@ -220,18 +222,15 @@ def main():
             entries = []
             for item in data:
                 grp = int(item.get('group', 2))
-                # 缺省与 write_entries 的单位一致：x64 毫秒（相对日志头），x32 秒
-                ts = int(item.get('timestamp', log_ts_ms if log_ts_ms is not None else int(time.time())))
+                ts = int(item.get('timestamp', log_ts))  # 缺省与 write_entries 同单位
                 msg = str(item.get('message', args.entry_message))
                 fid = int(item.get('fid', 1))
                 entries.append((grp, ts, msg, fid))
         else:
-            # x64 以日志头时间戳为基准（采样索引须相对它且落在 int32 内）；x32 用 2024 固定值（秒）
-            base_timestamp_ms = log_ts_ms if log_ts_ms is not None else 1704038400
             entries = []
             for i in range(args.entries_count):
                 grp = 2 + (i % 5)  # rotate some group ids
-                ts_ms = base_timestamp_ms + i * (60000 if log_ts_ms is not None else 60)  # 每条隔 1 min
+                ts_ms = log_ts + i * minute  # 每条隔 1 min
                 msg = f"{args.entry_message} #{i+1}"
                 fid = 1 + (i % args.entries_fids)
                 entries.append((grp, ts_ms, msg, fid))
