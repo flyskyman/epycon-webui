@@ -75,6 +75,14 @@ def test_inspect_channels_flags_a_channel_that_was_never_connected(recording):
     assert "dead: never connected" in facts["STIM"]["observations"]
 
 
+def test_summarise_reports_a_duplicate_of_an_unnamed_channel(recording):
+    """原件名为空串时，真值判断会把重复漏出报告，而 n_distinct_signals 已经少算了一个。"""
+    values = np.arange(100, dtype=float)
+    report = summarise(inspect_channels([values, values], ["", "u+HIS"]))
+    assert report["n_distinct_signals"] == 1
+    assert report["duplicates"] == {"u+HIS": ""}
+
+
 def test_summarise_counts_distinct_signals_not_channels(recording):
     values, names = recording
     report = summarise(inspect_channels(values, names))
@@ -113,10 +121,16 @@ def test_limb_identities_accept_a_lead_handed_in_as_a_column_slice(limb_leads):
     assert result["worst"] == pytest.approx(0.0, abs=1e-12)
 
 
-def test_limb_identities_still_reject_leads_of_different_lengths(limb_leads):
+@pytest.mark.parametrize("bad_aVF", [
+    pytest.param(lambda values: values[:-3], id="shorter"),
+    pytest.param(lambda values: values[:1], id="length-one-broadcasts-as-a-scalar"),
+    pytest.param(lambda values: values[:0], id="empty"),
+])
+def test_limb_identities_reject_leads_that_do_not_share_one_nonzero_length(limb_leads, bad_aVF):
+    """长度 1 的导联会按标量广播，让整组恒等式"精确成立"却不携带任何信息。"""
     mismatched = dict(limb_leads)
-    mismatched["aVF"] = np.asarray(limb_leads["aVF"])[:-3]
-    with pytest.raises(ValueError):
+    mismatched["aVF"] = bad_aVF(np.asarray(limb_leads["aVF"]))
+    with pytest.raises(ValueError, match="one nonzero length"):
         check_limb_identities(mismatched)
 
 

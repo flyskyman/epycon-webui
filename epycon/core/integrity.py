@@ -145,7 +145,9 @@ def summarise(facts: Sequence) -> dict:
     return {
         "n_channels": len(facts),
         "n_distinct_signals": len(digests),
-        "duplicates": {item["name"]: item["duplicate_of"] for item in facts if item["duplicate_of"]},
+        # `is not None`, not truthiness: channel_facts allows an empty name, and a duplicate of a channel
+        # named "" would drop out of this report while n_distinct_signals had already counted it.
+        "duplicates": {item["name"]: item["duplicate_of"] for item in facts if item["duplicate_of"] is not None},
         "flagged": {item["name"]: item["observations"] for item in facts if item["observations"]},
     }
 
@@ -174,8 +176,13 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
         raise KeyError(f"limb leads missing: {', '.join(missing)}")
     # ravel, as channel_facts does: a lead handed in as a column slice has shape (n, 1), and the identity
     # arithmetic would broadcast it against the (n,) leads into an (n, n) grid, failing on correct data.
-    # Leads of genuinely different lengths still fail, on numpy's own broadcast error.
     arrays = {name: np.asarray(values, dtype=float).ravel() for name, values in leads.items()}
+    # Lengths are checked here rather than left to numpy. Most mismatches do raise a broadcast error, but a
+    # lead of length one broadcasts as a scalar against every other lead and reports the whole set as an
+    # exact identity while carrying no information at all.
+    lengths = {array.size for array in arrays.values()}
+    if len(lengths) != 1 or 0 in lengths:
+        raise ValueError(f"limb leads must share one nonzero length, got {sorted(lengths)}")
     residuals = {label: float(np.max(np.abs(expression(arrays)))) for label, expression in LIMB_IDENTITIES.items()}
     # np.max, not the builtin: builtin max() compares pairwise, so a NaN is swallowed or returned depending
     # on where it sits in the sequence, and a NaN in aVF would report a worst residual of 0.0 — a silent
