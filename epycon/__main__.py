@@ -70,7 +70,7 @@ def main():
     from glob import iglob
 
     from epycon.config.byteschema import ENTRIES_FILENAME
-    from epycon.iou import EntryPlanter, readentries
+    from epycon.iou import EntryPlanter, readentries, readentries_header
     from epycon.conversion import convert_study, resolve_subject
 
     input_folder = _validate_path(cfg["paths"]["input_folder"], name='input folder')
@@ -98,10 +98,24 @@ def main():
             cfg["data"]["output_format"] == "h5" and cfg["data"]["pin_entries"]
         )
         entries = list()
+        entries_path = os.path.join(study_path, ENTRIES_FILENAME)
+
+        # 采集机 UTC 偏移（RecordDate 还原墙钟，issue #36）——与是否导出标注无关
+        utc_offset_sec = None
+        if os.path.exists(entries_path):
+            try:
+                utc_offset_sec = readentries_header(
+                    entries_path, version=cfg["global_settings"]["workmate_version"],
+                ).utc_offset_sec
+            except Exception:
+                logger.exception(
+                    f"Failed to parse ENTRIES header for {study_id}, "
+                    f"RecordDate falls back to local time of this machine")
+
         if need_entries:
             try:
                 entries = readentries(
-                    f_path=os.path.join(study_path, ENTRIES_FILENAME),
+                    f_path=entries_path,
                     version=cfg["global_settings"]["workmate_version"],
                     )
             except OSError:
@@ -135,6 +149,7 @@ def main():
         convert_study(
             study_path, study_id, out_dir, cfg, entries,
             subject_id=subject_id, subject_name=subject_name, logger=logger,
+            utc_offset_sec=utc_offset_sec,
         )
         print("DONE")
 

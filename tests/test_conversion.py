@@ -10,7 +10,7 @@ from pathlib import Path
 import h5py
 import pytest
 
-from epycon.conversion import convert_study, entries_to_marks, strip_log_suffix
+from epycon.conversion import convert_study, entries_to_marks, record_date, strip_log_suffix
 from epycon.iou import readentries
 
 ROOT = Path(__file__).parent.parent
@@ -84,6 +84,17 @@ class TestEntriesToMarks:
         assert caplog.text == ""
 
 
+def test_record_date_uses_acquisition_machine_offset():
+    """issue #36：epoch 是墙钟按采集机 OS 时区解释的结果，RecordDate 须按该偏移还原墙钟；
+    无偏移信息时保持此前的分析机本地时间"""
+    from datetime import datetime
+    ts = 1769608079.246
+    assert record_date(ts, 8 * 3600) == "2026-01-28T21:47:59.246000+08:00"
+    assert record_date(ts, -6 * 3600) == "2026-01-28T07:47:59.246000-06:00"
+    assert record_date(ts, None) == datetime.fromtimestamp(ts).isoformat()
+    assert record_date(0, 8 * 3600) == ""
+
+
 def test_strip_log_suffix():
     assert strip_log_suffix("00000000.log") == "00000000"
     assert strip_log_suffix("00000000") == "00000000"
@@ -106,6 +117,15 @@ class TestConvertStudy:
             assert max(f["Data"].shape) == 2048
             positions = [int(r["SampleLeft"]) for r in f["Marks"][:]]
             assert positions == [1074]  # 1024 文件偏移 + 50 亚秒偏移
+
+    @pytest.mark.parametrize("merge", [True, False])
+    def test_record_date_attribute_carries_offset(self, tmp_path, entries, merge):
+        cfg = _base_cfg(STUDY.parent, tmp_path, merge=merge)
+        cfg["entries"]["convert"] = False
+        convert_study(str(STUDY), "study01", str(tmp_path), cfg, entries, utc_offset_sec=8 * 3600)
+        out = tmp_path / ("study01_merged.h5" if merge else "00000000.h5")
+        with h5py.File(out, "r") as f:
+            assert f.attrs["RecordDate"] == "2026-01-28T21:47:59.246000+08:00"
 
     def test_normal_mode_marks_position(self, tmp_path, entries):
         cfg = _base_cfg(STUDY.parent, tmp_path, merge=False)

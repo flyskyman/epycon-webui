@@ -6,7 +6,7 @@ int 截断亚秒、字段名漂移、x32 时间戳误读等），故收敛到本
 """
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from glob import iglob
 
 from epycon.config.byteschema import MASTER_FILENAME, LOG_PATTERN
@@ -61,6 +61,21 @@ def resolve_subject(study_path, cfg, logger=None):
     return master_info["id"], master_info["name"]
 
 
+def record_date(timestamp, utc_offset_sec=None):
+    """RecordDate 属性：采集机墙钟的 ISO 串。
+
+    WorkMate 的 epoch 是墙钟按采集机 OS 时区解释的结果（issue #36：849 个 study 实测，
+    一批机器为 US Central、另一批为 UTC+8），只有按该偏移格式化才还原操作者看到的
+    时刻；偏移由 entries.log 头的 ASCII 墙钟推得（readentries_header）。没有偏移信息
+    （无 entries.log、x32、合成夹具）时按分析机本地时间格式化——即此前的行为。
+    """
+    if not timestamp:
+        return ""
+    if utc_offset_sec is None:
+        return datetime.fromtimestamp(timestamp).isoformat()
+    return datetime.fromtimestamp(timestamp, timezone(timedelta(seconds=utc_offset_sec))).isoformat()
+
+
 def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
                      base_offset=0, logger=None):
     """把 fid 归属于该日志的 entries 换算为采样点标注 (position, group, message)。
@@ -103,7 +118,7 @@ def _planter_kwargs(cfg):
 
 
 def _convert_merged(group_files, group_channel_count, multi_group, study_id, out_dir,
-                    cfg, entries, base_attributes, logger):
+                    cfg, entries, base_attributes, logger, utc_offset_sec=None):
     """合并模式：一组同通道数的日志写入单个 HDF5，标注按合并时间轴落位。"""
     first_mappings = group_files[0]['mappings']
     merged_column_names = list(first_mappings.keys())
@@ -113,7 +128,7 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
         **base_attributes,
         "datalog_ids": ",".join([d['id'] for d in group_files]),
         "Timestamp": first_timestamp,
-        "RecordDate": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+        "RecordDate": record_date(first_timestamp, utc_offset_sec),
         "merged": True,
         "num_files": len(group_files),
         "sampling_freq": group_files[0]['header'].amp.sampling_freq,
@@ -192,7 +207,7 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
 
 
 def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
-                    entryplanter, base_attributes, logger):
+                    entryplanter, base_attributes, logger, utc_offset_sec=None):
     """常规模式：单个日志输出 CSV/HDF5，并按配置嵌入标注、导出标注文件。"""
     output_fmt = cfg["data"]["output_format"]
 
@@ -226,7 +241,7 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
             "sampling_freq": fs,
             "num_channels": len(column_names),
             "Timestamp": ref_timestamp,
-            "RecordDate": datetime.fromtimestamp(ref_timestamp).isoformat() if ref_timestamp else "",
+            "RecordDate": record_date(ref_timestamp, utc_offset_sec),
         }
 
         planter_kwargs = _planter_kwargs(cfg) if output_fmt == "h5" else {}
@@ -303,7 +318,7 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
 
 def convert_study(study_path, study_id, out_dir, cfg, entries,
                   subject_id="", subject_name="", logger=None,
-                  extra_attributes=None):
+                  extra_attributes=None, utc_offset_sec=None):
     """转换单个 study：根据 cfg 选择合并/常规模式。返回处理的文件数。
 
     Args:
@@ -311,6 +326,8 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
                  timestamp 为 unix 秒；CLI 传 readentries 原始结果，
                  GUI 传清洗后的 MutableEntry）
         extra_attributes: 额外并入 HDF5 根属性的字典（如 GUI 的 PatientName）
+        utc_offset_sec: 采集机 OS 的 UTC 偏移（readentries_header().utc_offset_sec），
+                 用于 RecordDate 还原墙钟；None 时按分析机本地时间（见 record_date）
     """
     valid_datalogs = set(
         strip_log_suffix(f) for f in cfg["data"]["data_files"]
@@ -390,6 +407,7 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             processed += _convert_merged(
                 group_files, group_channel_count, len(channel_groups) > 1,
                 study_id, out_dir, cfg, entries, base_attributes, logger,
+                utc_offset_sec=utc_offset_sec,
             )
     else:
         entryplanter = EntryPlanter(entries)
@@ -399,6 +417,7 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             processed += _convert_single(
                 datalog_path, datalog_id, study_id, out_dir, cfg, entries,
                 entryplanter, base_attributes, logger,
+                utc_offset_sec=utc_offset_sec,
             )
 
     return processed

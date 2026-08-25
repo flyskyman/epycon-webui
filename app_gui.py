@@ -260,7 +260,7 @@ except ImportError: pass
 # ========================================================
 try:
     from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN, MASTER_FILENAME
-    from epycon.iou import LogParser, EntryPlanter, readentries
+    from epycon.iou import LogParser, EntryPlanter, readentries, readentries_header
     from epycon.iou.parsers import _readmaster
     from epycon.utils.person import Tokenize
 except ImportError as e:
@@ -611,7 +611,17 @@ def execute_epycon_conversion(cfg):
                 epath = os.path.join(study_path, ENTRIES_FILENAME)
                 need_entries = cfg["entries"]["convert"] or (cfg["data"]["output_format"] == "h5" and cfg["data"]["pin_entries"])
                 conv_logger.info(f"📋 Entries 配置: convert={cfg['entries']['convert']}, pin_entries={cfg['data']['pin_entries']}, need_entries={need_entries}")
-                
+
+                # 采集机 UTC 偏移（RecordDate 还原墙钟，issue #36）。读原文件：
+                # prepare_standard_entries_file 重排后的临时文件头部为零
+                utc_offset_sec = None
+                if os.path.exists(epath):
+                    try:
+                        utc_offset_sec = readentries_header(
+                            epath, version=cfg["global_settings"]["workmate_version"]).utc_offset_sec
+                    except Exception:
+                        conv_logger.exception("⚠️ entries.log 文件头解析失败，RecordDate 退回分析机本地时间")
+
                 if need_entries:
                     if os.path.exists(epath):
                         try:
@@ -675,6 +685,7 @@ def execute_epycon_conversion(cfg):
                         study_path, study_id, study_out_dir, cfg, all_entries_norm,
                         subject_id=subject_id, subject_name=subject_name,
                         logger=conv_logger, extra_attributes=extra_attrs,
+                        utc_offset_sec=utc_offset_sec,
                     )
                     processed_count += n_processed
                     if n_processed == 0:

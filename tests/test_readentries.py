@@ -101,6 +101,38 @@ def test_readentries_sample_index_from_generator(tmp_path):
     assert readentries(str(tmp_path / 'entries.log'), version='4.1')[0].sample_index is None
 
 
+def test_readentries_header_from_fixture():
+    """issue #36：头 0x02 u64 ms、0x0A/0x16 ASCII 墙钟、0x20 DFile 数；
+    夹具墙钟按 UTC+8 写入 → utc_offset_sec = 28800"""
+    if not TEST_DATA_PATH.exists():
+        pytest.skip(f"测试数据文件不存在: {TEST_DATA_PATH}")
+    from epycon.iou import readentries_header
+
+    h = readentries_header(str(TEST_DATA_PATH), version='4.3.2')
+    assert h.timestamp == pytest.approx(1769608082.246)
+    assert h.num_datalogs == 2
+    assert h.wall_clock == "01/28/2026 21:48:02"
+    assert h.utc_offset_sec == 8 * 3600
+
+
+def test_readentries_header_without_wall_clock(tmp_path):
+    """墙钟串缺失（全零头）→ wall_clock/utc_offset_sec 为 None；x32 无时间串同样 None"""
+    sys.path.insert(0, str(Path("scripts").resolve()))
+    from generate_fake_wmx import write_entries
+    from epycon.iou import readentries_header
+
+    import struct
+    blank = bytearray(0x24 + 0xDC)
+    blank[0x02:0x0A] = struct.pack('<Q', 1704038400000)
+    (tmp_path / 'entries.log').write_bytes(bytes(blank))
+    h = readentries_header(str(tmp_path / 'entries.log'), version='4.3.2')
+    assert (h.timestamp, h.wall_clock, h.utc_offset_sec, h.num_datalogs) == (1704038400.0, None, None, 0)
+
+    write_entries(str(tmp_path), version='4.1', datalog_id=1, entries=[(2, 1704038400, 'x')])
+    h32 = readentries_header(str(tmp_path / 'entries.log'), version='4.1')
+    assert (h32.wall_clock, h32.utc_offset_sec, h32.num_datalogs) == (None, None, None)
+
+
 def test_group_map_covers_observed_subtypes():
     """849 个真实 study 实测 subtype（8 在解析层过滤，5 同）全部有标签（issue #36）"""
     from epycon.config.byteschema import GROUP_MAP
