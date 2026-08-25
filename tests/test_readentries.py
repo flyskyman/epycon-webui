@@ -129,3 +129,16 @@ def test_group_map_covers_observed_subtypes():
     observed = {1, 2, 3, 4, 5, 6, 7, 9, 13, 16, 17, 20}
     assert observed <= set(GROUP_MAP)
     assert GROUP_MAP[16] == 'RF'
+
+
+def test_webui_group_map_matches_byteschema():
+    """ui/WorkMate_Log_Parser.html 内联了一份 GROUP_MAP（浏览器端解析 entries.log），
+    必须与 byteschema.GROUP_MAP 逐项一致，否则 WebUI 与 CSV/HDF5 对同一 subtype 标签不同"""
+    import re
+    from epycon.config.byteschema import GROUP_MAP
+
+    html = Path("ui/WorkMate_Log_Parser.html").read_text(encoding="utf-8")
+    m = re.search(r"const GROUP_MAP = \{([^}]*)\};", html)
+    assert m, "WebUI GROUP_MAP literal not found"
+    js_map = {int(k): v for k, v in re.findall(r"(\d+):\s*'([A-Z_]+)'", m.group(1))}
+    assert js_map == GROUP_MAP
