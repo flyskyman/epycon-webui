@@ -37,7 +37,11 @@ RAIL_FRACTION = 0.01
 
 
 def channel_digest(samples) -> str:
-    """Content fingerprint of one channel, for detecting channels that carry the same samples."""
+    """Content fingerprint of one channel, for detecting channels that carry the same samples.
+
+    The fingerprint is taken over the samples as float64, so an int16 channel and its float copy match,
+    and integers beyond 2**53 (far outside any ADC range) are not told apart.
+    """
     return md5(np.ascontiguousarray(samples, dtype=np.float64).tobytes()).hexdigest()
 
 
@@ -60,15 +64,23 @@ def channel_facts(samples, name: str = "") -> dict:
     ``rail_fraction`` counts an extreme only when that exact value occurs at least twice. Every finite
     channel has one minimum and one maximum sample, so counting them unconditionally would put a floor of
     2/n on this fraction and make any channel shorter than 2/threshold samples look clipped; a channel that
-    is genuinely resting against a rail repeats the value.
+    is genuinely resting against a rail repeats the value. By the same rule a single sample, or no finite
+    sample at all, gives 0.0.
+
+    ``samples`` must be one channel: a 1-D array or a column/row vector. A 2-D block is refused rather than
+    flattened into one long channel that would then look perfectly healthy.
     """
-    column = np.asarray(samples, dtype=float).ravel()
+    column = np.asarray(samples, dtype=float)
+    if column.ndim > 1 and column.size != max(column.shape):
+        raise ValueError(f"one channel must be one-dimensional, got shape {column.shape}")
+    column = column.ravel()
     finite = np.isfinite(column)
     values = column[finite]
     # Differences are taken on the original column and then restricted to pairs whose both endpoints are
     # finite. Dropping the non-finite samples first would make samples that a gap had separated adjacent,
     # so [1, nan, 1, 2, nan, 2] would read as two thirds frozen when nothing was ever held.
-    step = np.diff(column)
+    with np.errstate(invalid="ignore"):  # inf - inf on pairs the finite mask discards on the next line
+        step = np.diff(column)
     if step.size:
         step = step[finite[:-1] & finite[1:]]
     rail = 0
@@ -77,7 +89,7 @@ def channel_facts(samples, name: str = "") -> dict:
         at_low = int(np.count_nonzero(values == low))
         at_high = int(np.count_nonzero(values == high))
         rail = (at_low if at_low >= 2 else 0) + (at_high if at_high >= 2 else 0)
-        if high == low:  # a constant channel rests on its extreme at every sample
+        if high == low and values.size >= 2:  # a constant channel rests on its extreme at every sample
             rail = int(values.size)
     return {
         "name": name,
@@ -87,7 +99,7 @@ def channel_facts(samples, name: str = "") -> dict:
         "sd": float(values.std()) if values.size else 0.0,
         "zero_fraction": float(np.mean(values == 0.0)) if values.size else 1.0,
         "frozen_fraction": float(np.mean(step == 0.0)) if step.size else 0.0,
-        "rail_fraction": float(rail / values.size) if values.size else 1.0,
+        "rail_fraction": float(rail / values.size) if values.size else 0.0,
     }
 
 
@@ -102,18 +114,29 @@ def inspect_channels(
 
     ``channels`` is a 2-D numpy array with one channel per column, or a sequence of 1-D channels. The two
     are told apart by type, not by shape: a list holding a single 1-D channel is one channel, not one
-    sample of many. Each result
+    sample of many. A 1-D array, or a flat sequence of numbers, is refused rather than read as one channel
+    per sample. Names must be unique, because ``duplicate_of`` and :func:`summarise` refer to channels by
+    name. Each result
     carries ``duplicate_of``, naming the first channel that holds the same samples, and ``observations``, a
     list of strings. An empty ``observations`` list means nothing stood out; it is not a guarantee, and a
     non-empty one is not an instruction — see :func:`summarise` and decide in the caller.
     """
-    if isinstance(channels, np.ndarray) and channels.ndim == 2:
+    if isinstance(channels, np.ndarray):
+        if channels.ndim != 2:
+            raise ValueError("an array of channels must be 2-D with one channel per column, "
+                             f"got shape {channels.shape}")
         columns = [channels[:, i] for i in range(channels.shape[1])]
     else:
         columns = [np.asarray(channel) for channel in channels]
+        scalars = [i for i, column in enumerate(columns) if column.ndim == 0]
+        if scalars:
+            raise ValueError(f"channel {scalars[0]} is a single number: pass a 2-D array or a sequence of 1-D "
+                             "channels, not one flat sequence of samples")
     labels = list(names) if names is not None else [f"channel_{i}" for i in range(len(columns))]
     if len(labels) != len(columns):
         raise ValueError(f"got {len(columns)} channels but {len(labels)} names")
+    if len(set(labels)) != len(labels):
+        raise ValueError("channel names must be unique: duplicate_of and summarise refer to channels by name")
 
     results, first_seen = [], {}
     for label, column in zip(labels, columns):
@@ -156,6 +179,7 @@ def summarise(facts: Sequence) -> dict:
 # Einthoven and Goldberger relate the six limb leads to two independent ones. A recorder that derives the
 # other four satisfies these exactly, which is also why they cannot detect an I/II swap: swapping the two
 # and re-deriving the rest leaves every identity intact.
+LIMB_LEADS = ("I", "II", "III", "aVR", "aVL", "aVF")
 LIMB_IDENTITIES = {
     "III = II - I": lambda s: s["III"] - (s["II"] - s["I"]),
     "aVR = -(I + II) / 2": lambda s: s["aVR"] + (s["I"] + s["II"]) / 2,
@@ -171,12 +195,13 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     rather than measured. Note the blind spot documented above: these identities cannot detect a swap
     between leads I and II.
     """
-    missing = [name for name in ("I", "II", "III", "aVR", "aVL", "aVF") if name not in leads]
+    missing = [name for name in LIMB_LEADS if name not in leads]
     if missing:
         raise KeyError(f"limb leads missing: {', '.join(missing)}")
     # ravel, as channel_facts does: a lead handed in as a column slice has shape (n, 1), and the identity
     # arithmetic would broadcast it against the (n,) leads into an (n, n) grid, failing on correct data.
-    arrays = {name: np.asarray(values, dtype=float).ravel() for name, values in leads.items()}
+    # Only the six limb leads are read; other keys in the dict are left alone.
+    arrays = {name: np.asarray(leads[name], dtype=float).ravel() for name in LIMB_LEADS}
     # Lengths are checked here rather than left to numpy. Most mismatches do raise a broadcast error, but a
     # lead of length one broadcasts as a scalar against every other lead and reports the whole set as an
     # exact identity while carrying no information at all.
