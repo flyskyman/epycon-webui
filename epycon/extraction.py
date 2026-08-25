@@ -213,9 +213,13 @@ def _gap_message(segments, target_epoch, zero):
 
 def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
                    window=2.0, before=None, after=None, raw_unipolar=False,
-                   raw_counts=False, version=None):
+                   raw_counts=False, version=None, check_entries=True):
     """按流逝时刻/epoch 提取指定导联 ±窗口原始波形。见设计文档第 8 节。
-    非 raw_counts 时物理值固定为 µV（= raw_int × resolution / 1000）。"""
+    非 raw_counts 时物理值固定为 µV（= raw_int × resolution / 1000）。
+
+    check_entries=False 时跳过 entries.log 整簿一致性校验（KNOWN_ISSUES #30 /
+    issue #11：哨兵时间戳或亚秒级边界差会让整个 study 不可提取，而波形读取
+    并不依赖 entries）。返回结果中 entries_check 字段记录本次是否校验。"""
     if version is None:
         version = _default_version()
     # 非法版本在 LogParser 里会抛 ValueError；此处提前转 ExtractionError，
@@ -238,7 +242,8 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
     segments = load_segments(study_dir, version)
     if not segments:
         raise ExtractionError(f"{study_dir} 无 .log 段")
-    check_consistency(study_dir, segments, version)
+    if check_entries:
+        check_consistency(study_dir, segments, version)
     zero = segments[0]["ts"]
 
     if at_epoch is not None and at_elapsed is not None:
@@ -288,6 +293,7 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
         "version": version,
         "fs": fs,
         "units": "counts" if raw_counts else "uV",
+        "entries_check": "passed" if check_entries else "skipped",
         "resolution_nV": res,
         "target": {"elapsed": at_elapsed, "epoch": target,
                    "offset_in_seg_s": offset},

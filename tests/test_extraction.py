@@ -426,3 +426,54 @@ class TestMalformedInputPure:
         (tmp_path / "entries.log").write_bytes(b"\x00" * 7)  # 长度非法
         with pytest.raises(ExtractionError, match="无法解析"):
             check_consistency(str(tmp_path), [], VER)
+
+
+class TestSkipEntriesCheck:
+    """issue #11 / KNOWN_ISSUES #30: waveform reading must not be blocked by entries.log."""
+
+    def _first_lead(self, segs):
+        from epycon.core.helpers import get_channel_mappings
+        header = segs[0]["header"]
+        cfg = {"data": {"leads": "computed", "custom_channels": {}}}
+        mapping = get_channel_mappings(header, cfg)
+        for name, cols in mapping.items():
+            if all(c is not None and 0 <= c < header.num_channels for c in cols):
+                return name
+        pytest.skip("study01 has no resolvable lead")
+
+    def test_study01_extract_refused_by_default(self):
+        from epycon.extraction import extract_window, load_segments
+        segs = load_segments(str(STUDY01), "4.3.2")
+        lead = self._first_lead(segs)
+        with pytest.raises(ExtractionError, match="00000001"):
+            extract_window(str(STUDY01), at_elapsed="0:00:00.100", leads=[lead],
+                           window=0.05, version="4.3.2")
+
+    def test_study01_extract_with_check_skipped(self):
+        from epycon.extraction import extract_window, load_segments
+        segs = load_segments(str(STUDY01), "4.3.2")
+        lead = self._first_lead(segs)
+        out = extract_window(str(STUDY01), at_elapsed="0:00:00.100", leads=[lead],
+                             window=0.05, version="4.3.2", check_entries=False)
+        assert out["entries_check"] == "skipped"
+        assert out["leads"][0]["name"] == lead
+
+    def test_default_result_marks_check_passed(self):
+        from epycon.extraction import extract_window, load_segments
+        if not REAL.exists():
+            pytest.skip("realdata not available")
+        segs = load_segments(str(REAL), VER)
+        lead = self._first_lead(segs)
+        out = extract_window(str(REAL), at_elapsed="0:00:01", leads=[lead], window=0.05, version=VER)
+        assert out["entries_check"] == "passed"
+
+    def test_cli_flag(self, tmp_path):
+        from epycon.cli.extract import main
+        from epycon.extraction import load_segments
+        segs = load_segments(str(STUDY01), "4.3.2")
+        lead = self._first_lead(segs)
+        out = tmp_path / "w.npz"
+        rc = main(["--study", str(STUDY01), "--at", "0:00:00.100", "--leads", lead,
+                   "--window", "0.05", "--version", "4.3.2", "--skip-entries-check",
+                   "--out", str(out)])
+        assert rc == 0 and out.exists()

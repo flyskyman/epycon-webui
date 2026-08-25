@@ -27,6 +27,9 @@ def _build_parser():
     ap.add_argument("--raw-unipolar", action="store_true")
     ap.add_argument("--raw-counts", action="store_true")
     ap.add_argument("--version")
+    ap.add_argument("--skip-entries-check", action="store_true",
+                    help="跳过 entries.log 一致性校验，仅读波形（哨兵/边界时间戳"
+                         "会让整个 study 被拒，见 issue #11）；结果 entries_check=skipped")
     ap.add_argument("--out", help="写 .npz 文件而非 stdout 全量（相对路径按当前工作目录解析）")
     return ap
 
@@ -59,7 +62,7 @@ def main(argv=None):
             args.study, at_elapsed=args.at, at_epoch=args.epoch, leads=leads,
             window=args.window, before=args.before, after=args.after,
             raw_unipolar=args.raw_unipolar, raw_counts=args.raw_counts,
-            version=args.version)
+            version=args.version, check_entries=not args.skip_entries_check)
     except ExtractionError as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
         return 2
