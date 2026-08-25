@@ -144,6 +144,17 @@ def test_channel_facts_count_nonfinite_samples_and_exclude_them(limb_leads):
     assert "0.1% of samples are not finite" in inspect_channels([values], ["I"])[0]["observations"]
 
 
+def test_nonfinite_samples_do_not_close_a_gap_and_look_frozen():
+    """剔除 NaN 后再差分，会把被 NaN 隔开的样点接成相邻：[1,NaN,1,2,NaN,2] 曾读作三分之二冻结。"""
+    probe = np.array([1, np.nan, 1, 2, np.nan, 2], dtype=float)
+    assert channel_facts(probe, name="probe")["frozen_fraction"] == 0.0
+    assert "frozen: held or disconnected" not in inspect_channels([probe], ["probe"])[0]["observations"]
+
+    # 真正被保持的样点仍要计入：可评估的相邻对只有 (1,1) 与 (1,1)，两对皆冻结
+    genuinely_held = np.array([1, np.nan, 1, 1, 1, np.nan, 2], dtype=float)
+    assert channel_facts(genuinely_held, name="held")["frozen_fraction"] == 1.0
+
+
 @pytest.mark.parametrize("n", [50, 100, 150, 200, 1000])
 def test_rail_fraction_has_no_floor_that_depends_on_length(n):
     """每段有限信号必有一个最小值和一个最大值；无条件计入会给出 2/n 的下限。"""

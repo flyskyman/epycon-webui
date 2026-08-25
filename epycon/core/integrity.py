@@ -49,7 +49,8 @@ def channel_facts(samples, name: str = "") -> dict:
     extreme, see below) and ``nonfinite_fraction``, alongside the content digest and basic statistics.
 
     Non-finite samples are counted and then excluded from every other statistic, so that one NaN cannot
-    turn ``sd`` into NaN or collapse the range and make an ordinary channel look clipped.
+    turn ``sd`` into NaN, collapse the range and make an ordinary channel look clipped, or close a gap and
+    make two separated samples look held.
 
     ``rail_fraction`` counts an extreme only when that exact value occurs at least twice. Every finite
     channel has one minimum and one maximum sample, so counting them unconditionally would put a floor of
@@ -59,7 +60,12 @@ def channel_facts(samples, name: str = "") -> dict:
     column = np.asarray(samples, dtype=float).ravel()
     finite = np.isfinite(column)
     values = column[finite]
-    step = np.diff(values)
+    # Differences are taken on the original column and then restricted to pairs whose both endpoints are
+    # finite. Dropping the non-finite samples first would make samples that a gap had separated adjacent,
+    # so [1, nan, 1, 2, nan, 2] would read as two thirds frozen when nothing was ever held.
+    step = np.diff(column)
+    if step.size:
+        step = step[finite[:-1] & finite[1:]]
     rail = 0
     if values.size:
         low, high = float(values.min()), float(values.max())
