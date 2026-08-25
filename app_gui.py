@@ -590,6 +590,9 @@ def execute_epycon_conversion(cfg):
                         try:
                             conv_logger.info(f"🔎 读取标注: {os.path.basename(epath)}")
                             native_entries = readentries(epath, version=cfg["global_settings"]["workmate_version"])
+                            from epycon.conversion import reconcile_entries
+                            native_entries = reconcile_entries(
+                                study_path, native_entries, cfg["global_settings"]["workmate_version"], conv_logger)
                             conv_logger.info(f"📊 原始标注条数: {len(native_entries)}")
 
                             all_entries_norm = clean_entries_content(native_entries)

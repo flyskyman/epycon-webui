@@ -71,7 +71,7 @@ def main():
 
     from epycon.config.byteschema import ENTRIES_FILENAME
     from epycon.iou import EntryPlanter, readentries, readentries_utc_offset
-    from epycon.conversion import convert_study, resolve_subject
+    from epycon.conversion import convert_study, reconcile_entries, resolve_subject
 
     input_folder = _validate_path(cfg["paths"]["input_folder"], name='input folder')
     output_folder = _validate_path(cfg["paths"]["output_folder"], name='output folder')
@@ -117,6 +117,8 @@ def main():
                     f_path=entries_path,
                     version=cfg["global_settings"]["workmate_version"],
                     )
+                entries = reconcile_entries(
+                    study_path, entries, cfg["global_settings"]["workmate_version"], logger)
             except OSError:
                 logger.warning("Could not find ENTRIES log file. Annotation export will be skipped.")
             except Exception:

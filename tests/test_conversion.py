@@ -11,7 +11,8 @@ import h5py
 import pytest
 
 from epycon.conversion import (
-    convert_study, entries_to_marks, reattribute_entries, record_date, strip_log_suffix,
+    convert_study, entries_to_marks, reattribute_entries, reconcile_entries, record_date,
+    strip_log_suffix,
 )
 from epycon.core._dataclasses import Entry
 from epycon.iou import readentries
@@ -98,6 +99,15 @@ def test_reattribute_entries_by_timestamp_and_sample_index():
     out = reattribute_entries([stale, ok, nohit, fake], index)
     assert [e.fid for e in out] == ["00000001", "00000001", "00000000", "00000000"]
     assert out[0].message == "S1=500" and out[0].sample_index == 50
+
+
+def test_reconcile_entries_indexes_every_study_log():
+    """索引取 study 全部 DFile（不受 data.data_files 过滤影响）：夹具里 fid 指 00000000、
+    时间戳+采样索引落在 00000001 → 改判"""
+    stale = Entry(fid="00000000", group="PACE", timestamp=1769608092.303, message="S1=500", sample_index=50)
+    out = reconcile_entries(str(STUDY), [stale], "4.3.2")
+    assert out[0].fid == "00000001"
+    assert reconcile_entries(str(STUDY), [], "4.3.2") == []
 
 
 def test_record_date_uses_acquisition_machine_offset():

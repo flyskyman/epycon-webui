@@ -104,6 +104,25 @@ def reattribute_entries(entries, datalog_index, logger=None):
     return out
 
 
+def reconcile_entries(study_path, entries, version, logger=None):
+    """读完 entries.log 后立即调用：按 study 里**全部** DFile 头做 reattribute_entries。
+
+    放在 convert_study 之外是因为 CLI/GUI 在转换前就已导出 entries_summary.csv，
+    改判必须先于一切导出；索引取全部日志而非 data.data_files 过滤后的子集，否则被
+    过滤掉的 fid 查不到"自身"就无法判定矛盾。
+    """
+    if not entries:
+        return entries
+    datalog_index = {}
+    for datalog_path, datalog_id in list_datalogs(study_path):
+        with LogParser(datalog_path, version=version, samplesize=1024) as parser:
+            header = parser.get_header()
+            if header is not None:
+                datalog_index[datalog_id] = (
+                    float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
+    return reattribute_entries(entries, datalog_index, logger)
+
+
 def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
                      base_offset=0, logger=None):
     """把 fid 归属于该日志的 entries 换算为采样点标注 (position, group, message)。
@@ -381,17 +400,6 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             "owner": credentials.get("owner", ""),
         })
     base_attributes.update(extra_attributes or {})
-
-    if entries:
-        datalog_index = {}
-        for datalog_path, datalog_id in all_datalogs:
-            with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"],
-                           samplesize=1024) as parser:
-                header = parser.get_header()
-                if header is not None:
-                    datalog_index[datalog_id] = (
-                        float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
-        entries = reattribute_entries(entries, datalog_index, logger)
 
     merge_mode = cfg["data"].get("merge_logs", False)
     output_fmt = cfg["data"]["output_format"]

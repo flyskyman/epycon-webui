@@ -159,7 +159,12 @@ def write_entries(out_dir, version='4.3.2', entries=None, datalog_id=1,
             line[0xA:0x12] = struct.pack('<Q', int(ts))
             # sample index at 0x6:0xA (int32, relative to the referenced DFile start)
             if log_ts_ms is not None:
-                line[0x6:0xA] = struct.pack('<i', round((int(ts) - int(log_ts_ms)) * fs / 1000))
+                sidx = round((int(ts) - int(log_ts_ms)) * fs / 1000)
+                if not -2**31 <= sidx < 2**31:
+                    raise ValueError(f"entry timestamp {ts} is {(int(ts) - int(log_ts_ms)) / 1000:.0f} s "
+                                     f"from the log start; sample index must fit int32 — "
+                                     f"use timestamps near log_ts_ms={log_ts_ms}")
+                line[0x6:0xA] = struct.pack('<i', sidx)
         # text at 0xE:0xC0 (truncate)
         text_bytes = msg.encode('ascii', 'ignore')
         text_offset = 0xE if fmt_ts == '<L' else 0x12
@@ -215,7 +220,8 @@ def main():
             entries = []
             for item in data:
                 grp = int(item.get('group', 2))
-                ts = int(item.get('timestamp', int(time.time())))
+                # 缺省与 write_entries 的单位一致：x64 毫秒（相对日志头），x32 秒
+                ts = int(item.get('timestamp', log_ts_ms if log_ts_ms is not None else int(time.time())))
                 msg = str(item.get('message', args.entry_message))
                 fid = int(item.get('fid', 1))
                 entries.append((grp, ts, msg, fid))
