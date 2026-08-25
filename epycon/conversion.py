@@ -4,6 +4,7 @@
 int 截断亚秒、字段名漂移、x32 时间戳误读等），故收敛到本模块。
 任何转换语义的修改只允许发生在这里。
 """
+import dataclasses
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -74,6 +75,33 @@ def record_date(timestamp, utc_offset_sec=None):
     if utc_offset_sec is None:
         return datetime.fromtimestamp(timestamp).isoformat()
     return datetime.fromtimestamp(timestamp, timezone(timedelta(seconds=utc_offset_sec))).isoformat()
+
+
+def reattribute_entries(entries, datalog_index, logger=None):
+    """DFile 索引字段与 (时间戳, 采样索引) 矛盾时改判归属（issue #36）。
+
+    849 个真实 study 里有 24 条（全是起搏协议行）0x02 指向的 DFile 与时间戳相差几十秒到
+    几十分钟，而 时间戳+采样索引 一致地落在另一个 DFile 内，且那个 DFile 里没有同文本
+    副本——按 fid 归属即丢失。两个独立字段一致优先于单个字段；只在唯一命中时改判。
+    datalog_index: {fid: (start_sec, fs, num_samples)}；无 sample_index 的条目原样返回。
+    """
+    out = []
+    for entry in entries:
+        sidx = getattr(entry, "sample_index", None)
+        own = datalog_index.get(str(entry.fid))
+        if sidx is None or own is None or abs(round((entry.timestamp - own[0]) * own[1]) - sidx) <= 1:
+            out.append(entry)
+            continue
+        hits = [fid for fid, (start, fs, n) in datalog_index.items()
+                if 0 <= sidx < n and abs(round((entry.timestamp - start) * fs) - sidx) <= 1]
+        if len(hits) != 1:
+            out.append(entry)
+            continue
+        if logger:
+            logger.warning(f"   ⚠️ Entry '{entry.message}' fid {entry.fid} → {hits[0]}: "
+                           f"timestamp+sample_index agree on the other file (issue #36)")
+        out.append(dataclasses.replace(entry, fid=hits[0]))
+    return out
 
 
 def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
@@ -353,6 +381,17 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             "owner": credentials.get("owner", ""),
         })
     base_attributes.update(extra_attributes or {})
+
+    if entries:
+        datalog_index = {}
+        for datalog_path, datalog_id in all_datalogs:
+            with LogParser(datalog_path, version=cfg["global_settings"]["workmate_version"],
+                           samplesize=1024) as parser:
+                header = parser.get_header()
+                if header is not None:
+                    datalog_index[datalog_id] = (
+                        float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
+        entries = reattribute_entries(entries, datalog_index, logger)
 
     merge_mode = cfg["data"].get("merge_logs", False)
     output_fmt = cfg["data"]["output_format"]

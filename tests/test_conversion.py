@@ -10,7 +10,10 @@ from pathlib import Path
 import h5py
 import pytest
 
-from epycon.conversion import convert_study, entries_to_marks, record_date, strip_log_suffix
+from epycon.conversion import (
+    convert_study, entries_to_marks, reattribute_entries, record_date, strip_log_suffix,
+)
+from epycon.core._dataclasses import Entry
 from epycon.iou import readentries
 
 ROOT = Path(__file__).parent.parent
@@ -82,6 +85,19 @@ class TestEntriesToMarks:
             marks = entries_to_marks([entry], "a", 100.0, self.FS, 5000, logger=logger)
         assert [m[0] for m in marks] == [500]
         assert caplog.text == ""
+
+
+def test_reattribute_entries_by_timestamp_and_sample_index():
+    """issue #36：fid 指向的文件与时间戳矛盾、而时间戳+采样索引唯一落在另一文件 → 改判；
+    fid 自洽 / 无唯一命中 / 无 sample_index（GUI FakeEntry）→ 原样"""
+    index = {"00000000": (100.0, 1000, 5000), "00000001": (200.0, 1000, 5000)}
+    stale = Entry(fid="00000000", group="PACE", timestamp=200.05, message="S1=500", sample_index=50)
+    ok = Entry(fid="00000001", group="PACE", timestamp=200.05, message="x", sample_index=50)
+    nohit = Entry(fid="00000000", group="PACE", timestamp=300.05, message="y", sample_index=50)
+    fake = FakeEntry("00000000", 200.05)
+    out = reattribute_entries([stale, ok, nohit, fake], index)
+    assert [e.fid for e in out] == ["00000001", "00000001", "00000000", "00000000"]
+    assert out[0].message == "S1=500" and out[0].sample_index == 50
 
 
 def test_record_date_uses_acquisition_machine_offset():
