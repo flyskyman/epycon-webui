@@ -3,7 +3,7 @@
 分类规则（2026-06-10 整理）：
 
 - **scripts/ 根目录**：仍在使用的脚本
-  - CI 在用：`generate_fake_wmx.py`、`generate_fake_wmx32.py`（windows-build-release）、
+  - CI 在用：`generate_fake_wmx.py`（ci 与 windows-build-release 均用 x64 schema）、
     `validate_ci_output.py`、`test_performance_regression.py`
     （`test_version.py`/`test_business_functions.py` 已移植为
     `tests/test_business_logic.py` 并归档）

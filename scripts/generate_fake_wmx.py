@@ -220,12 +220,12 @@ def main():
                 fid = int(item.get('fid', 1))
                 entries.append((grp, ts, msg, fid))
         else:
-            # x64 以日志头时间戳为基准（采样索引须相对它且落在 int32 内）；x32 用 2024 固定值
-            base_timestamp_ms = log_ts_ms if log_ts_ms is not None else 1704038400000
+            # x64 以日志头时间戳为基准（采样索引须相对它且落在 int32 内）；x32 用 2024 固定值（秒）
+            base_timestamp_ms = log_ts_ms if log_ts_ms is not None else 1704038400
             entries = []
             for i in range(args.entries_count):
                 grp = 2 + (i % 5)  # rotate some group ids
-                ts_ms = base_timestamp_ms + i * 60000  # Add minutes in milliseconds to avoid duplicate timestamps
+                ts_ms = base_timestamp_ms + i * (60000 if log_ts_ms is not None else 60)  # 每条隔 1 min
                 msg = f"{args.entry_message} #{i+1}"
                 fid = 1 + (i % args.entries_fids)
                 entries.append((grp, ts_ms, msg, fid))
