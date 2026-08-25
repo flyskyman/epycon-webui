@@ -152,3 +152,28 @@ def test_limb_domain_never_passes_without_evidence(leads, transform, holds, deri
 def test_limb_leads_that_carry_no_matching_samples_are_refused(leads, bad):
     with pytest.raises(ValueError, match="nonzero length"):
         check_limb_identities({**leads, "aVF": bad})
+
+
+def test_flat_leads_satisfy_every_identity_but_prove_nothing(leads):
+    """六条全零导联让四条恒等式平凡成立；这不是"记录仪导出了从属导联"的证据。"""
+    flat = check_limb_identities({k: np.zeros(N) for k in leads})
+    assert flat["holds"] and not flat["informative"] and not flat["derived"]
+
+    # 只要 I、II 之一有变化，恒等式就非平凡：I 平、II 活时从属导联随 II 变化，derived 仍成立
+    two = leads["II"]
+    one_flat = {"I": np.zeros(N), "II": two, "III": two, "aVR": -two / 2, "aVL": -two / 2, "aVF": two}
+    assert check_limb_identities(one_flat)["derived"]
+
+
+def test_derived_presumes_float64_and_is_not_a_dtype_test(leads):
+    """三条恒等式含 /2：整型或 float32 存储各留一份残差，derived 永远为假，不论记录仪导得多忠实。
+    不调容差——容差是调用方按 LSB 设的，这里把代价钉成断言而不是藏起来。"""
+    float32 = check_limb_identities({k: v.astype(np.float32) for k, v in leads.items()})
+    assert float32["holds"] and not float32["derived"]
+    assert 0 < float32["worst"] < 1e-6
+
+    int16 = {k: (v * 1000).astype(np.int16) for k, v in leads.items()}   # 截断：残差恰为 1.5 LSB
+    assert check_limb_identities(int16)["worst"] == 1.5
+    assert not check_limb_identities(int16, tolerance=1.5)["derived"]
+    assert check_limb_identities(int16, tolerance=1.5)["holds"]
+    assert not check_limb_identities(int16, tolerance=1.0)["holds"]

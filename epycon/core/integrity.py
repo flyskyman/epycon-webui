@@ -192,8 +192,15 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     """Residual of each limb-lead identity, in the units of the leads given.
 
     A worst residual at floating-point zero means the four dependent leads were derived by the recorder
-    rather than measured. Note the blind spot documented above: these identities cannot detect a swap
-    between leads I and II.
+    rather than measured — provided the leads carry signal at all. When neither I nor II varies, every
+    identity holds trivially (six flat-zero leads satisfy all four), so ``informative`` is False and
+    ``derived`` is not claimed. Note the blind spot documented above: these identities cannot detect a
+    swap between leads I and II.
+
+    ``derived`` presumes exact float64 arithmetic. Three of the four identities divide by two, so leads
+    stored as integers or float32 keep a residual (1.5 LSB for truncated int16, ~1e-7 for float32) however
+    faithfully the recorder derived them: ``holds`` is then the caller's call via ``tolerance``, and
+    ``derived`` is not a test of storage dtype.
     """
     missing = [name for name in LIMB_LEADS if name not in leads]
     if missing:
@@ -213,10 +220,14 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     # on where it sits in the sequence, and a NaN in aVF would report a worst residual of 0.0 — a silent
     # pass in exactly the case this check exists to catch. np.max propagates, and `nan <= tolerance` is False.
     worst = float(np.max(list(residuals.values())))
+    # The identities are non-trivial only if one of the two independent leads varies; with I and II both
+    # flat, the four dependent leads are flat too and a zero residual is no evidence of derivation.
+    informative = bool(np.ptp(arrays["I"]) > 0 or np.ptp(arrays["II"]) > 0)
     return {
         "residual": residuals,
         "worst": worst,
         "holds": worst <= tolerance,
-        "derived": worst <= 1e-9,
+        "informative": informative,
+        "derived": informative and worst <= 1e-9,
         "blind_to": "a swap between leads I and II",
     }

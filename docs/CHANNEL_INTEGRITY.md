@@ -39,7 +39,7 @@ from epycon.core.integrity import check_limb_identities
 check_limb_identities({"I": ..., "II": ..., "III": ..., "aVR": ..., "aVL": ..., "aVF": ...})
 ```
 
-`derived=True` 表示四个从属导联由记录仪从 I、II 导出而非独立测量。**已知盲区**：互换 I 与 II 后重新导出其余四个，恒等式依旧成立，故它无法检测 I/II 互换——该盲区在返回值的 `blind_to` 字段中显式声明。
+`derived=True` 表示四个从属导联由记录仪从 I、II 导出而非独立测量；前提是 I、II 至少一个有变化（六条平直导联让恒等式平凡成立，此时 `informative=False`、不声明 `derived`），且导联以 float64 存储——整型或 float32 存储会留下残差（截断 int16 为 1.5 LSB），`holds` 由调用方按 LSB 设 `tolerance` 判定，`derived` 不能当 dtype 检验用。**已知盲区**：互换 I 与 II 后重新导出其余四个，恒等式依旧成立，故它无法检测 I/II 互换——该盲区在返回值的 `blind_to` 字段中显式声明。
 
 ## 另一个与读取有关的坑：导出每页开头约 2 秒不可用
 
