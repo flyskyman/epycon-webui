@@ -270,7 +270,7 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
             # #21 改名前标注也叫 <fid>.csv，与旧波形 CSV 同名：首行整行匹配 _tocsv 表头
             # 才是标注，只删标注，旧波形 CSV 留着
             legacy = os.path.join(out_dir, datalog_id + ".csv")
-            if file_fmt == "csv" and legacy != full_output_path and os.path.exists(legacy):
+            if legacy != full_output_path and os.path.exists(legacy):
                 with open(legacy, encoding="utf-8") as f:
                     is_annotation = f.readline().rstrip("\r\n") in _ENTRY_CSV_HEADERS
                 if is_annotation:
