@@ -197,7 +197,7 @@ python -m epycon.cli.extract --study <study目录> --at 1:07:15 --leads "V6,CS 3
 - `docs/`：活文档（台账、渲染规范、上游论文、工具用法）；`docs/archive/` 为历史留档。
   索引见 `docs/README.md`。
 - `examples/`：示例（`demo.py`）与合成测试夹具（`examples/data/study01/`，测试断言依赖其精确内容）。
-- 项目根还包含：`README.md`, `CLAUDE.md`（维护约定）, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
+- 项目根还包含：`README.md`, `AGENTS.md`（维护约定；`CLAUDE.md` 仅导入它）, `LICENSE`, `setup.py`, `requirements.txt` 等元数据与开发文件。
 - 变更记录：用户可见变更见 [GitHub Releases](https://github.com/flyskyman/epycon-webui/releases)；开发细节见 git log；待办问题见 [GitHub Issues](https://github.com/flyskyman/epycon-webui/issues)。
 
 打包说明：为了简化 PyInstaller 配置，`--add-data "ui;ui"` 可用于包含整个前端目录（示例命令已在上方“打包为可执行文件”部分）。
