@@ -20,6 +20,9 @@ class Entry:
     group: Union[int, str]  # int from binary, but mapped to str label via GROUP_MAP
     timestamp: int
     message: str
+    # DFile 内采样索引（x64 条目 0x06，i32）；x32 schema 未验证该字段，为 None。
+    # 与时间戳定位互为独立来源，仅作交叉校验（issue #36）
+    sample_index: Union[int, None] = None
 
     def to_datetime(self, format: str = "%H:%M:%S") -> str:
         return datetime.fromtimestamp(self.timestamp).strftime(format)

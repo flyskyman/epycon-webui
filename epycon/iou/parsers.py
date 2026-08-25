@@ -605,6 +605,12 @@ def _readentries(
         start_byte, end_byte = diary.timestamp
         timestamp = struct.unpack(fmt, barray[pointer + start_byte:pointer + end_byte])[0] / factor
 
+        # DFile 内采样索引（i32，有符号）；x32 schema 无此字段
+        sample_index = None
+        if hasattr(diary, "sample_index"):
+            start_byte, end_byte = diary.sample_index
+            sample_index = struct.unpack("<i", barray[pointer + start_byte:pointer + end_byte])[0]
+
         # retrieve text annotation
         start_byte, end_byte = diary.text
         text_bytes = barray[pointer + start_byte:pointer + end_byte]
@@ -638,6 +644,7 @@ def _readentries(
                 group=mapped_group,
                 timestamp=timestamp,
                 message=message,
+                sample_index=sample_index,
                 )
         )
 

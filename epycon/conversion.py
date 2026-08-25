@@ -70,6 +70,8 @@ def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
     - 有符号偏移：早于文件起点为负，由下界拒绝；保留亚秒精度
     - round 取最近采样点：大数量级 epoch 时间戳相减存在浮点误差，
       int() 截断会系统性偏移一个采样点
+    - entries.log 自带的 DFile 内采样索引（entry.sample_index）只作交叉校验：
+      849 个真实 study 上与时间戳定位 ≤1 样本一致，偏差更大即告警（issue #36）
     """
     marks = []
     for entry in entries:
@@ -79,6 +81,11 @@ def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
         local_pos = round(offset_sec * fs)
         if 0 <= local_pos < file_sample_count:
             marks.append((base_offset + local_pos, entry.group, entry.message))
+            sample_index = getattr(entry, "sample_index", None)
+            if logger and sample_index is not None and abs(sample_index - local_pos) > 1:
+                logger.warning(
+                    f"   ⚠️ {datalog_id}: Entry '{entry.message}' sample_index={sample_index} "
+                    f"disagrees with timestamp position {local_pos} (issue #36)")
         elif logger:
             file_duration = file_sample_count / fs if fs > 0 else 0
             logger.warning(

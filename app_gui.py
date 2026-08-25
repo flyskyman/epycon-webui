@@ -26,6 +26,7 @@ import signal
 import uuid
 import concurrent.futures
 import subprocess
+from typing import Optional
 
 # ========================================================
 # 🛡️ 运行时环境
@@ -327,6 +328,7 @@ class MutableEntry:
     fid: str = '0'
     duration: float = 0
     color: int = 0
+    sample_index: Optional[int] = None  # 透传 Entry.sample_index 供定位交叉校验（issue #36）
 
 # ========================================================
 # ⚖️ [核心] 全自动时间归一化 (Unix Seconds)
@@ -475,7 +477,8 @@ def clean_entries_content(entries):
             timestamp=to_unix_seconds(e.timestamp),
             group=raw_grp,
             message=raw_msg,
-            fid=getattr(e, 'fid', '0')
+            fid=getattr(e, 'fid', '0'),
+            sample_index=getattr(e, 'sample_index', None),
         )
         cleaned_list.append(new_e)
 

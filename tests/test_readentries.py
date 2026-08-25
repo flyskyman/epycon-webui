@@ -72,3 +72,39 @@ def test_readentries_entry_parsing():
         entry = entries[0]
         assert hasattr(entry, 'timestamp'), "条目应有 timestamp 属性"
         assert hasattr(entry, 'group'), "条目应有 group 属性"
+
+
+def test_readentries_sample_index_from_fixture():
+    """issue #36：条目 0x06 为 DFile 内采样索引（i32）。夹具两条都指向 00000001.log
+    （ts 1769608092253）：第一条早 12.907 s → -12907，第二条晚 50 ms → 50（fs=1000）"""
+    if not TEST_DATA_PATH.exists():
+        pytest.skip(f"测试数据文件不存在: {TEST_DATA_PATH}")
+    from epycon.iou import readentries
+
+    entries = readentries(str(TEST_DATA_PATH), version='4.3.2')
+    assert [e.sample_index for e in entries] == [-12907, 50]
+
+
+def test_readentries_sample_index_from_generator(tmp_path):
+    """生成器写入的采样索引 = (ts − DFile ts)×fs/1000，解析回同一值；x32 无该字段 → None"""
+    sys.path.insert(0, str(Path("scripts").resolve()))
+    from generate_fake_wmx import write_entries
+    from epycon.iou import readentries
+
+    log_ts_ms = 1704038400000
+    write_entries(str(tmp_path), version='4.3.2', datalog_id=1, log_ts_ms=log_ts_ms, fs=2000,
+                  entries=[(2, log_ts_ms - 100, 'pre'), (3, log_ts_ms + 2500, 'post')])
+    entries = readentries(str(tmp_path / 'entries.log'), version='4.3.2')
+    assert [(e.fid, e.sample_index) for e in entries] == [('00000001', -200), ('00000001', 5000)]
+
+    write_entries(str(tmp_path), version='4.1', datalog_id=1, entries=[(2, 1704038400, 'x')])
+    assert readentries(str(tmp_path / 'entries.log'), version='4.1')[0].sample_index is None
+
+
+def test_group_map_covers_observed_subtypes():
+    """849 个真实 study 实测 subtype（8 在解析层过滤，5 同）全部有标签（issue #36）"""
+    from epycon.config.byteschema import GROUP_MAP
+
+    observed = {1, 2, 3, 4, 5, 6, 7, 9, 13, 16, 17, 20}
+    assert observed <= set(GROUP_MAP)
+    assert GROUP_MAP[16] == 'RF'

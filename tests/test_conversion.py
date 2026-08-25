@@ -62,6 +62,27 @@ class TestEntriesToMarks:
         marks = entries_to_marks(entries, "a", 100.0, self.FS, 5000, base_offset=1024)
         assert [m[0] for m in marks] == [1524]
 
+    def test_sample_index_cross_check_warns_but_keeps_timestamp_position(self, caplog):
+        # issue #36：0x06 采样索引只交叉校验，偏差 >1 样本告警，定位仍以时间戳为准
+        import logging
+        logger = logging.getLogger("test_marks")
+        entry = FakeEntry("a", 100.5)
+        entry.sample_index = 400
+        with caplog.at_level(logging.WARNING, logger="test_marks"):
+            marks = entries_to_marks([entry], "a", 100.0, self.FS, 5000, logger=logger)
+        assert [m[0] for m in marks] == [500]
+        assert "sample_index=400" in caplog.text
+
+    def test_sample_index_within_one_sample_is_silent(self, caplog):
+        import logging
+        logger = logging.getLogger("test_marks")
+        entry = FakeEntry("a", 100.5)
+        entry.sample_index = 499
+        with caplog.at_level(logging.WARNING, logger="test_marks"):
+            marks = entries_to_marks([entry], "a", 100.0, self.FS, 5000, logger=logger)
+        assert [m[0] for m in marks] == [500]
+        assert caplog.text == ""
+
 
 def test_strip_log_suffix():
     assert strip_log_suffix("00000000.log") == "00000000"
