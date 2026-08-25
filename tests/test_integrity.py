@@ -104,6 +104,34 @@ def test_limb_identities_are_exact_when_the_recorder_derives_them(limb_leads):
     assert result["worst"] == pytest.approx(0.0, abs=1e-12)
 
 
+def test_limb_identities_accept_a_lead_handed_in_as_a_column_slice(limb_leads):
+    """列切片 arr[:, i:i+1] 形状为 (n,1)，广播后会算成 (n,n) 网格，把正确导出的导联误判为不成立。"""
+    as_columns = dict(limb_leads)
+    as_columns["aVL"] = np.asarray(limb_leads["aVL"]).reshape(-1, 1)
+    result = check_limb_identities(as_columns)
+    assert result["derived"]
+    assert result["worst"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_limb_identities_still_reject_leads_of_different_lengths(limb_leads):
+    mismatched = dict(limb_leads)
+    mismatched["aVF"] = np.asarray(limb_leads["aVF"])[:-3]
+    with pytest.raises(ValueError):
+        check_limb_identities(mismatched)
+
+
+def test_no_evaluable_pair_is_not_evidence_of_a_held_input():
+    """无可评估的相邻对时，frozen_fraction 应为 0.0：没有证据不等于有冻结的证据。"""
+    separated = np.array([1, np.nan, 2], dtype=float)
+    assert channel_facts(separated, name="p")["frozen_fraction"] == 0.0
+    assert "frozen: held or disconnected" not in inspect_channels([separated], ["p"])[0]["observations"]
+    assert channel_facts(np.array([5.0]), name="one")["frozen_fraction"] == 0.0
+
+    # 仍然报得出的两种：真实常数通道，以及整条全非有限
+    assert channel_facts(np.zeros(500), name="flat")["frozen_fraction"] == 1.0
+    assert "dead: never connected" in inspect_channels([np.full(10, np.nan)], ["nan"])[0]["observations"]
+
+
 def test_limb_identities_are_blind_to_a_swap_between_I_and_II(limb_leads):
     """这是刻意记录的盲区：互换 I、II 后重新导出其余四个，恒等式依旧成立。"""
     one, two = limb_leads["II"], limb_leads["I"]

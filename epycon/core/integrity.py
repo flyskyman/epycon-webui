@@ -52,6 +52,11 @@ def channel_facts(samples, name: str = "") -> dict:
     turn ``sd`` into NaN, collapse the range and make an ordinary channel look clipped, or close a gap and
     make two separated samples look held.
 
+    ``frozen_fraction`` is 0.0 when no pair of adjacent samples can be evaluated at all — a single sample,
+    or finite samples every one of which a gap separates. Absence of evidence is not evidence of a held
+    input, and an empty or wholly non-finite channel is reported by ``n_samples``, ``zero_fraction`` and
+    ``nonfinite_fraction`` instead.
+
     ``rail_fraction`` counts an extreme only when that exact value occurs at least twice. Every finite
     channel has one minimum and one maximum sample, so counting them unconditionally would put a floor of
     2/n on this fraction and make any channel shorter than 2/threshold samples look clipped; a channel that
@@ -81,7 +86,7 @@ def channel_facts(samples, name: str = "") -> dict:
         "nonfinite_fraction": float(np.mean(~finite)) if column.size else 1.0,
         "sd": float(values.std()) if values.size else 0.0,
         "zero_fraction": float(np.mean(values == 0.0)) if values.size else 1.0,
-        "frozen_fraction": float(np.mean(step == 0.0)) if step.size else 1.0,
+        "frozen_fraction": float(np.mean(step == 0.0)) if step.size else 0.0,
         "rail_fraction": float(rail / values.size) if values.size else 1.0,
     }
 
@@ -167,7 +172,10 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     missing = [name for name in ("I", "II", "III", "aVR", "aVL", "aVF") if name not in leads]
     if missing:
         raise KeyError(f"limb leads missing: {', '.join(missing)}")
-    arrays = {name: np.asarray(values, dtype=float) for name, values in leads.items()}
+    # ravel, as channel_facts does: a lead handed in as a column slice has shape (n, 1), and the identity
+    # arithmetic would broadcast it against the (n,) leads into an (n, n) grid, failing on correct data.
+    # Leads of genuinely different lengths still fail, on numpy's own broadcast error.
+    arrays = {name: np.asarray(values, dtype=float).ravel() for name, values in leads.items()}
     residuals = {label: float(np.max(np.abs(expression(arrays)))) for label, expression in LIMB_IDENTITIES.items()}
     # np.max, not the builtin: builtin max() compares pairwise, so a NaN is swallowed or returned depending
     # on where it sits in the sequence, and a NaN in aVF would report a worst residual of 0.0 — a silent
