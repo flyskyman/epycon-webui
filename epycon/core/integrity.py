@@ -225,8 +225,11 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05, lsb: Optional[fl
     # The identities are non-trivial only if one of the two independent leads varies; with I and II both
     # flat, the four dependent leads are flat too and a zero residual is no evidence of derivation.
     informative = bool(np.ptp(arrays["I"]) > 0 or np.ptp(arrays["II"]) > 0)
-    # Half a step, with float slack: a residual that is exactly half a step in exact arithmetic can land an
-    # ulp above lsb / 2 in float64.
+    # Half a step, with float slack. The slack is set by the magnitude of the operands, not by ulp(lsb / 2):
+    # the residual is a max over millions of differences of lead values, so float64 error runs at about
+    # eps * max|lead|, and relative to lsb / 2 that is eps * max|lead| / (lsb / 2). On a real WorkMate x64
+    # study (max 201 mV, lsb 7.8e-5 mV) the worst residual sat 3.9e-10 above half a step; the 1e-6 allowed
+    # here would need leads of ~180 V to run out.
     derivation_cutoff = 1e-9 if lsb is None else lsb / 2 * (1 + 1e-6)
     return {
         "residual": residuals,
