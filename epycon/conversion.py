@@ -4,9 +4,10 @@
 int 截断亚秒、字段名漂移、x32 时间戳误读等），故收敛到本模块。
 任何转换语义的修改只允许发生在这里。
 """
+import dataclasses
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from glob import iglob
 
 from epycon.config.byteschema import MASTER_FILENAME, LOG_PATTERN
@@ -61,6 +62,67 @@ def resolve_subject(study_path, cfg, logger=None):
     return master_info["id"], master_info["name"]
 
 
+def record_date(timestamp, utc_offset_sec=None):
+    """RecordDate 属性：采集机墙钟的 ISO 串。
+
+    WorkMate 的 epoch 是墙钟按采集机 OS 时区解释的结果（issue #36：849 个 study 实测，
+    一批机器为 US Central、另一批为 UTC+8），只有按该偏移格式化才还原操作者看到的
+    时刻；偏移由 entries.log 头的 ASCII 墙钟推得（readentries_utc_offset）。没有偏移信息
+    （无 entries.log、x32、合成夹具）时按分析机本地时间格式化——即此前的行为。
+    """
+    if not timestamp:
+        return ""
+    if utc_offset_sec is None:
+        return datetime.fromtimestamp(timestamp).isoformat()
+    return datetime.fromtimestamp(timestamp, timezone(timedelta(seconds=utc_offset_sec))).isoformat()
+
+
+def reattribute_entries(entries, datalog_index, logger=None):
+    """DFile 索引字段与 (时间戳, 采样索引) 矛盾时改判归属（issue #36）。
+
+    849 个真实 study 里有 24 条（全是起搏协议行）0x02 指向的 DFile 与时间戳相差几十秒到
+    几十分钟，而 时间戳+采样索引 一致地落在另一个 DFile 内，且那个 DFile 里没有同文本
+    副本——按 fid 归属即丢失。两个独立字段一致优先于单个字段；只在唯一命中时改判。
+    datalog_index: {fid: (start_sec, fs, num_samples)}；无 sample_index 的条目原样返回。
+    """
+    out = []
+    for entry in entries:
+        sidx = getattr(entry, "sample_index", None)
+        own = datalog_index.get(str(entry.fid))
+        if sidx is None or own is None or abs(round((entry.timestamp - own[0]) * own[1]) - sidx) <= 1:
+            out.append(entry)
+            continue
+        hits = [fid for fid, (start, fs, n) in datalog_index.items()
+                if 0 <= sidx < n and abs(round((entry.timestamp - start) * fs) - sidx) <= 1]
+        if len(hits) != 1:
+            out.append(entry)
+            continue
+        if logger:
+            logger.warning(f"   ⚠️ Entry '{entry.message}' fid {entry.fid} → {hits[0]}: "
+                           f"timestamp+sample_index agree on the other file (issue #36)")
+        out.append(dataclasses.replace(entry, fid=hits[0]))
+    return out
+
+
+def reconcile_entries(study_path, entries, version, logger=None):
+    """读完 entries.log 后立即调用：按 study 里**全部** DFile 头做 reattribute_entries。
+
+    放在 convert_study 之外是因为 CLI/GUI 在转换前就已导出 entries_summary.csv，
+    改判必须先于一切导出；索引取全部日志而非 data.data_files 过滤后的子集，否则被
+    过滤掉的 fid 查不到"自身"就无法判定矛盾。
+    """
+    if not entries:
+        return entries
+    datalog_index = {}
+    for datalog_path, datalog_id in list_datalogs(study_path):
+        with LogParser(datalog_path, version=version, samplesize=1024) as parser:
+            header = parser.get_header()
+            if header is not None:
+                datalog_index[datalog_id] = (
+                    float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
+    return reattribute_entries(entries, datalog_index, logger)
+
+
 def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
                      base_offset=0, logger=None):
     """把 fid 归属于该日志的 entries 换算为采样点标注 (position, group, message)。
@@ -70,6 +132,8 @@ def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
     - 有符号偏移：早于文件起点为负，由下界拒绝；保留亚秒精度
     - round 取最近采样点：大数量级 epoch 时间戳相减存在浮点误差，
       int() 截断会系统性偏移一个采样点
+    - entries.log 自带的 DFile 内采样索引（entry.sample_index）只作交叉校验：
+      849 个真实 study 上与时间戳定位 ≤1 样本一致，偏差更大即告警（issue #36）
     """
     marks = []
     for entry in entries:
@@ -79,6 +143,11 @@ def entries_to_marks(entries, datalog_id, file_start_sec, fs, file_sample_count,
         local_pos = round(offset_sec * fs)
         if 0 <= local_pos < file_sample_count:
             marks.append((base_offset + local_pos, entry.group, entry.message))
+            sample_index = getattr(entry, "sample_index", None)
+            if logger and sample_index is not None and abs(sample_index - local_pos) > 1:
+                logger.warning(
+                    f"   ⚠️ {datalog_id}: Entry '{entry.message}' sample_index={sample_index} "
+                    f"disagrees with timestamp position {local_pos} (issue #36)")
         elif logger:
             file_duration = file_sample_count / fs if fs > 0 else 0
             logger.warning(
@@ -96,7 +165,7 @@ def _planter_kwargs(cfg):
 
 
 def _convert_merged(group_files, group_channel_count, multi_group, study_id, out_dir,
-                    cfg, entries, base_attributes, logger):
+                    cfg, entries, base_attributes, logger, utc_offset_sec=None):
     """合并模式：一组同通道数的日志写入单个 HDF5，标注按合并时间轴落位。"""
     first_mappings = group_files[0]['mappings']
     merged_column_names = list(first_mappings.keys())
@@ -106,7 +175,7 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
         **base_attributes,
         "datalog_ids": ",".join([d['id'] for d in group_files]),
         "Timestamp": first_timestamp,
-        "RecordDate": datetime.fromtimestamp(first_timestamp).isoformat() if first_timestamp else "",
+        "RecordDate": record_date(first_timestamp, utc_offset_sec),
         "merged": True,
         "num_files": len(group_files),
         "sampling_freq": group_files[0]['header'].amp.sampling_freq,
@@ -185,7 +254,7 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
 
 
 def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
-                    entryplanter, base_attributes, logger):
+                    entryplanter, base_attributes, logger, utc_offset_sec=None):
     """常规模式：单个日志输出 CSV/HDF5，并按配置嵌入标注、导出标注文件。"""
     output_fmt = cfg["data"]["output_format"]
 
@@ -219,7 +288,7 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
             "sampling_freq": fs,
             "num_channels": len(column_names),
             "Timestamp": ref_timestamp,
-            "RecordDate": datetime.fromtimestamp(ref_timestamp).isoformat() if ref_timestamp else "",
+            "RecordDate": record_date(ref_timestamp, utc_offset_sec),
         }
 
         planter_kwargs = _planter_kwargs(cfg) if output_fmt == "h5" else {}
@@ -296,7 +365,7 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
 
 def convert_study(study_path, study_id, out_dir, cfg, entries,
                   subject_id="", subject_name="", logger=None,
-                  extra_attributes=None):
+                  extra_attributes=None, utc_offset_sec=None):
     """转换单个 study：根据 cfg 选择合并/常规模式。返回处理的文件数。
 
     Args:
@@ -304,6 +373,8 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
                  timestamp 为 unix 秒；CLI 传 readentries 原始结果，
                  GUI 传清洗后的 MutableEntry）
         extra_attributes: 额外并入 HDF5 根属性的字典（如 GUI 的 PatientName）
+        utc_offset_sec: 采集机 OS 的 UTC 偏移（readentries_utc_offset()），
+                 用于 RecordDate 还原墙钟；None 时按分析机本地时间（见 record_date）
     """
     valid_datalogs = set(
         strip_log_suffix(f) for f in cfg["data"]["data_files"]
@@ -383,6 +454,7 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             processed += _convert_merged(
                 group_files, group_channel_count, len(channel_groups) > 1,
                 study_id, out_dir, cfg, entries, base_attributes, logger,
+                utc_offset_sec=utc_offset_sec,
             )
     else:
         entryplanter = EntryPlanter(entries)
@@ -392,6 +464,7 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             processed += _convert_single(
                 datalog_path, datalog_id, study_id, out_dir, cfg, entries,
                 entryplanter, base_attributes, logger,
+                utc_offset_sec=utc_offset_sec,
             )
 
     return processed

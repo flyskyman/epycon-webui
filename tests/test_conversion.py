@@ -10,7 +10,11 @@ from pathlib import Path
 import h5py
 import pytest
 
-from epycon.conversion import convert_study, entries_to_marks, strip_log_suffix
+from epycon.conversion import (
+    convert_study, entries_to_marks, reattribute_entries, reconcile_entries, record_date,
+    strip_log_suffix,
+)
+from epycon.core._dataclasses import Entry
 from epycon.iou import readentries
 
 ROOT = Path(__file__).parent.parent
@@ -62,6 +66,60 @@ class TestEntriesToMarks:
         marks = entries_to_marks(entries, "a", 100.0, self.FS, 5000, base_offset=1024)
         assert [m[0] for m in marks] == [1524]
 
+    def test_sample_index_cross_check_warns_but_keeps_timestamp_position(self, caplog):
+        # issue #36：0x06 采样索引只交叉校验，偏差 >1 样本告警，定位仍以时间戳为准
+        import logging
+        logger = logging.getLogger("test_marks")
+        entry = FakeEntry("a", 100.5)
+        entry.sample_index = 400
+        with caplog.at_level(logging.WARNING, logger="test_marks"):
+            marks = entries_to_marks([entry], "a", 100.0, self.FS, 5000, logger=logger)
+        assert [m[0] for m in marks] == [500]
+        assert "sample_index=400" in caplog.text
+
+    def test_sample_index_within_one_sample_is_silent(self, caplog):
+        import logging
+        logger = logging.getLogger("test_marks")
+        entry = FakeEntry("a", 100.5)
+        entry.sample_index = 499
+        with caplog.at_level(logging.WARNING, logger="test_marks"):
+            marks = entries_to_marks([entry], "a", 100.0, self.FS, 5000, logger=logger)
+        assert [m[0] for m in marks] == [500]
+        assert caplog.text == ""
+
+
+def test_reattribute_entries_by_timestamp_and_sample_index():
+    """issue #36：fid 指向的文件与时间戳矛盾、而时间戳+采样索引唯一落在另一文件 → 改判；
+    fid 自洽 / 无唯一命中 / 无 sample_index（GUI FakeEntry）→ 原样"""
+    index = {"00000000": (100.0, 1000, 5000), "00000001": (200.0, 1000, 5000)}
+    stale = Entry(fid="00000000", group="PACE", timestamp=200.05, message="S1=500", sample_index=50)
+    ok = Entry(fid="00000001", group="PACE", timestamp=200.05, message="x", sample_index=50)
+    nohit = Entry(fid="00000000", group="PACE", timestamp=300.05, message="y", sample_index=50)
+    fake = FakeEntry("00000000", 200.05)
+    out = reattribute_entries([stale, ok, nohit, fake], index)
+    assert [e.fid for e in out] == ["00000001", "00000001", "00000000", "00000000"]
+    assert out[0].message == "S1=500" and out[0].sample_index == 50
+
+
+def test_reconcile_entries_indexes_every_study_log():
+    """索引取 study 全部 DFile（不受 data.data_files 过滤影响）：夹具里 fid 指 00000000、
+    时间戳+采样索引落在 00000001 → 改判"""
+    stale = Entry(fid="00000000", group="PACE", timestamp=1769608092.303, message="S1=500", sample_index=50)
+    out = reconcile_entries(str(STUDY), [stale], "4.3.2")
+    assert out[0].fid == "00000001"
+    assert reconcile_entries(str(STUDY), [], "4.3.2") == []
+
+
+def test_record_date_uses_acquisition_machine_offset():
+    """issue #36：epoch 是墙钟按采集机 OS 时区解释的结果，RecordDate 须按该偏移还原墙钟；
+    无偏移信息时保持此前的分析机本地时间"""
+    from datetime import datetime
+    ts = 1769608079.246
+    assert record_date(ts, 8 * 3600) == "2026-01-28T21:47:59.246000+08:00"
+    assert record_date(ts, -6 * 3600) == "2026-01-28T07:47:59.246000-06:00"
+    assert record_date(ts, None) == datetime.fromtimestamp(ts).isoformat()
+    assert record_date(0, 8 * 3600) == ""
+
 
 def test_strip_log_suffix():
     assert strip_log_suffix("00000000.log") == "00000000"
@@ -85,6 +143,15 @@ class TestConvertStudy:
             assert max(f["Data"].shape) == 2048
             positions = [int(r["SampleLeft"]) for r in f["Marks"][:]]
             assert positions == [1074]  # 1024 文件偏移 + 50 亚秒偏移
+
+    @pytest.mark.parametrize("merge", [True, False])
+    def test_record_date_attribute_carries_offset(self, tmp_path, entries, merge):
+        cfg = _base_cfg(STUDY.parent, tmp_path, merge=merge)
+        cfg["entries"]["convert"] = False
+        convert_study(str(STUDY), "study01", str(tmp_path), cfg, entries, utc_offset_sec=8 * 3600)
+        out = tmp_path / ("study01_merged.h5" if merge else "00000000.h5")
+        with h5py.File(out, "r") as f:
+            assert f.attrs["RecordDate"] == "2026-01-28T21:47:59.246000+08:00"
 
     def test_normal_mode_marks_position(self, tmp_path, entries):
         cfg = _base_cfg(STUDY.parent, tmp_path, merge=False)

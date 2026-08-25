@@ -10,6 +10,9 @@ ID_MAP_FILE = 'id_mapping'
 
 PATIENT_LIST = 'patient_list.txt'
 
+# annotation subtype → 标签。7/9/13/16/20 按 849 个真实 study 的文本形态命名（issue #36）：
+# 7 全空文本（常带负采样索引）、9 "IMAGEn"、13 数值/"Print Review Fit"（语义未定）、
+# 16 "RF On - Session n"/"RF Off - n s"、20 刺激器 "Amp n=.. PW n=.."。8 在解析层被过滤，不列。
 GROUP_MAP = {
     1: 'PROTOCOL',
     2: 'EVENT',
@@ -17,7 +20,12 @@ GROUP_MAP = {
     4: 'IDK',
     5: 'HIDDEN_NOTE',
     6: 'PACE',
+    7: 'BLANK',
+    9: 'IMAGE',
+    13: 'VALUE',
+    16: 'RF',
     17: 'RATE',
+    20: 'STIM',
 }
 
 SOURCE_MAP = {
@@ -200,13 +208,21 @@ class WMx64MasterSchema:
 @dataclass
 class WMx64EntriesSchema:
     """ Annotation entries
+
+    布局在 849 个真实 study（334,968 条）上逐字段验证，见 issue #36：
+    头 0x02 u64 ms epoch（DFile0 之后 1–18 s）、0x0A "MM/DD/YYYY"、0x16 "HH:MM:SS"
+    墙钟、0x20 u16 DFile 数；条目 0x02 u32 DFile 索引（高 16 位恒 0）、0x06 i32 DFile 内
+    采样索引（有符号，负值 = 段起点之前）、0x0A u64 ms epoch（哨兵 0xFFFF…）。
     """
     header = 0x00, 0x24
     header_timestamp = 0x02, 0x0A
     timestamp_fmt = '<Q', 1000
     header_date = 0x0A, 0x14
+    header_time = 0x16, 0x1E
+    header_num_datalogs = 0x20, 0x22
     entry_type = 0x0, 0x2
     datalog_id = 0x2, 0x6
+    sample_index = 0x6, 0xA
     timestamp = 0xA, 0x12
     text = 0x12, 0xC2
     line_size = 0xDC

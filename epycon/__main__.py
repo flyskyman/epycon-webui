@@ -70,8 +70,8 @@ def main():
     from glob import iglob
 
     from epycon.config.byteschema import ENTRIES_FILENAME
-    from epycon.iou import EntryPlanter, readentries
-    from epycon.conversion import convert_study, resolve_subject
+    from epycon.iou import EntryPlanter, readentries, readentries_utc_offset
+    from epycon.conversion import convert_study, reconcile_entries, resolve_subject
 
     input_folder = _validate_path(cfg["paths"]["input_folder"], name='input folder')
     output_folder = _validate_path(cfg["paths"]["output_folder"], name='output folder')
@@ -98,12 +98,27 @@ def main():
             cfg["data"]["output_format"] == "h5" and cfg["data"]["pin_entries"]
         )
         entries = list()
+        entries_path = os.path.join(study_path, ENTRIES_FILENAME)
+
+        # 采集机 UTC 偏移（RecordDate 还原墙钟，issue #36）——与是否导出标注无关
+        utc_offset_sec = None
+        if os.path.exists(entries_path):
+            try:
+                utc_offset_sec = readentries_utc_offset(
+                    entries_path, version=cfg["global_settings"]["workmate_version"])
+            except Exception:
+                logger.exception(
+                    f"Failed to parse ENTRIES header for {study_id}, "
+                    f"RecordDate falls back to local time of this machine")
+
         if need_entries:
             try:
                 entries = readentries(
-                    f_path=os.path.join(study_path, ENTRIES_FILENAME),
+                    f_path=entries_path,
                     version=cfg["global_settings"]["workmate_version"],
                     )
+                entries = reconcile_entries(
+                    study_path, entries, cfg["global_settings"]["workmate_version"], logger)
             except OSError:
                 logger.warning("Could not find ENTRIES log file. Annotation export will be skipped.")
             except Exception:
@@ -135,6 +150,7 @@ def main():
         convert_study(
             study_path, study_id, out_dir, cfg, entries,
             subject_id=subject_id, subject_name=subject_name, logger=logger,
+            utc_offset_sec=utc_offset_sec,
         )
         print("DONE")
 

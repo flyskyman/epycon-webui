@@ -15,10 +15,8 @@ import glob
 import json
 from glob import iglob
 import dataclasses
-import struct
 import csv
 import tempfile
-import shutil
 from datetime import datetime, timezone
 import socket
 import atexit
@@ -26,6 +24,7 @@ import signal
 import uuid
 import concurrent.futures
 import subprocess
+from typing import Optional
 
 # ========================================================
 # 🛡️ 运行时环境
@@ -259,7 +258,7 @@ except ImportError: pass
 # ========================================================
 try:
     from epycon.config.byteschema import ENTRIES_FILENAME, LOG_PATTERN, MASTER_FILENAME
-    from epycon.iou import LogParser, EntryPlanter, readentries
+    from epycon.iou import LogParser, EntryPlanter, readentries, readentries_utc_offset
     from epycon.iou.parsers import _readmaster
     from epycon.utils.person import Tokenize
 except ImportError as e:
@@ -327,6 +326,7 @@ class MutableEntry:
     fid: str = '0'
     duration: float = 0
     color: int = 0
+    sample_index: Optional[int] = None  # 透传 Entry.sample_index 供定位交叉校验（issue #36）
 
 # ========================================================
 # ⚖️ [核心] 全自动时间归一化 (Unix Seconds)
@@ -343,40 +343,6 @@ def to_unix_seconds(val):
         return num
     except Exception:
         return 0.0
-
-# ========================================================
-# 🛠️ [核心] entries.log 去壳
-# ========================================================
-def prepare_standard_entries_file(original_path):
-    try:
-        with open(original_path, 'rb') as f:
-            raw = f.read(256)
-        valid_gids = [1, 2, 3, 4, 5, 6, 17]
-        target_offset = 0
-        gid_128 = struct.unpack_from('<H', raw, 128)[0]
-        if gid_128 in valid_gids:
-            target_offset = 128
-        else:
-            for i in range(0, 200, 4):
-                gid = struct.unpack_from('<H', raw, i)[0]
-                if gid in valid_gids and i+220 < len(raw):
-                    if struct.unpack_from('<H', raw, i+220)[0] in valid_gids:
-                        target_offset = i
-                        break
-        # [Phase 2.2] 性能快速路径：标准格式 (offset=36) 无需处理
-        if target_offset == 0 or target_offset == 36:
-            return original_path
-            
-        if target_offset > 0:
-            temp_dir = tempfile.gettempdir()
-            temp_path = os.path.join(temp_dir, f"std_{os.path.basename(original_path)}")
-            with open(original_path, 'rb') as src, open(temp_path, 'wb') as dst:
-                dst.write(b'\x00' * 36) 
-                src.seek(target_offset)
-                shutil.copyfileobj(src, dst)
-            return temp_path
-        return original_path
-    except Exception: return original_path
 
 # ========================================================
 # 🧹 [终极核心] V68.1 融合版 (Strict ASCII + Semantic SNR)
@@ -475,7 +441,8 @@ def clean_entries_content(entries):
             timestamp=to_unix_seconds(e.timestamp),
             group=raw_grp,
             message=raw_msg,
-            fid=getattr(e, 'fid', '0')
+            fid=getattr(e, 'fid', '0'),
+            sample_index=getattr(e, 'sample_index', None),
         )
         cleaned_list.append(new_e)
 
@@ -608,21 +575,28 @@ def execute_epycon_conversion(cfg):
                 epath = os.path.join(study_path, ENTRIES_FILENAME)
                 need_entries = cfg["entries"]["convert"] or (cfg["data"]["output_format"] == "h5" and cfg["data"]["pin_entries"])
                 conv_logger.info(f"📋 Entries 配置: convert={cfg['entries']['convert']}, pin_entries={cfg['data']['pin_entries']}, need_entries={need_entries}")
-                
+
+                # 采集机 UTC 偏移（RecordDate 还原墙钟，issue #36）
+                utc_offset_sec = None
+                if os.path.exists(epath):
+                    try:
+                        utc_offset_sec = readentries_utc_offset(
+                            epath, version=cfg["global_settings"]["workmate_version"])
+                    except Exception:
+                        conv_logger.exception("⚠️ entries.log 文件头解析失败，RecordDate 退回分析机本地时间")
+
                 if need_entries:
                     if os.path.exists(epath):
                         try:
                             conv_logger.info(f"🔎 读取标注: {os.path.basename(epath)}")
-                            clean_path = prepare_standard_entries_file(epath) 
-                            native_entries = readentries(clean_path, version=cfg["global_settings"]["workmate_version"])
+                            native_entries = readentries(epath, version=cfg["global_settings"]["workmate_version"])
+                            from epycon.conversion import reconcile_entries
+                            native_entries = reconcile_entries(
+                                study_path, native_entries, cfg["global_settings"]["workmate_version"], conv_logger)
                             conv_logger.info(f"📊 原始标注条数: {len(native_entries)}")
-                            
+
                             all_entries_norm = clean_entries_content(native_entries)
-                            
-                            if clean_path != epath and os.path.exists(clean_path):
-                                try: os.remove(clean_path)
-                                except Exception: pass
-                                
+
                             conv_logger.info(f"✅ 归一化标注: {len(all_entries_norm)} 条 (ASCII+SNR双重净化)")
                             
                             # [FIX] 仅当用户启用 export 时才保留这份中间文件
@@ -672,6 +646,7 @@ def execute_epycon_conversion(cfg):
                         study_path, study_id, study_out_dir, cfg, all_entries_norm,
                         subject_id=subject_id, subject_name=subject_name,
                         logger=conv_logger, extra_attributes=extra_attrs,
+                        utc_offset_sec=utc_offset_sec,
                     )
                     processed_count += n_processed
                     if n_processed == 0:

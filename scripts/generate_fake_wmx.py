@@ -101,11 +101,15 @@ def write_master(out_dir, subject_id='SUBJ001'):
     return path
 
 
-def write_entries(out_dir, version='4.3.2', entries=None, datalog_id=1):
+def write_entries(out_dir, version='4.3.2', entries=None, datalog_id=1,
+                  log_ts_ms=None, fs=1000, num_datalogs=1):
     """Write a minimal binary entries.log compatible with parser.
 
     entries: list of tuples (group:int, timestamp:int, message:str)
              timestamp should be in milliseconds for WMx64, seconds for WMx32
+    log_ts_ms: header timestamp (ms) of the DFile the entries refer to; WMx64 only —
+               fills the per-entry sample index at 0x06 (issue #36). None → 0.
+    num_datalogs: WMx64 header 0x20 (number of DFiles).
     """
     if entries is None:
         # Use a fixed timestamp from 2024 to avoid potential issues with future dates
@@ -133,6 +137,11 @@ def write_entries(out_dir, version='4.3.2', entries=None, datalog_id=1):
         header[0x02:0x06] = struct.pack('<L', header_ts)
     else:
         header[0x02:0x0A] = struct.pack('<Q', int(header_ts*1000))
+        # 墙钟 ASCII（真机 = 采集机 OS 时区下的本地时间；合成夹具取 UTC）与 DFile 数
+        wall = time.gmtime(header_ts)
+        header[0x0A:0x14] = time.strftime('%m/%d/%Y', wall).encode('ascii')
+        header[0x16:0x1E] = time.strftime('%H:%M:%S', wall).encode('ascii')
+        header[0x20:0x22] = struct.pack('<H', num_datalogs)
 
     buf = bytearray()
     buf.extend(header)
@@ -148,6 +157,14 @@ def write_entries(out_dir, version='4.3.2', entries=None, datalog_id=1):
             line[0xA:0xE] = struct.pack('<L', int(ts))
         else:
             line[0xA:0x12] = struct.pack('<Q', int(ts))
+            # sample index at 0x6:0xA (int32, relative to the referenced DFile start)
+            if log_ts_ms is not None:
+                sidx = round((int(ts) - int(log_ts_ms)) * fs / 1000)
+                if not -2**31 <= sidx < 2**31:
+                    raise ValueError(f"entry timestamp {ts} is {(int(ts) - int(log_ts_ms)) / 1000:.0f} s "
+                                     f"from the log start; sample index must fit int32 — "
+                                     f"use timestamps near log_ts_ms={log_ts_ms}")
+                line[0x6:0xA] = struct.pack('<i', sidx)
         # text at 0xE:0xC0 (truncate)
         text_bytes = msg.encode('ascii', 'ignore')
         text_offset = 0xE if fmt_ts == '<L' else 0x12
@@ -188,6 +205,12 @@ def main():
         print(f'Wrote MASTER to {mpath}')
 
     if args.with_entries:
+        # 采样索引相对刚写出的 DFile 头时间戳（x64: u64 ms；x32 无此字段），默认条目也以它为基准
+        log_ts_ms = None
+        if args.version != '4.1':
+            with open(args.out, 'rb') as lf:
+                log_ts_ms = struct.unpack('<Q', lf.read(8))[0]
+
         # Load entries from JSON file if provided
         if args.entries_json:
             import json
@@ -197,18 +220,18 @@ def main():
             entries = []
             for item in data:
                 grp = int(item.get('group', 2))
-                ts = int(item.get('timestamp', int(time.time())))
+                # 缺省与 write_entries 的单位一致：x64 毫秒（相对日志头），x32 秒
+                ts = int(item.get('timestamp', log_ts_ms if log_ts_ms is not None else int(time.time())))
                 msg = str(item.get('message', args.entry_message))
                 fid = int(item.get('fid', 1))
                 entries.append((grp, ts, msg, fid))
         else:
-            # Use fixed base timestamp from 2024 to avoid datetime issues
-            # For WMx64, timestamp is in milliseconds, so we use smaller base value
-            base_timestamp_ms = 1704038400000  # 2024-01-01 00:00:00 UTC (milliseconds)
+            # x64 以日志头时间戳为基准（采样索引须相对它且落在 int32 内）；x32 用 2024 固定值（秒）
+            base_timestamp_ms = log_ts_ms if log_ts_ms is not None else 1704038400
             entries = []
             for i in range(args.entries_count):
                 grp = 2 + (i % 5)  # rotate some group ids
-                ts_ms = base_timestamp_ms + i * 60000  # Add minutes in milliseconds to avoid duplicate timestamps
+                ts_ms = base_timestamp_ms + i * (60000 if log_ts_ms is not None else 60)  # 每条隔 1 min
                 msg = f"{args.entry_message} #{i+1}"
                 fid = 1 + (i % args.entries_fids)
                 entries.append((grp, ts_ms, msg, fid))
@@ -223,7 +246,8 @@ def main():
         epath = None
         for fid, elist in grouped.items():
             # write separate entries.log per fid by appending fid in filename suffix
-            subpath = epath = write_entries(out_dir, version=args.version, entries=elist, datalog_id=fid)
+            subpath = epath = write_entries(out_dir, version=args.version, entries=elist, datalog_id=fid,
+                                            log_ts_ms=log_ts_ms, fs=args.fs, num_datalogs=args.entries_fids)
         print(f'Wrote entries to {epath}')
         print(f'Wrote entries to {epath}')
 
