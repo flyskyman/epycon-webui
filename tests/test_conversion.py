@@ -110,6 +110,21 @@ def test_reconcile_entries_indexes_every_study_log():
     assert reconcile_entries(str(STUDY), [], "4.3.2") == []
 
 
+def test_reconcile_entries_skips_unreadable_dfile(tmp_path, caplog):
+    """一个无关 DFile 截断（NAS 同步瞬态/残缺拷贝）只丢它自己的索引项，其余改判照常，且记 warning"""
+    import logging
+    import shutil
+    study = tmp_path / "study01"
+    shutil.copytree(STUDY, study)
+    (study / "00000002.log").write_bytes((study / "00000000.log").read_bytes()[:100])
+    stale = Entry(fid="00000000", group="PACE", timestamp=1769608092.303, message="S1=500", sample_index=50)
+    logger = logging.getLogger("test_reconcile")
+    with caplog.at_level(logging.WARNING, logger="test_reconcile"):
+        out = reconcile_entries(str(study), [stale], "4.3.2", logger)
+    assert out[0].fid == "00000001"
+    assert "00000002: header unreadable" in caplog.text
+
+
 def test_record_date_uses_acquisition_machine_offset():
     """issue #36：epoch 是墙钟按采集机 OS 时区解释的结果，RecordDate 须按该偏移还原墙钟；
     无偏移信息时保持此前的分析机本地时间"""

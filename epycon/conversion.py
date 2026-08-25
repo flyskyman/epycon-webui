@@ -115,11 +115,17 @@ def reconcile_entries(study_path, entries, version, logger=None):
         return entries
     datalog_index = {}
     for datalog_path, datalog_id in list_datalogs(study_path):
-        with LogParser(datalog_path, version=version, samplesize=1024) as parser:
-            header = parser.get_header()
-            if header is not None:
-                datalog_index[datalog_id] = (
-                    float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
+        # 单个 DFile 截断/不可读（NAS 同步瞬态、残缺拷贝）只影响它自己的索引项，
+        # 不得让整个 study 失去改判——失败显式 WARNING，不静默
+        try:
+            with LogParser(datalog_path, version=version, samplesize=1024) as parser:
+                header = parser.get_header()
+                if header is not None:
+                    datalog_index[datalog_id] = (
+                        float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
+        except Exception as exc:
+            (logger or logging.getLogger(__name__)).warning(
+                f"   ⚠️ {datalog_id}: header unreadable ({exc!r}), excluded from entry reconciliation")
     return reattribute_entries(entries, datalog_index, logger)
 
 
