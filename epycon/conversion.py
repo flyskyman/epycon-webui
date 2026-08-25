@@ -262,9 +262,14 @@ def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
         try:
             if os.path.exists(entry_path):
                 os.remove(entry_path)
-            legacy = os.path.join(out_dir, datalog_id + ".csv")   # #21 改名前的标注文件名
+            # #21 改名前标注也叫 <fid>.csv，与旧波形 CSV 同名：按首行判（_tocsv 表头
+            # 以 Group,FileId 开头），只删标注，旧波形 CSV 留着
+            legacy = os.path.join(out_dir, datalog_id + ".csv")
             if file_fmt == "csv" and legacy != full_output_path and os.path.exists(legacy):
-                os.remove(legacy)
+                with open(legacy, encoding="utf-8") as f:
+                    is_annotation = f.readline().startswith("Group,FileId")
+                if is_annotation:
+                    os.remove(legacy)
             if entries:
                 criteria = {
                     "fids": [datalog_id],
