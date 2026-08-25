@@ -42,7 +42,7 @@ entries↔log 一致性硬校验。全程 fail-closed（失败一律 `Extraction
 
 ## 延伸阅读
 
-- `CLAUDE.md` — 维护约定（发版流程、台账、删除代码规矩、常用命令）
+- `AGENTS.md` — 维护约定（`CLAUDE.md` 仅 `@AGENTS.md` 导入）（发版流程、台账、删除代码规矩、常用命令）
 - `README.md` 项目结构一节
 - GitHub Issues — 待办与调查项；`docs/archive/KNOWN_ISSUES_resolved.md` — 旧台账已解决条目
 - `docs/ECG_LAYOUT_SPEC.md` — ECG 查看器排版逻辑规范（Workmate 物理定标对比分析）

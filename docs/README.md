@@ -17,5 +17,5 @@
 ## archive/（历史留档，不维护）
 
 一次性修复记录、阶段性总结、会话记录、历史 release notes（自 2026-06 起
-发版说明直接写在 GitHub Release，见 CLAUDE.md 发版流程）、过时指南。
+发版说明直接写在 GitHub Release，见 AGENTS.md 发版流程）、过时指南。
 仅供考古，内容可能与现行代码不符。
