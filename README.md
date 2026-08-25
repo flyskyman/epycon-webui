@@ -168,7 +168,8 @@ python -m epycon.cli.extract --study <study目录> --at 1:07:15 --leads "V6,CS 3
 ```
 
 常用参数：`--at`（流逝时刻，或 `--epoch` 传绝对秒）、`--leads`（逗号分隔导联名，按目标段
-通道表精确匹配——各段通道表可不同；`all` = 该段全部导联，源无效者单独标 rejected）、
+通道表精确匹配——各段通道表可不同；`all` = 该段全部独立信号：源无效者单独标 rejected，同一
+电极对的多个显示名（如 `LBB`/`LBB-I`/`LBB 30-100`，仅显示滤波不同）只出一份并列 `aliases`）、
 `--window N`（对称 ±N 秒，或 `--before/--after` 非对称）、`--raw-unipolar`（出原始单极而非
 双极合成）、`--raw-counts`（出原始整数而非 µV）、`--out x.npz`。**双极极性 = u+ − u−**
 （与 WorkMate 屏幕一致；起搏伪差的符号取决于导线接 JBox 的方式，不由文件决定）。全程 fail-closed：时刻落

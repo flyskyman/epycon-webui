@@ -174,6 +174,20 @@ def resolve_lead_sources(header, requested, raw_unipolar):
     return out
 
 
+def _dedupe_sources(sources):
+    """同一电极对在 WorkMate 通道表里可有多个显示名（滤波带后缀，如 LBB / LBB-I /
+    LBB 30-100，issue #27）：原始 .log 只有一份采样，同源只保留首个名字，其余记为
+    别名。cols 为 None（源无效）的条目互不合并。返回 (去重后 sources, {name: [别名]})。"""
+    first, out, aliases = {}, [], {}
+    for name, cols in sources:
+        if cols is not None and cols in first:
+            aliases.setdefault(first[cols], []).append(name)
+        else:
+            first[cols] = name
+            out.append((name, cols))
+    return out, aliases
+
+
 def _lead_signal(raw_int, sources):
     """单源直取；双源 u+ − u−。委托已导出的 mount_channels，保持双极合成
     规则与 conversion 单一来源、不漂移（sources 已是有效列索引，见
@@ -266,26 +280,32 @@ def extract_window(study_dir, at_elapsed=None, at_epoch=None, leads=None,
 
     raw_int = read_raw_window(seg, s0, s1, version)
     sources = resolve_lead_sources(seg["header"], leads, raw_unipolar)
+    aliases = {}
+    if list(leads) == ["all"]:
+        # all = 该段全部独立信号：同源多显示名只出一份（显式点名不合并，要什么给什么）
+        sources, aliases = _dedupe_sources(sources)
     res = seg["resolution"]
     fs = seg["fs"]
 
     lead_out = []
     for name, cols in sources:
         if cols is None:
-            lead_out.append({"name": name, "status": "rejected",
-                             "reason": "源电极参考无效，本次未有效记录"})
-            continue
-        if any(is_railed(raw_int[:, c]) for c in cols):
-            lead_out.append({"name": name, "status": "rejected",
-                             "reason": "通道恒定于满量程，电极未连接"})
-            continue
-        sig = _lead_signal(raw_int, cols)
-        if raw_counts:
-            samples = [int(x) for x in sig]
+            entry = {"name": name, "status": "rejected",
+                     "reason": "源电极参考无效，本次未有效记录"}
+        elif any(is_railed(raw_int[:, c]) for c in cols):
+            entry = {"name": name, "status": "rejected",
+                     "reason": "通道恒定于满量程，电极未连接"}
         else:
-            samples = (sig.astype(np.float64) * res / 1000.0).tolist()
-        lead_out.append({"name": name, "status": "ok",
-                         "n": int(sig.shape[0]), "samples": samples})
+            sig = _lead_signal(raw_int, cols)
+            if raw_counts:
+                samples = [int(x) for x in sig]
+            else:
+                samples = (sig.astype(np.float64) * res / 1000.0).tolist()
+            entry = {"name": name, "status": "ok",
+                     "n": int(sig.shape[0]), "samples": samples}
+        if name in aliases:
+            entry["aliases"] = aliases[name]
+        lead_out.append(entry)
 
     return {
         "study": os.path.basename(os.path.normpath(study_dir)),

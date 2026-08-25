@@ -20,7 +20,8 @@ def _build_parser():
                      help="绝对 epoch 秒（浮点须带足精度，如 repr(float)，否则丢亚秒位）")
     ap.add_argument("--leads", required=True,
                     help="逗号分隔导联名，按目标段的通道表精确匹配（各 .log 段通道表可不同，"
-                         "勿用别段的表拼名）；all = 该段全部导联，源无效者单独标 rejected")
+                         "勿用别段的表拼名）；all = 该段全部独立信号：源无效者单独标 rejected，"
+                         "同一电极对的多个显示名（滤波带后缀）只出一份并在 aliases 列出")
     ap.add_argument("--window", type=float, default=2.0)
     ap.add_argument("--before", type=float)
     ap.add_argument("--after", type=float)
