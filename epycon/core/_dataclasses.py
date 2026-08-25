@@ -87,9 +87,12 @@ class Channels:
                 mappings[key] = (self.content[indices[0]].reference,)
 
             if len(indices) == 2:
+                # 双极 = u+ − u−（mount_channels 做 source[0] − source[1]），与 WorkMate
+                # 的 u+/u− 标签语义及其屏幕显示一致（issue #12）。曾为 u− − u+（#16）。
+                # 起搏伪差符号取决于 JBox 接线（header 不记录 tip 在哪个针脚），不是判据。
                 mappings[key] = (
-                    self.content[indices[1]].reference,
                     self.content[indices[0]].reference,
+                    self.content[indices[1]].reference,
                     )
 
         return mappings
