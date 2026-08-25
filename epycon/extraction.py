@@ -175,7 +175,7 @@ def resolve_lead_sources(header, requested, raw_unipolar):
 
 
 def _lead_signal(raw_int, sources):
-    """单源直取；双源 u- − u+。委托已导出的 mount_channels，保持双极合成
+    """单源直取；双源 u+ − u−。委托已导出的 mount_channels，保持双极合成
     规则与 conversion 单一来源、不漂移（sources 已是有效列索引，见
     resolve_lead_sources 的守卫）。"""
     return mount_channels(raw_int, {"_": sources})[:, 0]

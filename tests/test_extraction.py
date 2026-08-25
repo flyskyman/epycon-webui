@@ -164,17 +164,17 @@ class TestLeadResolve:
         assert out[0][0] == "V6"
         assert len(out[0][1]) == 1
 
-    def test_bipolar_sign_is_uminus_minus_uplus(self):
+    def test_bipolar_sign_is_uplus_minus_uminus(self):
         from epycon.extraction import (
             load_segments, resolve_lead_sources, read_raw_window, _lead_signal)
         seg = [s for s in load_segments(str(REAL), VER) if s["id"] == "00000005"][0]
         raw = read_raw_window(seg, 1316, 9316, VER)
-        # 手算 u- - u+：从 header 取 CS 3-4 的两源 reference
+        # 手算 u+ - u-（issue #12：与 WorkMate 标签语义一致）：从 header 取 CS 3-4 的两源 reference
         content = seg["header"].channels.content
         names = [c.name for c in content]
         ref_uplus = content[names.index("u+CS 3-4")].reference
         ref_uminus = content[names.index("u-CS 3-4")].reference
-        expected = raw[:, ref_uminus] - raw[:, ref_uplus]
+        expected = raw[:, ref_uplus] - raw[:, ref_uminus]
         sources = resolve_lead_sources(seg["header"], ["CS 3-4"], False)[0][1]
         got = _lead_signal(raw, sources)
         assert np.array_equal(got, expected)
@@ -323,6 +323,19 @@ class TestLeadSourceValidation:
         header = self._fake_header("HI", 999, num_channels=88)
         with pytest.raises(ExtractionError, match="无效"):
             resolve_lead_sources(header, ["HI"], False)
+
+    def test_computed_bipolar_is_uplus_minus_uminus(self):
+        # issue #12：双极 = u+ − u−，与 WorkMate 标签语义/显示一致。合成 header 钉死方向；
+        # 起搏伪差符号取决于 JBox 接线，不作判据
+        from epycon.core._dataclasses import Channel, Channels
+        from epycon.extraction import _lead_signal
+        channels = Channels([Channel("u+X", 5, "ECG", ()), Channel("u-X", 7, "ECG", ())],
+                            {"X": (0, 1)})
+        assert channels.computed_mappings["X"] == (5, 7)
+        raw = np.zeros((4, 8), dtype=np.int64)
+        raw[:, 5] = 10
+        raw[:, 7] = 3
+        assert _lead_signal(raw, (5, 7)).tolist() == [7, 7, 7, 7]
 
     def test_all_marks_invalid_source_instead_of_raising(self):
         # --leads all：源无效导联不整批失败，cols=None 交由 extract_window 标 rejected
