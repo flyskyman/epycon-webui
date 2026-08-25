@@ -188,7 +188,7 @@ LIMB_IDENTITIES = {
 }
 
 
-def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
+def check_limb_identities(leads: dict, tolerance: float = 0.05, lsb: Optional[float] = None) -> dict:
     """Residual of each limb-lead identity, in the units of the leads given.
 
     A worst residual at floating-point zero means the four dependent leads were derived by the recorder
@@ -197,10 +197,12 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     ``derived`` is not claimed. Note the blind spot documented above: these identities cannot detect a
     swap between leads I and II.
 
-    ``derived`` presumes float64 arithmetic: its 1e-9 threshold absorbs float64 rounding (a scaled copy
-    leaves ~1e-14) but not float32 (~1e-7), and three of the four identities divide by two, so leads stored
-    as integers keep a residual (1.5 LSB for truncated int16) however faithfully the recorder derived them.
-    ``holds`` is then the caller's call via ``tolerance``; ``derived`` is not a test of storage dtype.
+    Without ``lsb``, ``derived`` presumes float64 arithmetic: its 1e-9 threshold absorbs float64 rounding
+    (a scaled copy leaves ~1e-14) but not float32 (~1e-7). A recording that was derived and then quantised
+    to a storage grid never meets that: on a real WorkMate x64 study the identity without a division
+    (``III = II - I``) is bit-exact while the three with ``/ 2`` each sit at exactly half a quantisation
+    step. Pass the step as ``lsb`` (in the units of the leads) and ``derived`` accepts a worst residual of
+    ``lsb / 2``, which is that signature. ``holds`` remains the caller's call via ``tolerance``.
     """
     missing = [name for name in LIMB_LEADS if name not in leads]
     if missing:
@@ -223,11 +225,14 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05) -> dict:
     # The identities are non-trivial only if one of the two independent leads varies; with I and II both
     # flat, the four dependent leads are flat too and a zero residual is no evidence of derivation.
     informative = bool(np.ptp(arrays["I"]) > 0 or np.ptp(arrays["II"]) > 0)
+    # Half a step, with float slack: a residual that is exactly half a step in exact arithmetic can land an
+    # ulp above lsb / 2 in float64.
+    derivation_cutoff = 1e-9 if lsb is None else lsb / 2 * (1 + 1e-6)
     return {
         "residual": residuals,
         "worst": worst,
         "holds": worst <= tolerance,
         "informative": informative,
-        "derived": informative and worst <= 1e-9,
+        "derived": informative and worst <= derivation_cutoff,
         "blind_to": "a swap between leads I and II",
     }

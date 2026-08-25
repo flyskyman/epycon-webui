@@ -181,3 +181,19 @@ def test_derived_presumes_float64_and_is_not_a_dtype_test(leads):
     assert not check_limb_identities(int16, tolerance=1.5)["derived"]
     assert check_limb_identities(int16, tolerance=1.5)["holds"]
     assert not check_limb_identities(int16, tolerance=1.0)["holds"]
+
+
+def test_derived_reads_the_quantised_signature_when_given_the_step(leads):
+    """真实 WorkMate 记录：先由 I、II 导出，再量化到存储网格。无除法的 III 精确成立，
+    含 /2 的三条残差恰为半个量化步长。给出 lsb 时 derived 认这个签名；不给时维持 float64 语义。"""
+    lsb = 7.8e-5                                                    # mV，取自该 study 的量化步长
+    q = lambda x: np.rint(x / lsb) * lsb                            # noqa: E731
+    one, two = q(leads["I"]), q(leads["II"])                        # 记录仪从已量化的 I、II 导出，再落网格
+    grid = {"I": one, "II": two, "III": two - one,
+            "aVR": q(-(one + two) / 2), "aVL": q(one - two / 2), "aVF": q(two - one / 2)}
+    result = check_limb_identities(grid, lsb=lsb)
+    assert result["residual"]["III = II - I"] < 1e-12
+    assert result["worst"] == pytest.approx(lsb / 2, rel=1e-6)
+    assert result["derived"]
+    assert not check_limb_identities(grid)["derived"]              # 不给 lsb：不猜步长
+    assert not check_limb_identities(grid, lsb=lsb * 0.9)["derived"]
