@@ -96,10 +96,12 @@ python -m epycon.cli.extract --study examples/data/realdata \
 - 默认 **computed** 映射：`V6` 等单极原样 + `CS 3-4`（双极差分）均可按名取。
   **注意 config 默认是 `"original"`**，本工具须在传给 `get_channel_mappings` 的 cfg 里
   显式置 `data.leads="computed"`（除非 `--raw-unipolar`），不能依赖 config 缺省。
-- **双极极性 = 现状 `u- − u+`**（非"正减负"）：`get_channel_mappings` 的 computed 映射
-  对 `CS 3-4` 返回 `(18, 19)` = `(u-.ref, u+.ref)`，`_mount_channels` 做 `source[0]−source[1]`
-  = `u- − u+`。这正是 KNOWN_ISSUES #16 记录的极性倒置。**本工具沿用现状以与 WebUI/convert
-  全仓库一致**，不在此偷偷"改对"（极性修复是 #16 的独立议题）。tests 必须钉死该符号。
+- **双极极性 = `u+ − u−`**（2026-08-25 起，issue #12；此前为 `u- − u+`，见归档 #16）：
+  `get_channel_mappings` 的 computed 映射对 `CS 3-4` 返回 `(u+.ref, u-.ref)`，
+  `_mount_channels` 做 `source[0]−source[1]` = `u+ − u−`，与 WorkMate 的 u+/u− 标签语义
+  及屏幕显示一致，CLI/GUI/extract/WebUI 四路统一。判据是设备标签语义，**不是**起搏伪差
+  极性——全库复核表明伪差符号取决于 JBox 接线（header 不记录 tip 在哪个针脚），
+  同一公式在不同时期的病例上给出相反符号。tests 用合成 header 钉死方向。
 - `--raw-unipolar`：切换 original 模式，输出原始单极 `u+CS 3-4` / `u-CS 3-4`。
 - 支持逗号分隔多导联（如 `V6,II,"CS 3-4"`），输出按列排布。
 - **导联名查找**：以解析出的通道名精确匹配。若目标名含 `\x00` 脏字符或重名，
@@ -195,6 +197,6 @@ JSON 形态（示意；`--at 1:07:15` 命中段 `00000005` 段内偏移 2.658s�
 - **段间空档拒绝**：目标落分钟级空档 → 拒绝。
 - **未连接拒绝**：取 V6 → 在 `raw_int` 上判栏杆（值 = `-2147483649` 类）、拒绝 V6，
   同请求的 V1 照常返回；验证判定发生在缩放前整数、且逐导联。
-- **双极极性钉死**：取 `CS 3-4`，断言其 = `u- − u+`（对照直接从原始列手算），锁 #16 现状符号。
+- **双极极性钉死**：取 `CS 3-4`，断言其 = `u+ − u−`（对照直接从原始列手算），锁 #12 裁定的符号。
 - **一致性报错**：对 `study01` 合成夹具运行 → entry `fid=00000001` epoch 落在 log0 区间，报错。
 - **版本**：显式 x64 正确；显式误传 x32 → 通道表异常（记录为"显式参数由用户负责"）。
