@@ -51,6 +51,9 @@ def read_datalog_headers(datalogs, version, logger=None):
     「判定 + 排除 + 警告」的唯一实现（issue #40/#41）。reconcile_entries 与 convert_study
     都只消费本函数，坏文件在改判索引与波形/逐文件标注输出中被排除的是同一集合；
     只捕获解析器的预期异常，编程错误照常抛出。
+
+    盲区：转换时以这里的 num_samples 为 end 重开文件，只钉住预检后文件变长（拷贝进行中）；
+    运行期间文件被按整块换短不在输入域内，不校验。
     """
     readable = []
     for datalog_path, datalog_id in datalogs:
