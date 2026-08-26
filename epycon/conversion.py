@@ -224,10 +224,13 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
         # 写入本文件前，记录其在合并时间轴上的样本偏移
         file_offset_samples = total_samples
 
+        # end 钉在 read_datalog_headers 校验过的快照上：文件在预检后仍被写入（拷贝进行中）
+        # 也只读校验过的那段（issue #41）
         with LogParser(
             datalog_path,
             version=cfg["global_settings"]["workmate_version"],
             samplesize=cfg["global_settings"]["processing"]["chunk_size"],
+            end=dlog_info['num_samples'],
         ) as parser:
             with HDFPlanter(
                 merged_output_path,
@@ -273,15 +276,17 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
     return len(group_files)
 
 
-def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
+def _convert_single(datalog_path, datalog_id, num_samples, study_id, out_dir, cfg, entries,
                     entryplanter, base_attributes, logger, utc_offset_sec=None):
     """常规模式：单个日志输出 CSV/HDF5，并按配置嵌入标注、导出标注文件。"""
     output_fmt = cfg["data"]["output_format"]
 
+    # end 钉在 read_datalog_headers 校验过的快照上（同 _convert_merged）
     with LogParser(
         datalog_path,
         version=cfg["global_settings"]["workmate_version"],
         samplesize=cfg["global_settings"]["processing"]["chunk_size"],
+        end=num_samples,
     ) as parser:
         header = parser.get_header()
         ref_timestamp = header.timestamp
@@ -474,11 +479,11 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             )
     else:
         entryplanter = EntryPlanter(entries)
-        for datalog_path, datalog_id, _header, _num_samples in datalogs:
+        for datalog_path, datalog_id, _header, num_samples in datalogs:
             if logger:
                 logger.info(f"Converting {datalog_id}")
             processed += _convert_single(
-                datalog_path, datalog_id, study_id, out_dir, cfg, entries,
+                datalog_path, datalog_id, num_samples, study_id, out_dir, cfg, entries,
                 entryplanter, base_attributes, logger,
                 utc_offset_sec=utc_offset_sec,
             )

@@ -290,6 +290,64 @@ class TestTruncatedDFile:
         assert (out / "study01" / "00000001.h5").stat().st_size > 0
         assert not any(name.startswith("00000000") for name in names)
 
+    def test_cli_all_unreadable_leaves_no_summary_csv(self, tmp_path):
+        """全部 DFile 不可读：CLI 显式失败，且汇总 CSV 在波形之后写，不留只有 CSV 的目录"""
+        study = _study_with_truncated(tmp_path, "00000000", "00000001")
+        out = tmp_path / "out"
+        out.mkdir()
+        env = {
+            "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
+            "EPYCON_JSONSCHEMA": str(ROOT / "epycon" / "config" / "schema.json"),
+        }
+        argv = ["epycon", "-i", str(study.parent), "-o", str(out)]
+        with patch.dict(os.environ, env), patch.object(sys, "argv", argv):
+            with pytest.raises(ValueError, match="unreadable"):
+                entry_point()
+        assert not (out / "study01" / "entries_summary.csv").exists()
+
+    def test_gui_all_unreadable_reports_failure_without_csv(self, tmp_path):
+        """GUI 按 study 捕获失败后不得整体报成功；汇总 CSV 同样在波形之后写"""
+        pytest.importorskip("tkinter")
+        import app_gui
+        study = _study_with_truncated(tmp_path, "00000000", "00000001")
+        out = tmp_path / "out"
+        cfg = {
+            "paths": {"input_folder": str(study.parent), "output_folder": str(out),
+                      "studies": ["study01"]},
+            "data": {"output_format": "h5", "merge_logs": True, "pin_entries": True,
+                     "leads": "original", "data_files": [], "channels": [], "custom_channels": {}},
+            "entries": {"convert": True, "output_format": "csv", "summary_csv": True,
+                        "filter_annotation_type": []},
+            "global_settings": {"workmate_version": "4.3.2", "processing": {"chunk_size": 1024}},
+        }
+        ok, logs = app_gui.execute_epycon_conversion(cfg)
+        assert ok is False
+        assert any("转换失败" in m for m in logs)
+        assert not (out / "study01" / "entries_summary.csv").exists()
+
+    @pytest.mark.parametrize("merge", [True, False])
+    def test_convert_reads_validated_snapshot_when_file_grows(self, tmp_path, merge):
+        """预检通过后文件仍在被写入（拷贝进行中）：转换只读校验过的快照，不因新尾部残块崩溃"""
+        from epycon import conversion as conversion_mod
+        study = tmp_path / "in" / "study01"
+        shutil.copytree(STUDY, study)
+        out = tmp_path / "out"
+        cfg = _base_cfg(study.parent, out, merge=merge)
+        real = conversion_mod.read_datalog_headers
+
+        def grow_after_preflight(*args, **kwargs):
+            result = real(*args, **kwargs)
+            with open(study / "00000001.log", "ab") as f:
+                f.write(b"\x00")  # 奇数字节：重开若读到 EOF 必是残块
+            return result
+
+        with patch("epycon.conversion.read_datalog_headers", side_effect=grow_after_preflight):
+            n = convert_study(str(study), "study01", str(out), cfg, [])
+        assert n == 2
+        target = out / ("study01_merged.h5" if merge else "00000001.h5")
+        with h5py.File(target, "r") as f:
+            assert max(f["Data"].shape) == (2048 if merge else 1024)
+
 
 # ========================= GUI 路径等价性 =========================
 
