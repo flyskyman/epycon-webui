@@ -20,7 +20,7 @@ from epycon.iou import (
     HDFPlanter,
     mount_channels,
 )
-from epycon.iou.parsers import _readmaster
+from epycon.iou.parsers import _PARSE_ERRORS, _readmaster
 from epycon.utils.person import Tokenize
 
 # 标注 CSV 的两种表头（绝对时间 / 相对时间），由 _tocsv 生成以保持单一来源；
@@ -42,6 +42,31 @@ def list_datalogs(study_path, valid_datalogs=None):
             continue
         result.append((datalog_path, datalog_id))
     return result
+
+
+def read_datalog_headers(datalogs, version, logger=None):
+    """读 list_datalogs 结果里每个 DFile 的头，返回可读者的 (path, id, header, num_samples)。
+
+    截断/不可读的 DFile（NAS 同步瞬态、残缺拷贝）是 study 的正常输入：这里是其
+    「判定 + 排除 + 警告」的唯一实现（issue #40/#41）。reconcile_entries 与 convert_study
+    都只消费本函数，坏文件在改判索引与波形/逐文件标注输出中被排除的是同一集合；
+    只捕获解析器的预期异常，编程错误照常抛出。
+
+    盲区：转换时以这里的 num_samples 为 end 重开文件，只钉住预检后文件变长（拷贝进行中）；
+    运行期间文件被按整块换短不在输入域内，不校验。
+    """
+    readable = []
+    for datalog_path, datalog_id in datalogs:
+        try:
+            with LogParser(datalog_path, version=version, samplesize=1024) as parser:
+                header = parser.get_header()
+                num_samples = parser.num_samples
+        except _PARSE_ERRORS as exc:
+            (logger or logging.getLogger(__name__)).warning(
+                f"   ⚠️ {datalog_id}: unreadable ({exc!r}), excluded")
+            continue
+        readable.append((datalog_path, datalog_id, header, num_samples))
+    return readable
 
 
 def resolve_subject(study_path, cfg, logger=None):
@@ -113,19 +138,11 @@ def reconcile_entries(study_path, entries, version, logger=None):
     """
     if not entries:
         return entries
-    datalog_index = {}
-    for datalog_path, datalog_id in list_datalogs(study_path):
-        # 单个 DFile 截断/不可读（NAS 同步瞬态、残缺拷贝）只影响它自己的索引项，
-        # 不得让整个 study 失去改判——失败显式 WARNING，不静默
-        try:
-            with LogParser(datalog_path, version=version, samplesize=1024) as parser:
-                header = parser.get_header()
-                if header is not None:
-                    datalog_index[datalog_id] = (
-                        float(header.timestamp), header.amp.sampling_freq, parser.num_samples)
-        except Exception as exc:
-            (logger or logging.getLogger(__name__)).warning(
-                f"   ⚠️ {datalog_id}: header unreadable ({exc!r}), excluded from entry reconciliation")
+    datalog_index = {
+        datalog_id: (float(header.timestamp), header.amp.sampling_freq, num_samples)
+        for _, datalog_id, header, num_samples
+        in read_datalog_headers(list_datalogs(study_path), version, logger)
+    }
     return reattribute_entries(entries, datalog_index, logger)
 
 
@@ -210,10 +227,13 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
         # 写入本文件前，记录其在合并时间轴上的样本偏移
         file_offset_samples = total_samples
 
+        # end 钉在 read_datalog_headers 校验过的快照上：文件在预检后仍被写入（拷贝进行中）
+        # 也只读校验过的那段（issue #41）
         with LogParser(
             datalog_path,
             version=cfg["global_settings"]["workmate_version"],
             samplesize=cfg["global_settings"]["processing"]["chunk_size"],
+            end=dlog_info['num_samples'],
         ) as parser:
             with HDFPlanter(
                 merged_output_path,
@@ -259,15 +279,17 @@ def _convert_merged(group_files, group_channel_count, multi_group, study_id, out
     return len(group_files)
 
 
-def _convert_single(datalog_path, datalog_id, study_id, out_dir, cfg, entries,
+def _convert_single(datalog_path, datalog_id, num_samples, study_id, out_dir, cfg, entries,
                     entryplanter, base_attributes, logger, utc_offset_sec=None):
     """常规模式：单个日志输出 CSV/HDF5，并按配置嵌入标注、导出标注文件。"""
     output_fmt = cfg["data"]["output_format"]
 
+    # end 钉在 read_datalog_headers 校验过的快照上（同 _convert_merged）
     with LogParser(
         datalog_path,
         version=cfg["global_settings"]["workmate_version"],
         samplesize=cfg["global_settings"]["processing"]["chunk_size"],
+        end=num_samples,
     ) as parser:
         header = parser.get_header()
         ref_timestamp = header.timestamp
@@ -390,6 +412,13 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
         if logger:
             logger.warning(f"No valid datalog files found in {study_id}")
         return 0
+    # 截断 DFile 的排除与 reconcile_entries 同源（issue #41）；全部不可读是失败，不是
+    # "无事可做"——不得留下只有标注 CSV 的输出目录冒充成功
+    datalogs = read_datalog_headers(
+        all_datalogs, cfg["global_settings"]["workmate_version"], logger)
+    if not datalogs:
+        raise ValueError(
+            f"{study_id}: all {len(all_datalogs)} datalog file(s) unreadable, nothing to convert")
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -416,32 +445,21 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
         from collections import defaultdict
 
         datalog_info = []
-        for datalog_path, datalog_id in all_datalogs:
-            with LogParser(
-                datalog_path,
-                version=cfg["global_settings"]["workmate_version"],
-                samplesize=1024,
-            ) as parser:
-                header = parser.get_header()
-                if header is None:
-                    if logger:
-                        logger.warning(f"⚠️ Cannot read header: {datalog_id}.log, skipping")
-                    continue
+        for datalog_path, datalog_id, header, num_samples in datalogs:
+            file_mappings = get_channel_mappings(header, cfg)
+            if cfg["data"]["channels"]:
+                valid_channels = set(cfg["data"]["channels"])
+                file_mappings = {k: v for k, v in file_mappings.items() if k in valid_channels}
 
-                file_mappings = get_channel_mappings(header, cfg)
-                if cfg["data"]["channels"]:
-                    valid_channels = set(cfg["data"]["channels"])
-                    file_mappings = {k: v for k, v in file_mappings.items() if k in valid_channels}
-
-                datalog_info.append({
-                    'path': datalog_path,
-                    'id': datalog_id,
-                    'timestamp': header.timestamp,
-                    'header': header,
-                    'mappings': file_mappings,
-                    'num_output_channels': len(file_mappings),
-                    'num_samples': parser.num_samples,
-                })
+            datalog_info.append({
+                'path': datalog_path,
+                'id': datalog_id,
+                'timestamp': header.timestamp,
+                'header': header,
+                'mappings': file_mappings,
+                'num_output_channels': len(file_mappings),
+                'num_samples': num_samples,
+            })
 
         datalog_info.sort(key=lambda x: x['timestamp'])
 
@@ -464,11 +482,11 @@ def convert_study(study_path, study_id, out_dir, cfg, entries,
             )
     else:
         entryplanter = EntryPlanter(entries)
-        for datalog_path, datalog_id in all_datalogs:
+        for datalog_path, datalog_id, _header, num_samples in datalogs:
             if logger:
                 logger.info(f"Converting {datalog_id}")
             processed += _convert_single(
-                datalog_path, datalog_id, study_id, out_dir, cfg, entries,
+                datalog_path, datalog_id, num_samples, study_id, out_dir, cfg, entries,
                 entryplanter, base_attributes, logger,
                 utc_offset_sec=utc_offset_sec,
             )

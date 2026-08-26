@@ -126,10 +126,18 @@ def main():
                     f"Failed to parse ENTRIES log file for {study_id}, "
                     f"annotations skipped, waveform conversion continues")
 
+        logger.info(f"Converting study {study_id}")
+        convert_study(
+            study_path, study_id, out_dir, cfg, entries,
+            subject_id=subject_id, subject_name=subject_name, logger=logger,
+            utc_offset_sec=utc_offset_sec,
+        )
+
         if cfg["entries"]["convert"] and cfg["entries"]["summary_csv"]:
             # 标注侧任何失败都不得阻止波形落盘（issue #11/#19）：realdata 中未初始化的
             # 哨兵时间戳（2^64/1000 s）让 datetime.fromtimestamp 抛 ValueError/OSError，
-            # 此前整个 study 因此 0 字节。先清上次运行的残留——entries 解析失败或为空时
+            # 此前整个 study 因此 0 字节。汇总在波形之后写（issue #41：波形失败的 study
+            # 不得留下只有 CSV 的输出目录）；先清上次运行的残留——entries 解析失败或为空时
             # 也不得留下旧汇总冒充本次产物；失败显式 ERROR + 堆栈，不静默。
             summary_path = os.path.join(out_dir, "entries_summary.csv")
             try:
@@ -142,16 +150,7 @@ def main():
                         }
                     EntryPlanter(entries).savecsv(summary_path, criteria=criteria)
             except Exception:
-                logger.exception(
-                    f"Failed to export entries_summary.csv for {study_id}, "
-                    f"waveform conversion continues")
-
-        logger.info(f"Converting study {study_id}")
-        convert_study(
-            study_path, study_id, out_dir, cfg, entries,
-            subject_id=subject_id, subject_name=subject_name, logger=logger,
-            utc_offset_sec=utc_offset_sec,
-        )
+                logger.exception(f"Failed to export entries_summary.csv for {study_id}")
         print("DONE")
 
 

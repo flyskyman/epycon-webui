@@ -530,7 +530,8 @@ def execute_epycon_conversion(cfg):
                 conv_logger.info(f"📁 已过滤 studies: {len(study_list)} 个符合条件")
 
             processed_count = 0
-            
+            failed_studies = []
+
             # 获取配置选项（merge/credentials 由 epycon.conversion 内部处理）
             pseudonymize = cfg["global_settings"].get("pseudonymize", False)
 
@@ -611,25 +612,6 @@ def execute_epycon_conversion(cfg):
                     else:
                         conv_logger.info(f"ℹ️ 标注文件不存在: {epath}")
                 
-                # --- [Step 1.5] 导出汇总 entries CSV (summary_csv) ---
-                # 仅当 convert=True 时才导出 summary。先清上次残留：entries 解析失败或
-                # 为空时也不得留下旧汇总冒充本次产物（与 CLI 一致，issue #19）
-                if cfg["entries"]["convert"] and cfg["entries"].get("summary_csv", False):
-                    summary_path = os.path.join(study_out_dir, "entries_summary.csv")
-                    try:
-                        if os.path.exists(summary_path):
-                            os.remove(summary_path)
-                        if all_entries_norm:
-                            entryplanter = EntryPlanter(all_entries_norm)
-                            filter_groups = cfg["entries"].get("filter_annotation_type", [])
-                            criteria = {
-                                "fids": list(valid_datalogs) if valid_datalogs else [],
-                                "groups": filter_groups if filter_groups else [],
-                            }
-                            entryplanter.savecsv(summary_path, criteria=criteria)
-                            conv_logger.info(f"📊 导出汇总标注: entries_summary.csv")
-                    except Exception:
-                        conv_logger.exception("⚠️ 汇总 CSV 导出失败，波形转换继续")
                 # --- [Step 2] 数据转换：统一调用核心库实现 (epycon.conversion) ---
                 # 此前这里维护着与 __main__.py 平行的 merge/normal 实现，
                 # 已漂移出多个标注定位缺陷（墙钟偏移映射、int 截断、e.msg 字段名、
@@ -654,12 +636,38 @@ def execute_epycon_conversion(cfg):
                 except Exception as conv_err:
                     import traceback
                     conv_logger.error(f"❌ {study_id} 转换失败: {conv_err}\n{traceback.format_exc()}")
+                    failed_studies.append(study_id)
                     continue
 
-            update_progress(100, "✅ 转换圆满完成")
-            conv_logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
+                # --- [Step 2.5] 导出汇总 entries CSV (summary_csv) ---
+                # 仅当 convert=True 时才导出 summary，且在波形之后：转换失败的 study 不得
+                # 留下只有 CSV 的输出目录（issue #41）。先清上次残留：entries 解析失败或
+                # 为空时也不得留下旧汇总冒充本次产物（与 CLI 一致，issue #19）
+                if cfg["entries"]["convert"] and cfg["entries"].get("summary_csv", False):
+                    summary_path = os.path.join(study_out_dir, "entries_summary.csv")
+                    try:
+                        if os.path.exists(summary_path):
+                            os.remove(summary_path)
+                        if all_entries_norm:
+                            entryplanter = EntryPlanter(all_entries_norm)
+                            filter_groups = cfg["entries"].get("filter_annotation_type", [])
+                            criteria = {
+                                "fids": list(valid_datalogs) if valid_datalogs else [],
+                                "groups": filter_groups if filter_groups else [],
+                            }
+                            entryplanter.savecsv(summary_path, criteria=criteria)
+                            conv_logger.info(f"📊 导出汇总标注: entries_summary.csv")
+                    except Exception:
+                        conv_logger.exception("⚠️ 汇总 CSV 导出失败")
+
             res_logs = mem_handler.logs
             conv_logger.removeHandler(mem_handler)
+            if failed_studies:
+                update_progress(100, f"❌ {len(failed_studies)} 个 study 转换失败")
+                conv_logger.error(f"❌ 转换失败的 study: {', '.join(failed_studies)}；共处理 {processed_count} 个文件")
+                return False, res_logs
+            update_progress(100, "✅ 转换圆满完成")
+            conv_logger.info(f"✅ 全部完成! 共处理 {processed_count} 个文件")
             return True, res_logs
         
     except Exception as e:

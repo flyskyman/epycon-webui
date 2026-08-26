@@ -5,11 +5,17 @@
 两端此前各自维护平行实现并漂移出多个定位 bug，等价性测试防止再次分叉。
 """
 import json
+import logging
+import os
+import shutil
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import h5py
 import pytest
 
+from epycon.__main__ import main as entry_point
 from epycon.conversion import (
     convert_study, entries_to_marks, reattribute_entries, reconcile_entries, record_date,
     strip_log_suffix,
@@ -122,7 +128,7 @@ def test_reconcile_entries_skips_unreadable_dfile(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="test_reconcile"):
         out = reconcile_entries(str(study), [stale], "4.3.2", logger)
     assert out[0].fid == "00000001"
-    assert "00000002: header unreadable" in caplog.text
+    assert "00000002: unreadable" in caplog.text
 
 
 def test_record_date_uses_acquisition_machine_offset():
@@ -218,6 +224,129 @@ class TestConvertStudy:
             units = {row["Units"].decode() if isinstance(row["Units"], bytes)
                      else row["Units"] for row in f["Info"][:]}
         assert units == {"uV"}
+
+
+# ========================= 截断 DFile（issue #41） =========================
+
+def _study_with_truncated(tmp_path, *fids, nbytes=100):
+    """复制夹具到 tmp_path/in/study01 并把指定 DFile 截到 data[:nbytes]（issue #41 复现步骤）：
+    nbytes=100 落在头内；nbytes=-1 头完整、尾部残块"""
+    study = tmp_path / "in" / "study01"
+    shutil.copytree(STUDY, study)
+    for fid in fids:
+        path = study / f"{fid}.log"
+        path.write_bytes(path.read_bytes()[:nbytes])
+    return study
+
+
+class TestTruncatedDFile:
+    """截断 DFile 的可读性判定只有一处（read_datalog_headers），reconcile_entries 与
+    convert_study 都消费它：部分不可读 → 警告并排除，逐文件标注与波形覆盖同一集合；
+    全部不可读 → 显式失败，不留只有 CSV 的输出目录。"""
+
+    @pytest.mark.parametrize("nbytes", [100, -1], ids=["in-header", "mid-block"])
+    @pytest.mark.parametrize("merge", [True, False])
+    def test_convert_study_excludes_truncated_dfile(self, tmp_path, merge, nbytes, caplog):
+        study = _study_with_truncated(tmp_path, "00000000", nbytes=nbytes)
+        out = tmp_path / "out"
+        cfg = _base_cfg(study.parent, out, merge=merge)
+        cfg["entries"]["output_format"] = "csv"
+        entries = readentries(f_path=str(study / "entries.log"), version="4.3.2")
+        logger = logging.getLogger("test_truncated")
+        with caplog.at_level(logging.WARNING, logger="test_truncated"):
+            n = convert_study(str(study), "study01", str(out), cfg, entries, logger=logger)
+        assert n == 1
+        assert caplog.text.count("00000000: unreadable") == 1
+        if merge:
+            with h5py.File(out / "study01_merged.h5", "r") as f:
+                assert f.attrs["datalog_ids"] == "00000001"
+                assert max(f["Data"].shape) == 1024
+        else:
+            assert sorted(p.name for p in out.iterdir()) == ["00000001.h5", "00000001_entries.csv"]
+
+    def test_all_dfiles_unreadable_fails_explicitly(self, tmp_path):
+        study = _study_with_truncated(tmp_path, "00000000", "00000001")
+        out = tmp_path / "out"
+        cfg = _base_cfg(study.parent, out, merge=True)
+        with pytest.raises(ValueError, match="unreadable"):
+            convert_study(str(study), "study01", str(out), cfg, [])
+        assert not out.exists()
+
+    def test_cli_writes_waveform_after_summary_csv(self, tmp_path):
+        """issue #41 复现：默认配置跑 CLI，此前写完 entries_summary.csv 后 struct.error 整批崩溃，
+        输出目录只剩 CSV 没有 .h5"""
+        study = _study_with_truncated(tmp_path, "00000000")
+        out = tmp_path / "out"
+        out.mkdir()
+        env = {
+            "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
+            "EPYCON_JSONSCHEMA": str(ROOT / "epycon" / "config" / "schema.json"),
+        }
+        argv = ["epycon", "-i", str(study.parent), "-o", str(out)]
+        with patch.dict(os.environ, env), patch.object(sys, "argv", argv):
+            entry_point()
+        names = {p.name for p in (out / "study01").iterdir()}
+        assert "entries_summary.csv" in names
+        assert (out / "study01" / "00000001.h5").stat().st_size > 0
+        assert not any(name.startswith("00000000") for name in names)
+
+    def test_cli_all_unreadable_leaves_no_summary_csv(self, tmp_path):
+        """全部 DFile 不可读：CLI 显式失败，且汇总 CSV 在波形之后写，不留只有 CSV 的目录"""
+        study = _study_with_truncated(tmp_path, "00000000", "00000001")
+        out = tmp_path / "out"
+        out.mkdir()
+        env = {
+            "EPYCON_CONFIG": str(ROOT / "epycon" / "config" / "config.json"),
+            "EPYCON_JSONSCHEMA": str(ROOT / "epycon" / "config" / "schema.json"),
+        }
+        argv = ["epycon", "-i", str(study.parent), "-o", str(out)]
+        with patch.dict(os.environ, env), patch.object(sys, "argv", argv):
+            with pytest.raises(ValueError, match="unreadable"):
+                entry_point()
+        assert not (out / "study01" / "entries_summary.csv").exists()
+
+    def test_gui_all_unreadable_reports_failure_without_csv(self, tmp_path):
+        """GUI 按 study 捕获失败后不得整体报成功；汇总 CSV 同样在波形之后写"""
+        pytest.importorskip("tkinter")
+        import app_gui
+        study = _study_with_truncated(tmp_path, "00000000", "00000001")
+        out = tmp_path / "out"
+        cfg = {
+            "paths": {"input_folder": str(study.parent), "output_folder": str(out),
+                      "studies": ["study01"]},
+            "data": {"output_format": "h5", "merge_logs": True, "pin_entries": True,
+                     "leads": "original", "data_files": [], "channels": [], "custom_channels": {}},
+            "entries": {"convert": True, "output_format": "csv", "summary_csv": True,
+                        "filter_annotation_type": []},
+            "global_settings": {"workmate_version": "4.3.2", "processing": {"chunk_size": 1024}},
+        }
+        ok, logs = app_gui.execute_epycon_conversion(cfg)
+        assert ok is False
+        assert any("转换失败" in m for m in logs)
+        assert not (out / "study01" / "entries_summary.csv").exists()
+
+    @pytest.mark.parametrize("merge", [True, False])
+    def test_convert_reads_validated_snapshot_when_file_grows(self, tmp_path, merge):
+        """预检通过后文件仍在被写入（拷贝进行中）：转换只读校验过的快照，不因新尾部残块崩溃"""
+        from epycon import conversion as conversion_mod
+        study = tmp_path / "in" / "study01"
+        shutil.copytree(STUDY, study)
+        out = tmp_path / "out"
+        cfg = _base_cfg(study.parent, out, merge=merge)
+        real = conversion_mod.read_datalog_headers
+
+        def grow_after_preflight(*args, **kwargs):
+            result = real(*args, **kwargs)
+            with open(study / "00000001.log", "ab") as f:
+                f.write(b"\x00")  # 奇数字节：重开若读到 EOF 必是残块
+            return result
+
+        with patch("epycon.conversion.read_datalog_headers", side_effect=grow_after_preflight):
+            n = convert_study(str(study), "study01", str(out), cfg, [])
+        assert n == 2
+        target = out / ("study01_merged.h5" if merge else "00000001.h5")
+        with h5py.File(target, "r") as f:
+            assert max(f["Data"].shape) == (2048 if merge else 1024)
 
 
 # ========================= GUI 路径等价性 =========================

@@ -6,19 +6,16 @@
 import os
 import json
 import math
-import struct
 
 import numpy as np
-
-# 底层解析器在畸形输入上抛的预期异常——统一转 ExtractionError 走结构化错误，
-# 但不含裸 Exception，避免吞掉真正的编程 bug
-_PARSE_ERRORS = (struct.error, ValueError, OSError)
 
 from epycon.config.byteschema import ENTRIES_FILENAME
 from epycon.conversion import list_datalogs
 from epycon.core._validators import _validate_version
 from epycon.core.helpers import get_channel_mappings
 from epycon.iou import LogParser, mount_channels, readentries
+# 底层解析器在畸形输入上抛的预期异常——统一转 ExtractionError 走结构化错误
+from epycon.iou.parsers import _PARSE_ERRORS
 
 # int32 的正/负向满量程。曾含 -2147483649——那不是合法 int32 值，而是
 # _twos_complement 边界 off-by-one 把 +2147483647 翻出来的产物；根因已修，故移除。
