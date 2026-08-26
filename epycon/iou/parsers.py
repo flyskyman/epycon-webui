@@ -152,6 +152,14 @@ class LogParser(abc.Iterator):
             # Use os.fstat for potentially better performance than seek(0, 2)
             self._stopbyte = int(min(stopbyte, self._f_obj.seek(0, 2)))
 
+            # 尾部残块（截断落在样本块中间）：num_samples 会向下取整放行，读循环却读到
+            # EOF 后在 frombuffer/reshape 上抛错——在这里拒绝，让消费者按 _PARSE_ERRORS
+            # 当作不可读文件排除（issue #41）
+            trailing = (self._stopbyte - self._header.datablock_address) % (self._block_size or 1)
+            if trailing:
+                raise ValueError(
+                    f"{self.f_path}: truncated mid-block, {trailing} trailing byte(s)")
+
             # Seek to start position
             self._f_obj.seek(max(self._header.datablock_address, startbyte))
 

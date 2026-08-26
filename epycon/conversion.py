@@ -60,7 +60,7 @@ def read_datalog_headers(datalogs, version, logger=None):
                 num_samples = parser.num_samples
         except _PARSE_ERRORS as exc:
             (logger or logging.getLogger(__name__)).warning(
-                f"   ⚠️ {datalog_id}: header unreadable ({exc!r}), excluded")
+                f"   ⚠️ {datalog_id}: unreadable ({exc!r}), excluded")
             continue
         readable.append((datalog_path, datalog_id, header, num_samples))
     return readable

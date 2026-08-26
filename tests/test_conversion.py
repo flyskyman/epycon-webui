@@ -128,7 +128,7 @@ def test_reconcile_entries_skips_unreadable_dfile(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="test_reconcile"):
         out = reconcile_entries(str(study), [stale], "4.3.2", logger)
     assert out[0].fid == "00000001"
-    assert "00000002: header unreadable" in caplog.text
+    assert "00000002: unreadable" in caplog.text
 
 
 def test_record_date_uses_acquisition_machine_offset():
@@ -228,13 +228,14 @@ class TestConvertStudy:
 
 # ========================= 截断 DFile（issue #41） =========================
 
-def _study_with_truncated(tmp_path, *fids):
-    """复制夹具到 tmp_path/in/study01 并把指定 DFile 截到 100 字节（issue #41 复现步骤）"""
+def _study_with_truncated(tmp_path, *fids, nbytes=100):
+    """复制夹具到 tmp_path/in/study01 并把指定 DFile 截到 data[:nbytes]（issue #41 复现步骤）：
+    nbytes=100 落在头内；nbytes=-1 头完整、尾部残块"""
     study = tmp_path / "in" / "study01"
     shutil.copytree(STUDY, study)
     for fid in fids:
         path = study / f"{fid}.log"
-        path.write_bytes(path.read_bytes()[:100])
+        path.write_bytes(path.read_bytes()[:nbytes])
     return study
 
 
@@ -243,9 +244,10 @@ class TestTruncatedDFile:
     convert_study 都消费它：部分不可读 → 警告并排除，逐文件标注与波形覆盖同一集合；
     全部不可读 → 显式失败，不留只有 CSV 的输出目录。"""
 
+    @pytest.mark.parametrize("nbytes", [100, -1], ids=["in-header", "mid-block"])
     @pytest.mark.parametrize("merge", [True, False])
-    def test_convert_study_excludes_truncated_dfile(self, tmp_path, merge, caplog):
-        study = _study_with_truncated(tmp_path, "00000000")
+    def test_convert_study_excludes_truncated_dfile(self, tmp_path, merge, nbytes, caplog):
+        study = _study_with_truncated(tmp_path, "00000000", nbytes=nbytes)
         out = tmp_path / "out"
         cfg = _base_cfg(study.parent, out, merge=merge)
         cfg["entries"]["output_format"] = "csv"
@@ -254,7 +256,7 @@ class TestTruncatedDFile:
         with caplog.at_level(logging.WARNING, logger="test_truncated"):
             n = convert_study(str(study), "study01", str(out), cfg, entries, logger=logger)
         assert n == 1
-        assert caplog.text.count("00000000: header unreadable") == 1
+        assert caplog.text.count("00000000: unreadable") == 1
         if merge:
             with h5py.File(out / "study01_merged.h5", "r") as f:
                 assert f.attrs["datalog_ids"] == "00000001"
