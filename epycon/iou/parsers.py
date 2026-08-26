@@ -39,6 +39,10 @@ from epycon.config.byteschema import (
     GROUP_MAP, SOURCE_MAP,
 )
 
+# 本模块解析器在畸形输入（截断/残缺拷贝、长度非法）上抛的预期异常；conversion 与
+# extraction 都据此隔离坏文件，但不含裸 Exception，避免吞掉真正的编程 bug
+_PARSE_ERRORS = (struct.error, ValueError, OSError)
+
 
 def _twos_complement(darray, bytesize):
     """把无符号读入的 bytesize 字节整数还原为二补数有符号值。
