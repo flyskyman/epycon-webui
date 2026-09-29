@@ -48,8 +48,8 @@ $env:EPYCON_CONFIG="$PWD\config\config.json"; $env:EPYCON_JSONSCHEMA="$PWD\confi
 
 ## 评审裁定（有界输入域）
 
-本包的输入域有界：Abbott WorkMate 真实记录——int16 ADC 样点、mV 单位、已知量化步长
-（DLog 头的 resolution，78 nV/LSb）、字符串通道名、通道数与形状由日志决定。
+本包的输入域有界：Abbott WorkMate 真实记录——int32 ADC 样点、nV 单位（parser 输出；HDF5 与
+extraction 输出 µV）、已知量化步长（DLog 头的 resolution，78 nV/LSb）、字符串通道名、通道数与形状由日志决定。
 
 - 自动评审（Codex）或人工提出的发现，先问"该输入在真实 study case 里出得来吗"。
   出得来 → 复现后修并加测试；出不来 → 记入 issue（wontfix，例 #33）或在 docstring 声明为盲区，不改代码。
