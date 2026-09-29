@@ -18,6 +18,7 @@ from epycon.core.integrity import (
     inspect_channels,
     summarise,
 )
+from epycon.core.units import quantization_step
 
 N = 400
 
@@ -197,3 +198,37 @@ def test_derived_reads_the_quantised_signature_when_given_the_step(leads):
     assert result["derived"]
     assert not check_limb_identities(grid)["derived"]              # 不给 lsb：不猜步长
     assert not check_limb_identities(grid, lsb=lsb * 0.9)["derived"]
+
+
+RESOLUTION_NV = 78                                                  # WorkMate：78 nV/LSb
+
+
+def _derived_counts(amplitude):
+    """整数 counts 上由 I、II 导出其余四个导联，再取整落回网格。"""
+    one, two = np.random.default_rng(0).integers(-amplitude, amplitude, size=(2, 20_000))
+    rounded = lambda x: np.rint(x).astype(np.int64)                 # noqa: E731
+    return {"I": one, "II": two, "III": two - one, "aVR": rounded(-(one + two) / 2),
+            "aVL": rounded(one - two / 2), "aVF": rounded(two - one / 2)}
+
+
+@pytest.mark.parametrize("units,scale", [
+    ("uV", lambda counts: counts.astype(np.float64) * RESOLUTION_NV / 1000.0),
+    ("mV", lambda counts: counts.astype(np.float64) * (RESOLUTION_NV * 1e-6)),
+    ("nV", lambda counts: counts * RESOLUTION_NV),
+])
+def test_step_from_the_header_resolution_reads_the_signature(units, scale):
+    """lsb 由头里的 resolution 推出（issue #35）：counts 定标到 uV / mV / nV 后，推出的步长
+    读得出半步签名。幅度取真实 study 的量级（约 ±195 mV）。"""
+    leads = {name: scale(values) for name, values in _derived_counts(2_500_000).items()}
+    lsb = quantization_step(RESOLUTION_NV, units)
+    result = check_limb_identities(leads, lsb=lsb)
+    assert result["worst"] == pytest.approx(lsb / 2, rel=1e-6)
+    assert result["derived"]
+
+
+def test_float32_storage_does_not_carry_the_signature():
+    """盲区：HDF5 的 Data 是 float32，0.078 µV 的整数倍存不精确，舍入超出 derived 的余量。
+    步长给对了 derived 也为 False——不得把它读成"这些导联是独立测量的"。"""
+    stored = {name: (values * RESOLUTION_NV / 1000.0).astype(np.float32)
+              for name, values in _derived_counts(12_800).items()}                  # 约 ±1 mV
+    assert not check_limb_identities(stored, lsb=quantization_step(RESOLUTION_NV, "uV"))["derived"]

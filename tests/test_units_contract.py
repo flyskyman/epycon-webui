@@ -10,7 +10,7 @@ from epycon.core.units import (
     UV, MV, NV, COUNTS, UNKNOWN,
     UNITS_CONTRACT_VERSION,
     normalize, resolve, to_mv_factor, resolve_hdf5, resolve_hdf5_detailed,
-    channel_units, declarations,
+    channel_units, declarations, quantization_step,
 )
 
 
@@ -280,3 +280,20 @@ class TestInferredFlag:
     def test_third_party_not_marked_inferred(self):
         units, inferred = resolve_hdf5_detailed("mV", None, [], generated_by="Other")
         assert (units, inferred) == (MV, False)
+
+
+class TestQuantizationStep:
+    """量化步长由 DLog 头的 resolution（nV/LSb）推出（issue #35）。"""
+
+    @pytest.mark.parametrize("units,want", [
+        ("mV", 7.8e-5), ("uV", 0.078), ("µV", 0.078), ("nV", 78.0),
+    ])
+    def test_workmate_resolution_in_lead_units(self, units, want):
+        """78 nV/LSb 是上游 CinC 论文 2.1 节给出的 WorkMate 分辨率。"""
+        assert quantization_step(78, units) == pytest.approx(want, rel=1e-12)
+
+    @pytest.mark.parametrize("units", ["counts", "unknown", "volts", "", None])
+    def test_units_without_physical_scale_refused(self, units):
+        """counts 无量纲、unknown 不可定标：拒绝并报出单位，不退化成某个默认步长。"""
+        with pytest.raises(ValueError, match="quantization step"):
+            quantization_step(78, units)

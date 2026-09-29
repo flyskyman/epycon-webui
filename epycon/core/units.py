@@ -106,6 +106,22 @@ def to_mv_factor(units: Optional[str]) -> Optional[float]:
     return _TO_MV.get(normalize(units) or units)
 
 
+def quantization_step(resolution_nv, units) -> float:
+    """DLog 头的 resolution（nV/LSb）-> `units` 下的量化步长。
+
+    resolution 的唯一来源是 DLog 头（`Header.amp.resolution`；`extraction` 以
+    `resolution_nV` 原样带出）。结果可直接作 `check_limb_identities` 的 `lsb`，
+    `units` 须与导联数组的单位一致。
+
+    counts / unknown / 无法识别的单位没有物理量纲，抛 ValueError（counts 下步长按定义为 1，
+    无需换算）。
+    """
+    factor = to_mv_factor(units)
+    if factor is None:
+        raise ValueError(f"no quantization step in units {units!r}: expected one of {sorted(_TO_MV)}")
+    return resolution_nv * _TO_MV[NV] / factor
+
+
 def resolve_hdf5_detailed(root_units, dataset_units, info_units: Iterable,
                           generated_by=None, contract=None):
     """同 `resolve_hdf5`，但返回 `(units, inferred)`。
