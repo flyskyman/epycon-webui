@@ -39,7 +39,15 @@ from epycon.core.integrity import check_limb_identities
 check_limb_identities({"I": ..., "II": ..., "III": ..., "aVR": ..., "aVL": ..., "aVF": ...})
 ```
 
-`derived=True` 表示四个从属导联由记录仪从 I、II 导出而非独立测量；前提是 I、II 至少一个有变化（六条平直导联让恒等式平凡成立，此时 `informative=False`、不声明 `derived`），且默认按 float64 精确算术判定（阈值 1e-9）。真实记录是先导出再量化的：本 study 上无除法的 `III = II − I` bit-exact，含 `/2` 的三条残差恰为 **0.5 LSB**（7.8e-5 mV 的一半）——这正是"先导出、再量化"的签名。传入量化步长 `lsb=7.8e-5` 后 `derived` 认这个签名；不传则真实记录上恒为 False（不猜步长）。**已知盲区**：互换 I 与 II 后重新导出其余四个，恒等式依旧成立，故它无法检测 I/II 互换——该盲区在返回值的 `blind_to` 字段中显式声明。
+`derived=True` 表示四个从属导联由记录仪从 I、II 导出而非独立测量；前提是 I、II 至少一个有变化（六条平直导联让恒等式平凡成立，此时 `informative=False`、不声明 `derived`），且默认按 float64 精确算术判定（阈值 1e-9）。真实记录是先导出再量化的：本 study 上无除法的 `III = II − I` bit-exact，含 `/2` 的三条残差恰为 **0.5 LSB**（7.8e-5 mV 的一半）——这正是"先导出、再量化"的签名。传入量化步长 `lsb` 后 `derived` 认这个签名；不传则真实记录上恒为 False（不猜步长）。步长由 DLog 头的 resolution（nV/LSb）推出，单位须与导联数组一致：
+
+```python
+from epycon.core.units import quantization_step
+lsb = quantization_step(header.amp.resolution, "mV")    # 78 nV/LSb -> 7.8e-5 mV
+check_limb_identities(leads_mv, lsb=lsb)
+```
+
+从 HDF5 读回的导联读不出这个签名：`Data` 是 float32，0.078 µV 的整数倍存不精确，舍入超出 `derived` 的余量，给对 `lsb` 也为 False。**已知盲区**：互换 I 与 II 后重新导出其余四个，恒等式依旧成立，故它无法检测 I/II 互换——该盲区在返回值的 `blind_to` 字段中显式声明。
 
 ## 另一个与读取有关的坑：导出每页开头约 2 秒不可用
 

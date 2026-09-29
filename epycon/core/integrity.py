@@ -203,6 +203,12 @@ def check_limb_identities(leads: dict, tolerance: float = 0.05, lsb: Optional[fl
     (``III = II - I``) is bit-exact while the three with ``/ 2`` each sit at exactly half a quantisation
     step. Pass the step as ``lsb`` (in the units of the leads) and ``derived`` accepts a worst residual of
     ``lsb / 2``, which is that signature. ``holds`` remains the caller's call via ``tolerance``.
+
+    The step is a property of the recording, read from the DLog header:
+    ``epycon.core.units.quantization_step(header.amp.resolution, units)``. Leads read back from float32
+    storage (the HDF5 ``Data`` set) do not carry the signature: a multiple of 0.078 uV is not exact in
+    float32 and the rounding exceeds the slack at the amplitudes of a real recording, so ``derived`` is
+    False there even with the correct ``lsb``.
     """
     missing = [name for name in LIMB_LEADS if name not in leads]
     if missing:
